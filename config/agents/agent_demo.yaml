@@ -1,0 +1,14 @@
+id: agent_demo
+tier: worker
+domain: engineering
+budget_bytes: 65536
+reads:
+  - wiki/agents/agent_demo/profile.md
+  - wiki/agents/agent_demo/hot.md
+  - wiki/projects/proj_demo/standards.md
+writes:
+  - wiki/agents/agent_demo/task-log.md
+  - wiki/agents/agent_demo/learned.md
+  - wiki/agents/agent_demo/rewrites.md
+forbidden_paths:
+  - wiki/system/**

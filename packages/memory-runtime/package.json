@@ -1,0 +1,17 @@
+{
+  "name": "@agentic-harness/memory-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@agentic-harness/shared-types": "workspace:*",
+    "yaml": "^2.8.1"
+  }
+}
