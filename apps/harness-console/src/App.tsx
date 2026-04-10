@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import useSWR, { mutate } from "swr";
 import { CapacityBar, CostCard, Panel, Sparkline, StatusRow } from "@agentic-harness/ui-kit";
+import { CommandPalette } from "./CommandPalette.js";
 
 const tabs = ["Overview", "Missions", "Agents", "Memory", "Code", "Audit", "Settings"] as const;
 type Tab = (typeof tabs)[number];
@@ -39,7 +40,30 @@ function Overview() {
 
 function Missions() {
   const { data } = useSWR("http://localhost:4302/api/missions", fetcher, { refreshInterval: 3000 });
-  return <div style={{ padding: 16 }}><Panel title="Mission Queue">{(data?.missions ?? []).length === 0 ? <div>No missions yet.</div> : <pre>{JSON.stringify(data.missions, null, 2)}</pre>}</Panel></div>;
+  const [title, setTitle] = useState("Fix duplicate webhook jobs");
+
+  async function createMission() {
+    await fetch("http://localhost:4302/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title, project_id: "proj_demo" })
+    });
+    mutate("http://localhost:4302/api/missions");
+  }
+
+  return (
+    <div style={{ padding: 16, display: "grid", gap: 16 }}>
+      <Panel title="New Mission">
+        <div style={{ display: "flex", gap: 12 }}>
+          <input value={title} onChange={(event) => setTitle(event.target.value)} style={{ flex: 1, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+          <button onClick={createMission} style={{ borderRadius: 10, border: "1px solid #334155", background: "#0f172a", color: "#e2e8f0", padding: "12px 16px" }}>Create</button>
+        </div>
+      </Panel>
+      <Panel title="Mission Queue">
+        {(data?.missions ?? []).length === 0 ? <div>No missions yet.</div> : <pre>{JSON.stringify(data.missions, null, 2)}</pre>}
+      </Panel>
+    </div>
+  );
 }
 
 function Agents() { return <div style={{ padding: 16 }}><Panel title="Agents">Registry and context preview will land here.</Panel></div>; }
@@ -50,8 +74,24 @@ function Settings() { return <div style={{ padding: 16 }}><Panel title="Settings
 
 export function App() {
   const [active, setActive] = useState<Tab>("Overview");
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const num = Number(event.key);
+      if (!Number.isNaN(num) && num >= 1 && num <= tabs.length) {
+        setActive(tabs[num - 1]);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const commands = useMemo(() => tabs.map((tab) => ({ id: tab.toLowerCase(), label: `Open ${tab}`, action: () => setActive(tab) })), []);
+
   return (
     <div>
+      <CommandPalette commands={commands} />
       <TopBar active={active} onChange={setActive} />
       {active === "Overview" && <Overview />}
       {active === "Missions" && <Missions />}

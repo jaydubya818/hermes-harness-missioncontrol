@@ -8,6 +8,7 @@ function classify(path: string): MemoryClass {
   if (path.includes("rewrites")) return "rewrite";
   if (path.includes("task-log")) return "working";
   if (path.includes("learned")) return "learned";
+  if (path.includes("/projects/") || path.includes("standards") || path.includes("recipes")) return "learned";
   return "bus";
 }
 
