@@ -10,8 +10,8 @@
     "dev": "tsx watch src/index.ts"
   },
   "dependencies": {
-    "@agentic-harness/memory-runtime": "workspace:*",
-    "@agentic-harness/shared-types": "workspace:*",
+    "@hermes-harness-with-missioncontrol/memory-runtime": "workspace:*",
+    "@hermes-harness-with-missioncontrol/shared-types": "workspace:*",
     "hono": "^4.9.8",
     "@hono/node-server": "^1.19.4"
   },

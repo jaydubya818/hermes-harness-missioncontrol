@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
-import { makeId, type HarnessEvent } from "@agentic-harness/shared-types";
+import { makeId, type HarnessEvent } from "@hermes-harness-with-missioncontrol/shared-types";
 
 const app = new Hono();
 const missions: Array<Record<string, unknown>> = [];

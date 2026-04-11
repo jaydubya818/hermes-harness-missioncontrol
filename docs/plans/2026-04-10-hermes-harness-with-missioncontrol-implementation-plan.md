@@ -1,4 +1,4 @@
-# Agentic Harness Implementation Plan
+# Hermes-harness-with-missioncontrol Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
@@ -27,9 +27,9 @@
 **Files:**
 - Create: `README.md`
 - Create: `docs/architecture/2026-04-10-harness-console-surface-map.md`
-- Create: `docs/architecture/2026-04-10-missioncontrol-agentic-kb-integration-contract.md`
-- Create: `docs/architecture/2026-04-10-v1-system-architecture.md`
-- Create: `docs/architecture/2026-04-10-repo-service-layout.md`
+- Create: `docs/architecture/2026-04-10-hermes-harness-with-missioncontrol-integration-contract.md`
+- Create: `docs/architecture/2026-04-10-hermes-harness-with-missioncontrol-v1-system-architecture.md`
+- Create: `docs/architecture/2026-04-10-hermes-harness-with-missioncontrol-repo-service-layout.md`
 
 **Step 1: Create the workspace**
 
@@ -52,7 +52,7 @@ git add README.md docs/architecture
 git commit -m "docs: add harness architecture foundation"
 ```
 
-### Task 2: Fork and narrow the MissionControl UI into Harness Console
+### Task 2: Fork and narrow the MissionControl UI into Hermes Harness Console
 
 **Files:**
 - Create: `apps/harness-console/`
@@ -441,7 +441,7 @@ v1 is successful when:
 
 ---
 
-Plan complete and saved to `docs/plans/2026-04-10-agentic-harness-implementation-plan.md`.
+Plan complete and saved to `docs/plans/2026-04-10-hermes-harness-with-missioncontrol-implementation-plan.md`.
 
 Execution recommendation:
 - Start with the memory runtime first, then integrate the console, then add eval.

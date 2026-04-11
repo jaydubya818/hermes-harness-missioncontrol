@@ -1,4 +1,4 @@
-# Harness Console Surface Map
+# Hermes Harness Console Surface Map
 
 Goal: define exactly what to keep, adapt, borrow, and cut when turning MissionControl into the operator console for the agentic software-development harness.
 

@@ -1,5 +1,5 @@
 {
-  "name": "@agentic-harness/memory-runtime",
+  "name": "@hermes-harness-with-missioncontrol/memory-runtime",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@agentic-harness/shared-types": "workspace:*",
+    "@hermes-harness-with-missioncontrol/shared-types": "workspace:*",
     "yaml": "^2.8.1"
   }
 }

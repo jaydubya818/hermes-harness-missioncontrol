@@ -1,6 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { makeId, type ContextRequest, type ContextResponse, type MemoryClass } from "@agentic-harness/shared-types";
+import { makeId, type ContextRequest, type ContextResponse, type MemoryClass } from "@hermes-harness-with-missioncontrol/shared-types";
 
 function classify(path: string): MemoryClass {
   if (path.endsWith("profile.md")) return "profile";

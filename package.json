@@ -1,5 +1,5 @@
 {
-  "name": "agentic-harness",
+  "name": "hermes-harness-with-missioncontrol",
   "private": true,
   "version": "0.1.0",
   "packageManager": "pnpm@10.32.1",

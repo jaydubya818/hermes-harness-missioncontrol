@@ -1,4 +1,4 @@
-import type { MemoryClass } from "@agentic-harness/shared-types";
+import type { MemoryClass } from "@hermes-harness-with-missioncontrol/shared-types";
 
 export const MEMORY_CLASSES: Record<MemoryClass, { appendOnly: boolean; defaultFile: string }> = {
   profile: { appendOnly: false, defaultFile: "profile.md" },

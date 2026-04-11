@@ -1,4 +1,4 @@
-# v1 System Architecture — Agentic Harness
+# v1 System Architecture — Hermes-harness-with-missioncontrol
 
 ## Product Wedge
 
@@ -17,7 +17,7 @@ Not v1:
 
 ## System Planes
 
-### 1. Harness Console
+### 1. Hermes Harness Console
 Derived from MissionControl UI.
 Responsibilities:
 - operator overview
@@ -85,7 +85,7 @@ Responsibilities:
 
 ## Runtime Sequence
 
-1. Operator creates mission in Harness Console
+1. Operator creates mission in Hermes Harness Console
 2. Orchestrator chooses workflow template and task DAG
 3. Planner requests scoped context bundle from Agentic-KB
 4. Planner produces structured execution plan

@@ -1,12 +1,12 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { loadContextBundle, closeTask, promoteLearning } from "@agentic-harness/memory-runtime";
-import type { CloseTaskRequest, ContextRequest, PromoteLearningRequest } from "@agentic-harness/shared-types";
+import { join, resolve } from "node:path";
+import { loadContextBundle, closeTask, promoteLearning } from "@hermes-harness-with-missioncontrol/memory-runtime";
+import type { CloseTaskRequest, ContextRequest, PromoteLearningRequest } from "@hermes-harness-with-missioncontrol/shared-types";
 
 const app = new Hono();
-const vaultRoot = process.env.HARNESS_VAULT_ROOT ?? new URL("../../../vault/agentic-kb", import.meta.url).pathname;
+const vaultRoot = process.env.HARNESS_VAULT_ROOT ?? resolve(process.cwd(), "../../vault/agentic-kb");
 
 async function listProjectFiles(projectId: string) {
   const projectDir = join(vaultRoot, "wiki", "projects", projectId);

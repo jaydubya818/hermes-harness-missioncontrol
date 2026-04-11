@@ -1,6 +1,6 @@
 import { mkdir, appendFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { makeId, type CloseTaskRequest, type CloseTaskResponse, type PromoteLearningRequest, type PromoteLearningResponse } from "@agentic-harness/shared-types";
+import { makeId, type CloseTaskRequest, type CloseTaskResponse, type PromoteLearningRequest, type PromoteLearningResponse } from "@hermes-harness-with-missioncontrol/shared-types";
 
 async function safeAppend(path: string, content: string) {
   await mkdir(dirname(path), { recursive: true });

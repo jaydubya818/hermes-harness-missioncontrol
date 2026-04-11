@@ -5,12 +5,12 @@ Goal: define a repo/service map that preserves the MissionControl and Agentic-KB
 ## Recommendation
 
 Use a multi-repo or monorepo-with-clear-boundaries layout.
-Best default for speed: monorepo named `agentic-harness` with independent apps/packages.
+Best default for speed: monorepo named `Hermes-harness-with-missioncontrol` with independent apps/packages.
 
 ## Proposed Layout
 
 ```text
-agentic-harness/
+Hermes-harness-with-missioncontrol/
 ├── apps/
 │   ├── harness-console/          # MissionControl-derived UI shell
 │   ├── orchestrator-api/         # orchestration HTTP/WebSocket API

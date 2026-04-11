@@ -10,7 +10,7 @@
     "test": "echo 'no tests yet'"
   },
   "dependencies": {
-    "@agentic-harness/ui-kit": "workspace:*",
+    "@hermes-harness-with-missioncontrol/ui-kit": "workspace:*",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "swr": "^2.3.6"

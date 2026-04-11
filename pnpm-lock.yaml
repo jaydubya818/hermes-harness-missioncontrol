@@ -20,7 +20,7 @@ importers:
 
   apps/harness-console:
     dependencies:
-      '@agentic-harness/ui-kit':
+      '@hermes-harness-with-missioncontrol/ui-kit':
         specifier: workspace:*
         version: link:../../packages/ui-kit
       react:
@@ -48,10 +48,10 @@ importers:
 
   apps/memory-api:
     dependencies:
-      '@agentic-harness/memory-runtime':
+      '@hermes-harness-with-missioncontrol/memory-runtime':
         specifier: workspace:*
         version: link:../../packages/memory-runtime
-      '@agentic-harness/shared-types':
+      '@hermes-harness-with-missioncontrol/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
       '@hono/node-server':
@@ -67,7 +67,7 @@ importers:
 
   apps/orchestrator-api:
     dependencies:
-      '@agentic-harness/shared-types':
+      '@hermes-harness-with-missioncontrol/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
       '@hono/node-server':
@@ -83,7 +83,7 @@ importers:
 
   packages/memory-runtime:
     dependencies:
-      '@agentic-harness/shared-types':
+      '@hermes-harness-with-missioncontrol/shared-types':
         specifier: workspace:*
         version: link:../shared-types
       yaml:
