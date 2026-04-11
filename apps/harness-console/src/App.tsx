@@ -10,7 +10,7 @@ const MEM = import.meta.env.VITE_MEMORY_URL ?? "/memory";
 const EVAL = import.meta.env.VITE_EVAL_URL ?? "/eval";
 
 function getOperatorToken() {
-  return window.localStorage.getItem("harness.operatorToken") ?? "";
+  return window.localStorage.getItem("harness.operatorToken") ?? import.meta.env.VITE_OPERATOR_TOKEN ?? "";
 }
 
 function authFetch(url: string, init: RequestInit = {}) {
@@ -22,6 +22,25 @@ function authFetch(url: string, init: RequestInit = {}) {
       ...(token ? { authorization: `Bearer ${token}` } : {})
     }
   });
+}
+
+async function readApiResponse(response: Response) {
+  const text = await response.text();
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return text;
+  }
+}
+
+async function authJson(url: string, init: RequestInit = {}) {
+  const response = await authFetch(url, init);
+  const body = await readApiResponse(response);
+  if (!response.ok) {
+    const message = typeof body === "object" && body && "error" in body ? String((body as any).error) : `Request failed (${response.status})`;
+    throw new Error(message);
+  }
+  return body;
 }
 
 const fetcher = (url: string) => authFetch(url).then((r) => r.json());
@@ -68,54 +87,77 @@ function Missions() {
   const { data: approvals } = useSWR(`${ORCH}/api/approvals`, fetcher, { refreshInterval: 3000 });
   const [title, setTitle] = useState("Fix duplicate webhook jobs");
   const [repoPath, setRepoPath] = useState("/Users/jaywest/projects/Hermes-harness-with-missioncontrol");
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function runAction(action: () => Promise<unknown>, successMessage: string) {
+    setError(null);
+    setMessage(null);
+    try {
+      await action();
+      setMessage(successMessage);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
 
   async function createMission() {
-    await authFetch(`${ORCH}/api/missions`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title, project_id: "proj_demo", workflow_id: "bugfix", repo_path: repoPath })
-    });
-    mutate(`${ORCH}/api/missions`);
+    await runAction(async () => {
+      await authJson(`${ORCH}/api/missions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title, project_id: "proj_demo", workflow_id: "bugfix", repo_path: repoPath })
+      });
+      mutate(`${ORCH}/api/missions`);
+    }, "Mission created.");
   }
 
   async function startMission(missionId: string) {
-    await authFetch(`${ORCH}/api/missions/${missionId}/start`, { method: "POST" });
-    mutate(`${ORCH}/api/missions`);
-    mutate(`${ORCH}/api/runs`);
-    mutate(`${ORCH}/api/events`);
+    await runAction(async () => {
+      await authJson(`${ORCH}/api/missions/${missionId}/start`, { method: "POST" });
+      mutate(`${ORCH}/api/missions`);
+      mutate(`${ORCH}/api/runs`);
+      mutate(`${ORCH}/api/events`);
+    }, "Mission started.");
   }
 
   async function completeStep(runId: string, stepId: string) {
-    await authFetch(`${ORCH}/api/runs/${runId}/steps/${stepId}/complete`, { method: "POST" });
-    mutate(`${ORCH}/api/missions`);
-    mutate(`${ORCH}/api/runs`);
-    mutate(`${ORCH}/api/approvals`);
-    mutate(`${ORCH}/api/events`);
-    mutate(`${EVAL}/api/evals`);
-    mutate(`${MEM}/api/memory/agents/agent_demo/summary`);
+    await runAction(async () => {
+      await authJson(`${ORCH}/api/runs/${runId}/steps/${stepId}/complete`, { method: "POST" });
+      mutate(`${ORCH}/api/missions`);
+      mutate(`${ORCH}/api/runs`);
+      mutate(`${ORCH}/api/approvals`);
+      mutate(`${ORCH}/api/events`);
+      mutate(`${EVAL}/api/evals`);
+      mutate(`${MEM}/api/memory/agents/agent_demo/summary`);
+    }, `Step ${stepId} completed.`);
   }
 
   async function executeCurrent(runId: string) {
-    await authFetch(`${ORCH}/api/runs/${runId}/execute-current`, { method: "POST" });
-    mutate(`${ORCH}/api/missions`);
-    mutate(`${ORCH}/api/runs`);
-    mutate(`${ORCH}/api/approvals`);
-    mutate(`${ORCH}/api/events`);
-    mutate(`${EVAL}/api/evals`);
-    mutate(`${MEM}/api/memory/agents/agent_demo/summary`);
+    await runAction(async () => {
+      await authJson(`${ORCH}/api/runs/${runId}/execute-current`, { method: "POST" });
+      mutate(`${ORCH}/api/missions`);
+      mutate(`${ORCH}/api/runs`);
+      mutate(`${ORCH}/api/approvals`);
+      mutate(`${ORCH}/api/events`);
+      mutate(`${EVAL}/api/evals`);
+      mutate(`${MEM}/api/memory/agents/agent_demo/summary`);
+    }, "Current step executed.");
   }
 
   async function respondApproval(approvalId: string, decision: "approved" | "rejected") {
-    await authFetch(`${ORCH}/api/approvals/${approvalId}/respond`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ decision })
-    });
-    mutate(`${ORCH}/api/approvals`);
-    mutate(`${ORCH}/api/runs`);
-    mutate(`${ORCH}/api/missions`);
-    mutate(`${ORCH}/api/events`);
-    mutate(`${EVAL}/api/evals`);
+    await runAction(async () => {
+      await authJson(`${ORCH}/api/approvals/${approvalId}/respond`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ decision })
+      });
+      mutate(`${ORCH}/api/approvals`);
+      mutate(`${ORCH}/api/runs`);
+      mutate(`${ORCH}/api/missions`);
+      mutate(`${ORCH}/api/events`);
+      mutate(`${EVAL}/api/evals`);
+    }, `Approval ${decision}.`);
   }
 
   return (
@@ -125,6 +167,8 @@ function Missions() {
           <input value={title} onChange={(event) => setTitle(event.target.value)} style={{ flex: 1, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
           <input value={repoPath} onChange={(event) => setRepoPath(event.target.value)} style={{ flex: 1, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
           <Button onClick={createMission}>Create</Button>
+          {message && <div style={{ color: "#86efac", fontSize: 13 }}>{message}</div>}
+          {error && <div style={{ color: "#fca5a5", fontSize: 13 }}>Action failed: {error}. If auth is enabled, save HARNESS_OPERATOR_TOKEN in Settings first.</div>}
         </div>
       </Panel>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>

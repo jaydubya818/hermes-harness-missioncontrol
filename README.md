@@ -49,6 +49,9 @@ Required/optional environment variables
   - optional but recommended
   - when set, all mutating API routes require:
     - Authorization: Bearer <token>
+- VITE_OPERATOR_TOKEN
+  - optional console-side fallback token for local/dev or trusted internal deployments
+  - used when localStorage does not already contain harness.operatorToken
 - HARNESS_VAULT_ROOT
   - memory-api vault root
 - ORCHESTRATOR_STATE_FILE
@@ -82,7 +85,7 @@ Local run
 - HARNESS_OPERATOR_TOKEN=your-token pnpm --filter orchestrator-api dev
 - HARNESS_OPERATOR_TOKEN=your-token pnpm --filter eval-api dev
 - HARNESS_OPERATOR_TOKEN=your-token pnpm --filter worker-runtime dev
-- pnpm --filter harness-console dev
+- VITE_OPERATOR_TOKEN=your-token pnpm --filter harness-console dev
 
 Console auth
 - open the Settings tab
