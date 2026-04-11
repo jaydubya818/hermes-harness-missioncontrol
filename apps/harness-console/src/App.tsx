@@ -5,10 +5,26 @@ import { CommandPalette } from "./CommandPalette.js";
 
 const tabs = ["Overview", "Missions", "Agents", "Memory", "Code", "Audit", "Settings"] as const;
 type Tab = (typeof tabs)[number];
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
-const ORCH = "http://localhost:4302";
-const MEM = "http://localhost:4301";
-const EVAL = "http://localhost:4303";
+const ORCH = import.meta.env.VITE_ORCH_URL ?? "/orchestrator";
+const MEM = import.meta.env.VITE_MEMORY_URL ?? "/memory";
+const EVAL = import.meta.env.VITE_EVAL_URL ?? "/eval";
+
+function getOperatorToken() {
+  return window.localStorage.getItem("harness.operatorToken") ?? "";
+}
+
+function authFetch(url: string, init: RequestInit = {}) {
+  const token = getOperatorToken();
+  return fetch(url, {
+    ...init,
+    headers: {
+      ...(init.headers ?? {}),
+      ...(token ? { authorization: `Bearer ${token}` } : {})
+    }
+  });
+}
+
+const fetcher = (url: string) => authFetch(url).then((r) => r.json());
 
 function Button(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return <button {...props} style={{ borderRadius: 10, border: "1px solid #334155", background: "#0f172a", color: "#e2e8f0", padding: "10px 14px", cursor: "pointer", ...(props.style ?? {}) }} />;
@@ -51,25 +67,26 @@ function Missions() {
   const { data: runs } = useSWR(`${ORCH}/api/runs`, fetcher, { refreshInterval: 3000 });
   const { data: approvals } = useSWR(`${ORCH}/api/approvals`, fetcher, { refreshInterval: 3000 });
   const [title, setTitle] = useState("Fix duplicate webhook jobs");
+  const [repoPath, setRepoPath] = useState("/Users/jaywest/projects/Hermes-harness-with-missioncontrol");
 
   async function createMission() {
-    await fetch(`${ORCH}/api/missions`, {
+    await authFetch(`${ORCH}/api/missions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title, project_id: "proj_demo", workflow_id: "bugfix" })
+      body: JSON.stringify({ title, project_id: "proj_demo", workflow_id: "bugfix", repo_path: repoPath })
     });
     mutate(`${ORCH}/api/missions`);
   }
 
   async function startMission(missionId: string) {
-    await fetch(`${ORCH}/api/missions/${missionId}/start`, { method: "POST" });
+    await authFetch(`${ORCH}/api/missions/${missionId}/start`, { method: "POST" });
     mutate(`${ORCH}/api/missions`);
     mutate(`${ORCH}/api/runs`);
     mutate(`${ORCH}/api/events`);
   }
 
   async function completeStep(runId: string, stepId: string) {
-    await fetch(`${ORCH}/api/runs/${runId}/steps/${stepId}/complete`, { method: "POST" });
+    await authFetch(`${ORCH}/api/runs/${runId}/steps/${stepId}/complete`, { method: "POST" });
     mutate(`${ORCH}/api/missions`);
     mutate(`${ORCH}/api/runs`);
     mutate(`${ORCH}/api/approvals`);
@@ -79,7 +96,7 @@ function Missions() {
   }
 
   async function executeCurrent(runId: string) {
-    await fetch(`${ORCH}/api/runs/${runId}/execute-current`, { method: "POST" });
+    await authFetch(`${ORCH}/api/runs/${runId}/execute-current`, { method: "POST" });
     mutate(`${ORCH}/api/missions`);
     mutate(`${ORCH}/api/runs`);
     mutate(`${ORCH}/api/approvals`);
@@ -89,7 +106,7 @@ function Missions() {
   }
 
   async function respondApproval(approvalId: string, decision: "approved" | "rejected") {
-    await fetch(`${ORCH}/api/approvals/${approvalId}/respond`, {
+    await authFetch(`${ORCH}/api/approvals/${approvalId}/respond`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ decision })
@@ -104,8 +121,9 @@ function Missions() {
   return (
     <div style={{ padding: 16, display: "grid", gap: 16 }}>
       <Panel title="New Mission">
-        <div style={{ display: "flex", gap: 12 }}>
+        <div style={{ display: "grid", gap: 12 }}>
           <input value={title} onChange={(event) => setTitle(event.target.value)} style={{ flex: 1, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+          <input value={repoPath} onChange={(event) => setRepoPath(event.target.value)} style={{ flex: 1, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
           <Button onClick={createMission}>Create</Button>
         </div>
       </Panel>
@@ -114,6 +132,7 @@ function Missions() {
           {(data?.missions ?? []).length === 0 ? <div>No missions yet.</div> : (data.missions as any[]).map((mission) => (
             <div key={mission.mission_id} style={{ padding: 12, borderBottom: "1px solid #1e293b" }}>
               <StatusRow label={mission.title} value={mission.status} />
+              <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6 }}>{mission.repo_path ?? "no repo path"}</div>
               <div style={{ height: 8 }} />
               <div style={{ display: "flex", gap: 8 }}>
                 <Button onClick={() => startMission(mission.mission_id)}>Start</Button>
@@ -140,6 +159,7 @@ function Missions() {
                 <div key={step.id} style={{ padding: 10, border: "1px solid #1e293b", borderRadius: 8 }}>
                   <StatusRow label={`${step.id} (${step.kind})`} value={step.status} />
                   <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6 }}>Risk: {step.risk} · Artifacts: {step.artifacts.length}</div>
+                  {step.artifacts.length > 0 && <div style={{ color: "#7dd3fc", fontSize: 12, marginTop: 6 }}>Latest artifact: {step.artifacts[step.artifacts.length - 1].uri}</div>}
                   {step.status === "running" && <div style={{ marginTop: 8, display: "flex", gap: 8 }}><Button onClick={() => executeCurrent(run.run_id)}>Execute current step</Button><Button onClick={() => completeStep(run.run_id, step.id)}>Mark step complete</Button></div>}
                 </div>
               ))}
@@ -155,7 +175,7 @@ function Agents() {
   const { data: summary } = useSWR(`${MEM}/api/memory/agents/agent_demo/summary`, fetcher, { refreshInterval: 10000 });
   const [bundle, setBundle] = useState<any>(null);
   async function loadContext() {
-    const response = await fetch(`${MEM}/api/memory/context/load`, {
+    const response = await authFetch(`${MEM}/api/memory/context/load`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ agent_id: "agent_demo", agent_role: "coder", project_id: "proj_demo", budget_bytes: 65536 })
@@ -190,7 +210,7 @@ function Memory() {
   const { data: article } = useSWR(selectedArticle ? `${MEM}/api/memory/articles/${selectedArticle}` : null, fetcher, { refreshInterval: 10000 });
 
   async function closeTaskWriteback() {
-    const response = await fetch(`${MEM}/api/memory/tasks/close`, {
+    const response = await authFetch(`${MEM}/api/memory/tasks/close`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -215,7 +235,7 @@ function Memory() {
   }
 
   async function promoteRewrite(item: any) {
-    const response = await fetch(`${MEM}/api/memory/promote`, {
+    const response = await authFetch(`${MEM}/api/memory/promote`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ item_id: item.id, promoted_by: "agent_demo", target_path: `wiki/projects/proj_demo/promoted-${item.id}.md`, promotion_kind: "standard" })
@@ -277,7 +297,7 @@ function Code() {
   const [artifactContent, setArtifactContent] = useState("diff --git a/file.ts b/file.ts\n+ bounded autonomy patch");
 
   async function addArtifact(runId: string, stepId: string) {
-    await fetch(`${ORCH}/api/runs/${runId}/artifacts`, {
+    await authFetch(`${ORCH}/api/runs/${runId}/artifacts`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ step_id: stepId, type: "diff", content: artifactContent })
@@ -324,7 +344,25 @@ function Audit() {
 }
 
 function Settings() {
-  return <div style={{ padding: 16 }}><Panel title="Settings"><StatusRow label="Policy model" value="approval-high-risk" /><StatusRow label="Workflow library" value="bugfix, dependency_upgrade" /><StatusRow label="Eval endpoint" value={EVAL} /></Panel></div>;
+  const [token, setToken] = useState(getOperatorToken());
+  function saveToken() {
+    window.localStorage.setItem("harness.operatorToken", token);
+    mutate(() => true);
+  }
+  return (
+    <div style={{ padding: 16 }}>
+      <Panel title="Settings">
+        <StatusRow label="Policy model" value="approval-high-risk" />
+        <StatusRow label="Workflow library" value="bugfix, dependency_upgrade" />
+        <StatusRow label="Eval endpoint" value={EVAL} />
+        <div style={{ height: 16 }} />
+        <div style={{ color: "#94a3b8", marginBottom: 8 }}>Operator bearer token</div>
+        <input value={token} onChange={(event) => setToken(event.target.value)} placeholder="optional HARNESS_OPERATOR_TOKEN" style={{ width: "100%", borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+        <div style={{ height: 8 }} />
+        <Button onClick={saveToken}>Save token</Button>
+      </Panel>
+    </div>
+  );
 }
 
 export function App() {

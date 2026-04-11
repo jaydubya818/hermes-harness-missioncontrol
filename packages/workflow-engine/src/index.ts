@@ -7,11 +7,19 @@ export interface WorkflowStepTemplate {
   risk: "low" | "medium" | "high";
 }
 
+export interface WorkflowArtifact {
+  artifact_id: string;
+  type: string;
+  uri: string;
+  content?: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface WorkflowRunStep extends WorkflowStepTemplate {
   status: StepStatus;
   started_at?: string;
   completed_at?: string;
-  artifacts: Array<{ artifact_id: string; type: string; uri: string; content?: string }>;
+  artifacts: WorkflowArtifact[];
   notes?: string;
 }
 
@@ -96,7 +104,7 @@ export function startCurrentStep(run: WorkflowRun): WorkflowRun {
   return run;
 }
 
-export function attachArtifact(run: WorkflowRun, step_id: string, artifact: { artifact_id: string; type: string; uri: string; content?: string }): WorkflowRun {
+export function attachArtifact(run: WorkflowRun, step_id: string, artifact: WorkflowArtifact): WorkflowRun {
   const step = run.steps.find((item) => item.id == step_id);
   if (step) step.artifacts.push(artifact);
   run.updated_at = new Date().toISOString();
