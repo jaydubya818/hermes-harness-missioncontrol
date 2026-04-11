@@ -89,6 +89,9 @@ importers:
       '@hermes-harness-with-missioncontrol/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
+      '@hermes-harness-with-missioncontrol/state-store':
+        specifier: workspace:*
+        version: link:../../packages/state-store
       '@hermes-harness-with-missioncontrol/workflow-engine':
         specifier: workspace:*
         version: link:../../packages/workflow-engine
@@ -117,6 +120,8 @@ importers:
   packages/policy-engine: {}
 
   packages/shared-types: {}
+
+  packages/state-store: {}
 
   packages/ui-kit:
     dependencies:

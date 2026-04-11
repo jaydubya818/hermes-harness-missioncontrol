@@ -10,7 +10,8 @@
     "dev:console": "pnpm --filter harness-console dev",
     "dev:memory": "pnpm --filter memory-api dev",
     "dev:orchestrator": "pnpm --filter orchestrator-api dev",
-    "dev:eval": "pnpm --filter eval-api dev"
+    "dev:eval": "pnpm --filter eval-api dev",
+    "dev:reset-state": "rm -f data/orchestrator-state.json"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

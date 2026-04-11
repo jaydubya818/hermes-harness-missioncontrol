@@ -303,10 +303,11 @@ function Audit() {
   const { data: events } = useSWR(`${ORCH}/api/events`, fetcher, { refreshInterval: 3000 });
   const { data: audit } = useSWR(`${ORCH}/api/audit`, fetcher, { refreshInterval: 3000 });
   const { data: evals } = useSWR(`${EVAL}/api/evals`, fetcher, { refreshInterval: 4000 });
+  const { data: approvals } = useSWR(`${ORCH}/api/approvals`, fetcher, { refreshInterval: 3000 });
   return (
     <div style={{ padding: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
       <Panel title="Event Stream">{(events?.events ?? []).length === 0 ? <div>No events yet.</div> : <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(events.events, null, 2)}</pre>}</Panel>
-      <Panel title="Audit + Eval">{audit?.audit && <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(audit.audit, null, 2)}</pre>}{evals?.summary && <pre style={{ whiteSpace: "pre-wrap", marginTop: 12 }}>{JSON.stringify(evals.summary, null, 2)}</pre>}</Panel>
+      <Panel title="Audit + Eval">{audit?.audit && <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(audit.audit, null, 2)}</pre>}{evals?.summary && <pre style={{ whiteSpace: "pre-wrap", marginTop: 12 }}>{JSON.stringify(evals.summary, null, 2)}</pre>}{approvals?.approvals && <pre style={{ whiteSpace: "pre-wrap", marginTop: 12 }}>{JSON.stringify(approvals.approvals, null, 2)}</pre>}</Panel>
     </div>
   );
 }
