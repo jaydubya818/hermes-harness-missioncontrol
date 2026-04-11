@@ -1,5 +1,5 @@
 {
-  "name": "orchestrator-api",
+  "name": "eval-api",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,9 +10,7 @@
     "dev": "tsx watch src/index.ts"
   },
   "dependencies": {
-    "@hermes-harness-with-missioncontrol/shared-types": "workspace:*",
-    "@hermes-harness-with-missioncontrol/workflow-engine": "workspace:*",
-    "@hermes-harness-with-missioncontrol/policy-engine": "workspace:*",
+    "@hermes-harness-with-missioncontrol/eval-core": "workspace:*",
     "hono": "^4.9.8",
     "@hono/node-server": "^1.19.4"
   },

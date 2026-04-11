@@ -6,49 +6,88 @@ import { CommandPalette } from "./CommandPalette.js";
 const tabs = ["Overview", "Missions", "Agents", "Memory", "Code", "Audit", "Settings"] as const;
 type Tab = (typeof tabs)[number];
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
+const ORCH = "http://localhost:4302";
+const MEM = "http://localhost:4301";
+const EVAL = "http://localhost:4303";
+
+function Button(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return <button {...props} style={{ borderRadius: 10, border: "1px solid #334155", background: "#0f172a", color: "#e2e8f0", padding: "10px 14px", cursor: "pointer", ...(props.style ?? {}) }} />;
+}
 
 function TopBar({ active, onChange }: { active: Tab; onChange: (tab: Tab) => void }) {
   return (
-    <div style={{ display: "flex", gap: 8, alignItems: "center", padding: 12, borderBottom: "1px solid #1e293b", position: "sticky", top: 0, background: "#020617" }}>
+    <div style={{ display: "flex", gap: 8, alignItems: "center", padding: 12, borderBottom: "1px solid #1e293b", position: "sticky", top: 0, background: "#020617", zIndex: 20 }}>
       <div style={{ fontWeight: 800, color: "#7dd3fc", marginRight: 12 }}>HERMES-HARNESS-WITH-MISSIONCONTROL</div>
       {tabs.map((tab, index) => (
-        <button key={tab} onClick={() => onChange(tab)} style={{ background: active === tab ? "#0f172a" : "transparent", color: active === tab ? "#e2e8f0" : "#94a3b8", border: "1px solid #1e293b", borderRadius: 8, padding: "8px 12px" }}>{index + 1}. {tab}</button>
+        <Button key={tab} onClick={() => onChange(tab)} style={{ background: active === tab ? "#111827" : "transparent", color: active === tab ? "#e2e8f0" : "#94a3b8", padding: "8px 12px" }}>{index + 1}. {tab}</Button>
       ))}
       <div style={{ marginLeft: "auto" }}>
-        <button onClick={() => mutate(() => true)} style={{ background: "#0f172a", color: "#e2e8f0", border: "1px solid #1e293b", borderRadius: 8, padding: "8px 12px" }}>Refresh</button>
+        <Button onClick={() => mutate(() => true)}>Refresh</Button>
       </div>
     </div>
   );
 }
 
 function Overview() {
-  const { data: memory } = useSWR("http://localhost:4301/api/memory/agents/agent_demo/summary", fetcher, { refreshInterval: 15000 });
-  const { data: missions } = useSWR("http://localhost:4302/api/missions", fetcher, { refreshInterval: 5000 });
-  const missionCount = missions?.missions?.length ?? 0;
-  const trend = useMemo(() => [1, 3, 2, 5, 4, 6, 5], []);
+  const { data: memory } = useSWR(`${MEM}/api/memory/agents/agent_demo/summary`, fetcher, { refreshInterval: 15000 });
+  const { data: missions } = useSWR(`${ORCH}/api/missions`, fetcher, { refreshInterval: 5000 });
+  const { data: approvals } = useSWR(`${ORCH}/api/approvals`, fetcher, { refreshInterval: 5000 });
+  const { data: evals } = useSWR(`${EVAL}/api/evals`, fetcher, { refreshInterval: 7000 });
+  const trend = useMemo(() => ((evals?.records ?? []) as Array<{ cost_usd: number }>).slice(-7).map((item) => item.cost_usd) || [0], [evals]);
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 16, padding: 16 }}>
-      <Panel title="Active Missions"><StatusRow label="Open missions" value={missionCount} /><StatusRow label="Pending approvals" value={0} /><StatusRow label="Recent failures" value={0} /></Panel>
+      <Panel title="Active Missions"><StatusRow label="Open missions" value={missions?.missions?.length ?? 0} /><StatusRow label="Pending approvals" value={approvals?.approvals?.filter((item: any) => item.status === "pending").length ?? 0} /><StatusRow label="Recent failures" value={missions?.missions?.filter((item: any) => item.status === "failed").length ?? 0} /></Panel>
       <Panel title="Memory Health"><CapacityBar value={memory?.learned_count ?? 0} max={20} /><div style={{ height: 12 }} /><StatusRow label="Pending rewrites" value={memory?.pending_rewrites ?? 0} /></Panel>
-      <Panel title="Cost Today"><CostCard label="Estimated run cost" amount="$0.00" /></Panel>
-      <Panel title="Run Throughput"><Sparkline values={trend} /><StatusRow label="7-day velocity" value="steady" /></Panel>
-      <Panel title="Recent Promotions"><StatusRow label="Promotions" value={memory?.recent_promotions ?? 0} /><StatusRow label="Last context bundle" value={memory?.profile_path ?? "n/a"} /></Panel>
-      <Panel title="Deploy Health"><StatusRow label="Canary deploys" value="0" /><StatusRow label="Rollbacks" value="0" /></Panel>
+      <Panel title="Cost Today"><CostCard label="Estimated run cost" amount={`$${(evals?.summary?.total_cost_usd ?? 0).toFixed?.(2) ?? '0.00'}`} /></Panel>
+      <Panel title="Run Throughput"><Sparkline values={trend.length ? trend : [0]} /><StatusRow label="Total runs" value={evals?.summary?.total_runs ?? 0} /></Panel>
+      <Panel title="Approval Load"><StatusRow label="Awaiting decision" value={approvals?.approvals?.filter((item: any) => item.status === "pending").length ?? 0} /><StatusRow label="Approved" value={approvals?.approvals?.filter((item: any) => item.status === "approved").length ?? 0} /></Panel>
+      <Panel title="Eval Snapshot"><StatusRow label="Success rate" value={`${Math.round((evals?.summary?.success_rate ?? 0) * 100)}%`} /><StatusRow label="Avg cost" value={`$${(evals?.summary?.average_cost_usd ?? 0).toFixed?.(2) ?? '0.00'}`} /></Panel>
     </div>
   );
 }
 
 function Missions() {
-  const { data } = useSWR("http://localhost:4302/api/missions", fetcher, { refreshInterval: 3000 });
+  const { data } = useSWR(`${ORCH}/api/missions`, fetcher, { refreshInterval: 3000 });
+  const { data: runs } = useSWR(`${ORCH}/api/runs`, fetcher, { refreshInterval: 3000 });
+  const { data: approvals } = useSWR(`${ORCH}/api/approvals`, fetcher, { refreshInterval: 3000 });
   const [title, setTitle] = useState("Fix duplicate webhook jobs");
 
   async function createMission() {
-    await fetch("http://localhost:4302/api/missions", {
+    await fetch(`${ORCH}/api/missions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title, project_id: "proj_demo" })
+      body: JSON.stringify({ title, project_id: "proj_demo", workflow_id: "bugfix" })
     });
-    mutate("http://localhost:4302/api/missions");
+    mutate(`${ORCH}/api/missions`);
+  }
+
+  async function startMission(missionId: string) {
+    await fetch(`${ORCH}/api/missions/${missionId}/start`, { method: "POST" });
+    mutate(`${ORCH}/api/missions`);
+    mutate(`${ORCH}/api/runs`);
+    mutate(`${ORCH}/api/events`);
+  }
+
+  async function completeStep(runId: string, stepId: string) {
+    await fetch(`${ORCH}/api/runs/${runId}/steps/${stepId}/complete`, { method: "POST" });
+    mutate(`${ORCH}/api/missions`);
+    mutate(`${ORCH}/api/runs`);
+    mutate(`${ORCH}/api/approvals`);
+    mutate(`${ORCH}/api/events`);
+    mutate(`${EVAL}/api/evals`);
+  }
+
+  async function respondApproval(approvalId: string, decision: "approved" | "rejected") {
+    await fetch(`${ORCH}/api/approvals/${approvalId}/respond`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision })
+    });
+    mutate(`${ORCH}/api/approvals`);
+    mutate(`${ORCH}/api/runs`);
+    mutate(`${ORCH}/api/missions`);
+    mutate(`${ORCH}/api/events`);
+    mutate(`${EVAL}/api/evals`);
   }
 
   return (
@@ -56,29 +95,62 @@ function Missions() {
       <Panel title="New Mission">
         <div style={{ display: "flex", gap: 12 }}>
           <input value={title} onChange={(event) => setTitle(event.target.value)} style={{ flex: 1, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
-          <button onClick={createMission} style={{ borderRadius: 10, border: "1px solid #334155", background: "#0f172a", color: "#e2e8f0", padding: "12px 16px" }}>Create</button>
+          <Button onClick={createMission}>Create</Button>
         </div>
       </Panel>
-      <Panel title="Mission Queue">
-        {(data?.missions ?? []).length === 0 ? <div>No missions yet.</div> : <pre>{JSON.stringify(data.missions, null, 2)}</pre>}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <Panel title="Mission Queue">
+          {(data?.missions ?? []).length === 0 ? <div>No missions yet.</div> : (data.missions as any[]).map((mission) => (
+            <div key={mission.mission_id} style={{ padding: 12, borderBottom: "1px solid #1e293b" }}>
+              <StatusRow label={mission.title} value={mission.status} />
+              <div style={{ height: 8 }} />
+              <div style={{ display: "flex", gap: 8 }}>
+                <Button onClick={() => startMission(mission.mission_id)}>Start</Button>
+              </div>
+            </div>
+          ))}
+        </Panel>
+        <Panel title="Approvals Queue">
+          {(approvals?.approvals ?? []).length === 0 ? <div>No approvals.</div> : (approvals.approvals as any[]).map((approval) => (
+            <div key={approval.approval_id} style={{ padding: 12, borderBottom: "1px solid #1e293b" }}>
+              <StatusRow label={`${approval.step_id}`} value={approval.status} />
+              <div style={{ color: "#94a3b8", fontSize: 13, margin: "8px 0" }}>{approval.reason}</div>
+              {approval.status === "pending" && <div style={{ display: "flex", gap: 8 }}><Button onClick={() => respondApproval(approval.approval_id, "approved")}>Approve</Button><Button onClick={() => respondApproval(approval.approval_id, "rejected")} style={{ background: "#3f0d19" }}>Reject</Button></div>}
+            </div>
+          ))}
+        </Panel>
+      </div>
+      <Panel title="Workflow Runs">
+        {(runs?.runs ?? []).length === 0 ? <div>No runs yet.</div> : (runs.runs as any[]).map((run) => (
+          <div key={run.run_id} style={{ padding: 12, borderBottom: "1px solid #1e293b" }}>
+            <StatusRow label={`${run.run_id} · ${run.workflow_id}`} value={run.status} />
+            <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
+              {run.steps.map((step: any) => (
+                <div key={step.id} style={{ padding: 10, border: "1px solid #1e293b", borderRadius: 8 }}>
+                  <StatusRow label={`${step.id} (${step.kind})`} value={step.status} />
+                  <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6 }}>Risk: {step.risk} · Artifacts: {step.artifacts.length}</div>
+                  {step.status === "running" && <div style={{ marginTop: 8 }}><Button onClick={() => completeStep(run.run_id, step.id)}>Mark step complete</Button></div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
       </Panel>
     </div>
   );
 }
 
 function Agents() {
-  const { data: summary } = useSWR("http://localhost:4301/api/memory/agents/agent_demo/summary", fetcher, { refreshInterval: 10000 });
-  const [bundle, setBundle] = useState<unknown>(null);
-
+  const { data: summary } = useSWR(`${MEM}/api/memory/agents/agent_demo/summary`, fetcher, { refreshInterval: 10000 });
+  const [bundle, setBundle] = useState<any>(null);
   async function loadContext() {
-    const response = await fetch("http://localhost:4301/api/memory/context/load", {
+    const response = await fetch(`${MEM}/api/memory/context/load`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ agent_id: "agent_demo", agent_role: "coder", project_id: "proj_demo", budget_bytes: 65536 })
     });
     setBundle(await response.json());
   }
-
   return (
     <div style={{ padding: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
       <Panel title="Agent Summary">
@@ -88,22 +160,26 @@ function Agents() {
         <StatusRow label="Working log" value={summary?.working_path ?? "n/a"} />
         <StatusRow label="Pending rewrites" value={summary?.pending_rewrites ?? 0} />
         <div style={{ height: 12 }} />
-        <button onClick={loadContext} style={{ borderRadius: 10, border: "1px solid #334155", background: "#0f172a", color: "#e2e8f0", padding: "12px 16px" }}>Load context bundle</button>
+        <Button onClick={loadContext}>Load context bundle</Button>
       </Panel>
-      <Panel title="Latest Context Bundle">
-        {bundle ? <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(bundle, null, 2)}</pre> : <div>No bundle loaded yet.</div>}
-      </Panel>
+      <Panel title="Latest Context Bundle">{bundle ? <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(bundle, null, 2)}</pre> : <div>No bundle loaded yet.</div>}</Panel>
     </div>
   );
 }
 
 function Memory() {
-  const { data: project } = useSWR("http://localhost:4301/api/memory/projects/proj_demo/summary", fetcher, { refreshInterval: 10000 });
-  const { data: search } = useSWR("http://localhost:4301/api/memory/search?q=autonomy", fetcher, { refreshInterval: 10000 });
-  const [writeback, setWriteback] = useState<unknown>(null);
+  const { data: project } = useSWR(`${MEM}/api/memory/projects/proj_demo/summary`, fetcher, { refreshInterval: 10000 });
+  const { data: search } = useSWR(`${MEM}/api/memory/search?q=autonomy`, fetcher, { refreshInterval: 10000 });
+  const { data: rewrites } = useSWR(`${MEM}/api/memory/agents/agent_demo/rewrite-candidates`, fetcher, { refreshInterval: 10000 });
+  const [writeback, setWriteback] = useState<any>(null);
+  const [promotion, setPromotion] = useState<any>(null);
+  const [section, setSection] = useState("projects/proj_demo");
+  const [selectedArticle, setSelectedArticle] = useState("projects/proj_demo/standards.md");
+  const { data: articles } = useSWR(`${MEM}/api/memory/articles?section=${encodeURIComponent(section)}`, fetcher, { refreshInterval: 10000 });
+  const { data: article } = useSWR(selectedArticle ? `${MEM}/api/memory/articles/${selectedArticle}` : null, fetcher, { refreshInterval: 10000 });
 
   async function closeTaskWriteback() {
-    const response = await fetch("http://localhost:4301/api/memory/tasks/close", {
+    const response = await fetch(`${MEM}/api/memory/tasks/close`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -122,8 +198,18 @@ function Memory() {
     });
     const data = await response.json();
     setWriteback(data);
-    mutate("http://localhost:4301/api/memory/agents/agent_demo/summary");
-    mutate("http://localhost:4301/api/memory/projects/proj_demo/summary");
+    mutate(`${MEM}/api/memory/agents/agent_demo/summary`);
+    mutate(`${MEM}/api/memory/projects/proj_demo/summary`);
+    mutate(`${MEM}/api/memory/agents/agent_demo/rewrite-candidates`);
+  }
+
+  async function promoteRewrite(item: any) {
+    const response = await fetch(`${MEM}/api/memory/promote`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ item_id: item.id, promoted_by: "agent_demo", target_path: `wiki/projects/proj_demo/promoted-${item.id}.md`, promotion_kind: "standard" })
+    });
+    setPromotion(await response.json());
   }
 
   return (
@@ -133,48 +219,114 @@ function Memory() {
           <StatusRow label="Project" value={project?.project_id ?? "proj_demo"} />
           <StatusRow label="Standards" value={(project?.standards ?? []).join(", ") || "none"} />
           <StatusRow label="Recipes" value={(project?.recipes ?? []).join(", ") || "none"} />
-          <StatusRow label="Active rewrites" value={(project?.active_rewrites ?? []).length ?? 0} />
+          <StatusRow label="Active rewrites" value={(rewrites?.items ?? []).length ?? 0} />
         </Panel>
-        <Panel title="Knowledge Search">
-          {(search?.results ?? []).length === 0 ? <div>No results.</div> : <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(search.results, null, 2)}</pre>}
-        </Panel>
+        <Panel title="Knowledge Search">{(search?.results ?? []).length === 0 ? <div>No results.</div> : <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(search.results, null, 2)}</pre>}</Panel>
       </div>
       <Panel title="Writeback + Promotion Flow">
         <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
-          <button onClick={closeTaskWriteback} style={{ borderRadius: 10, border: "1px solid #334155", background: "#0f172a", color: "#e2e8f0", padding: "12px 16px" }}>Run writeback</button>
+          <Button onClick={closeTaskWriteback}>Run writeback</Button>
         </div>
         {writeback ? <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(writeback, null, 2)}</pre> : <div>No writeback executed yet.</div>}
+        <div style={{ height: 12 }} />
+        <div style={{ display: "grid", gap: 8 }}>
+          {(rewrites?.items ?? []).map((item: any) => (
+            <div key={item.id} style={{ border: "1px solid #1e293b", borderRadius: 8, padding: 12 }}>
+              <div style={{ fontWeight: 700 }}>{item.target}</div>
+              <div style={{ color: "#94a3b8", whiteSpace: "pre-wrap", margin: "8px 0" }}>{item.content || "No content"}</div>
+              <Button onClick={() => promoteRewrite(item)}>Promote rewrite</Button>
+            </div>
+          ))}
+        </div>
+        {promotion && <pre style={{ whiteSpace: "pre-wrap", marginTop: 12 }}>{JSON.stringify(promotion, null, 2)}</pre>}
+      </Panel>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1.3fr", gap: 16 }}>
+        <Panel title="Docs Browser">
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <input value={section} onChange={(event) => setSection(event.target.value)} style={{ flex: 1, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+            <Button onClick={() => mutate(`${MEM}/api/memory/articles?section=${encodeURIComponent(section)}`)}>Load</Button>
+          </div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {(articles?.files ?? []).map((file: string) => (
+              <Button key={file} onClick={() => setSelectedArticle(`${section}/${file}`)} style={{ textAlign: "left" }}>{file}</Button>
+            ))}
+          </div>
+        </Panel>
+        <Panel title="Article Viewer">
+          <div style={{ color: "#94a3b8", marginBottom: 8 }}>{selectedArticle}</div>
+          {article?.content ? <pre style={{ whiteSpace: "pre-wrap" }}>{article.content}</pre> : <div>Select an article.</div>}
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+function Code() {
+  const { data: runs } = useSWR(`${ORCH}/api/runs`, fetcher, { refreshInterval: 4000 });
+  const [artifactContent, setArtifactContent] = useState("diff --git a/file.ts b/file.ts\n+ bounded autonomy patch");
+
+  async function addArtifact(runId: string, stepId: string) {
+    await fetch(`${ORCH}/api/runs/${runId}/artifacts`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ step_id: stepId, type: "diff", content: artifactContent })
+    });
+    mutate(`${ORCH}/api/runs`);
+  }
+
+  return (
+    <div style={{ padding: 16, display: "grid", gap: 16 }}>
+      <Panel title="Artifact Composer">
+        <textarea value={artifactContent} onChange={(event) => setArtifactContent(event.target.value)} style={{ width: "100%", minHeight: 140, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+      </Panel>
+      <Panel title="Run Artifacts">
+        {(runs?.runs ?? []).length === 0 ? <div>No runs yet.</div> : (runs.runs as any[]).map((run) => (
+          <div key={run.run_id} style={{ marginBottom: 16 }}>
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>{run.run_id}</div>
+            {run.steps.map((step: any) => (
+              <div key={step.id} style={{ border: "1px solid #1e293b", borderRadius: 8, padding: 12, marginBottom: 8 }}>
+                <StatusRow label={`${step.id}`} value={`${step.artifacts.length} artifacts`} />
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <Button onClick={() => addArtifact(run.run_id, step.id)}>Add diff artifact</Button>
+                </div>
+                {step.artifacts.length > 0 && <pre style={{ whiteSpace: "pre-wrap", marginTop: 8 }}>{JSON.stringify(step.artifacts, null, 2)}</pre>}
+              </div>
+            ))}
+          </div>
+        ))}
       </Panel>
     </div>
   );
 }
 
-function Code() { return <div style={{ padding: 16 }}><Panel title="Code Pipeline">Diffs, tests, reviews, and deploy artifacts will render here.</Panel></div>; }
-
 function Audit() {
-  const { data } = useSWR("http://localhost:4302/api/events", fetcher, { refreshInterval: 3000 });
-  return <div style={{ padding: 16 }}><Panel title="Audit Ledger">{(data?.events ?? []).length === 0 ? <div>No events yet.</div> : <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(data.events, null, 2)}</pre>}</Panel></div>;
+  const { data: events } = useSWR(`${ORCH}/api/events`, fetcher, { refreshInterval: 3000 });
+  const { data: audit } = useSWR(`${ORCH}/api/audit`, fetcher, { refreshInterval: 3000 });
+  const { data: evals } = useSWR(`${EVAL}/api/evals`, fetcher, { refreshInterval: 4000 });
+  return (
+    <div style={{ padding: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <Panel title="Event Stream">{(events?.events ?? []).length === 0 ? <div>No events yet.</div> : <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(events.events, null, 2)}</pre>}</Panel>
+      <Panel title="Audit + Eval">{audit?.audit && <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(audit.audit, null, 2)}</pre>}{evals?.summary && <pre style={{ whiteSpace: "pre-wrap", marginTop: 12 }}>{JSON.stringify(evals.summary, null, 2)}</pre>}</Panel>
+    </div>
+  );
 }
 
-function Settings() { return <div style={{ padding: 16 }}><Panel title="Settings">Policies, integrations, and runtime config will render here.</Panel></div>; }
+function Settings() {
+  return <div style={{ padding: 16 }}><Panel title="Settings"><StatusRow label="Policy model" value="approval-high-risk" /><StatusRow label="Workflow library" value="bugfix, dependency_upgrade" /><StatusRow label="Eval endpoint" value={EVAL} /></Panel></div>;
+}
 
 export function App() {
   const [active, setActive] = useState<Tab>("Overview");
-
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const num = Number(event.key);
-      if (!Number.isNaN(num) && num >= 1 && num <= tabs.length) {
-        setActive(tabs[num - 1]);
-      }
+      if (!Number.isNaN(num) && num >= 1 && num <= tabs.length) setActive(tabs[num - 1]);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-
   const commands = useMemo(() => tabs.map((tab) => ({ id: tab.toLowerCase(), label: `Open ${tab}`, action: () => setActive(tab) })), []);
-
   return (
     <div>
       <CommandPalette commands={commands} />

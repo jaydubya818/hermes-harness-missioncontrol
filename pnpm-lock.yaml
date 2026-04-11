@@ -18,6 +18,22 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@24.12.2)(tsx@4.21.0)(yaml@2.8.3)
 
+  apps/eval-api:
+    dependencies:
+      '@hermes-harness-with-missioncontrol/eval-core':
+        specifier: workspace:*
+        version: link:../../packages/eval-core
+      '@hono/node-server':
+        specifier: ^1.19.4
+        version: 1.19.13(hono@4.12.12)
+      hono:
+        specifier: ^4.9.8
+        version: 4.12.12
+    devDependencies:
+      tsx:
+        specifier: ^4.20.5
+        version: 4.21.0
+
   apps/harness-console:
     dependencies:
       '@hermes-harness-with-missioncontrol/ui-kit':
@@ -67,9 +83,15 @@ importers:
 
   apps/orchestrator-api:
     dependencies:
+      '@hermes-harness-with-missioncontrol/policy-engine':
+        specifier: workspace:*
+        version: link:../../packages/policy-engine
       '@hermes-harness-with-missioncontrol/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
+      '@hermes-harness-with-missioncontrol/workflow-engine':
+        specifier: workspace:*
+        version: link:../../packages/workflow-engine
       '@hono/node-server':
         specifier: ^1.19.4
         version: 1.19.13(hono@4.12.12)
@@ -81,6 +103,8 @@ importers:
         specifier: ^4.20.5
         version: 4.21.0
 
+  packages/eval-core: {}
+
   packages/memory-runtime:
     dependencies:
       '@hermes-harness-with-missioncontrol/shared-types':
@@ -89,6 +113,8 @@ importers:
       yaml:
         specifier: ^2.8.1
         version: 2.8.3
+
+  packages/policy-engine: {}
 
   packages/shared-types: {}
 
@@ -101,6 +127,12 @@ importers:
       '@types/react':
         specifier: ^19.1.10
         version: 19.2.14
+
+  packages/workflow-engine:
+    dependencies:
+      '@hermes-harness-with-missioncontrol/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
 
 packages:
 
