@@ -75,6 +75,17 @@ function Missions() {
     mutate(`${ORCH}/api/approvals`);
     mutate(`${ORCH}/api/events`);
     mutate(`${EVAL}/api/evals`);
+    mutate(`${MEM}/api/memory/agents/agent_demo/summary`);
+  }
+
+  async function executeCurrent(runId: string) {
+    await fetch(`${ORCH}/api/runs/${runId}/execute-current`, { method: "POST" });
+    mutate(`${ORCH}/api/missions`);
+    mutate(`${ORCH}/api/runs`);
+    mutate(`${ORCH}/api/approvals`);
+    mutate(`${ORCH}/api/events`);
+    mutate(`${EVAL}/api/evals`);
+    mutate(`${MEM}/api/memory/agents/agent_demo/summary`);
   }
 
   async function respondApproval(approvalId: string, decision: "approved" | "rejected") {
@@ -129,7 +140,7 @@ function Missions() {
                 <div key={step.id} style={{ padding: 10, border: "1px solid #1e293b", borderRadius: 8 }}>
                   <StatusRow label={`${step.id} (${step.kind})`} value={step.status} />
                   <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6 }}>Risk: {step.risk} · Artifacts: {step.artifacts.length}</div>
-                  {step.status === "running" && <div style={{ marginTop: 8 }}><Button onClick={() => completeStep(run.run_id, step.id)}>Mark step complete</Button></div>}
+                  {step.status === "running" && <div style={{ marginTop: 8, display: "flex", gap: 8 }}><Button onClick={() => executeCurrent(run.run_id)}>Execute current step</Button><Button onClick={() => completeStep(run.run_id, step.id)}>Mark step complete</Button></div>}
                 </div>
               ))}
             </div>

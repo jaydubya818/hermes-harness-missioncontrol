@@ -82,10 +82,11 @@ app.get("/api/memory/projects/:id/summary", async (c) => {
   const files = await listProjectFiles(projectId);
   return c.json({
     project_id: projectId,
-    standards: files.filter((file) => file.includes("standards")),
+    standards: files.filter((file) => file.includes("standards") || file.startsWith("promoted-")),
     active_rewrites: [],
     recent_postmortems: files.filter((file) => file.includes("postmortem")),
-    recipes: files.filter((file) => file.includes("recipe") || file.includes("recipes"))
+    recipes: files.filter((file) => file.includes("recipe") || file.includes("recipes")),
+    promoted: files.filter((file) => file.startsWith("promoted-"))
   });
 });
 

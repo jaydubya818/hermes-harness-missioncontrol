@@ -23,6 +23,9 @@ importers:
       '@hermes-harness-with-missioncontrol/eval-core':
         specifier: workspace:*
         version: link:../../packages/eval-core
+      '@hermes-harness-with-missioncontrol/state-store':
+        specifier: workspace:*
+        version: link:../../packages/state-store
       '@hono/node-server':
         specifier: ^1.19.4
         version: 1.19.13(hono@4.12.12)
@@ -95,6 +98,22 @@ importers:
       '@hermes-harness-with-missioncontrol/workflow-engine':
         specifier: workspace:*
         version: link:../../packages/workflow-engine
+      '@hono/node-server':
+        specifier: ^1.19.4
+        version: 1.19.13(hono@4.12.12)
+      hono:
+        specifier: ^4.9.8
+        version: 4.12.12
+    devDependencies:
+      tsx:
+        specifier: ^4.20.5
+        version: 4.21.0
+
+  apps/worker-runtime:
+    dependencies:
+      '@hermes-harness-with-missioncontrol/state-store':
+        specifier: workspace:*
+        version: link:../../packages/state-store
       '@hono/node-server':
         specifier: ^1.19.4
         version: 1.19.13(hono@4.12.12)
