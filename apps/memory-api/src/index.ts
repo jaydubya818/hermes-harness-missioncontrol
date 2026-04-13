@@ -198,5 +198,9 @@ app.get("/api/memory/articles/:slug{.+}", async (c) => {
   }
 });
 
-serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 4301) });
-console.log("memory-api listening on http://localhost:4301");
+if (!process.env.VITEST) {
+  serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 4301) });
+  console.log("memory-api listening on http://localhost:4301");
+}
+
+export { app };

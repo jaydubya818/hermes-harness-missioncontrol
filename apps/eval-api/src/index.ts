@@ -49,5 +49,9 @@ app.post("/api/evals", async (c) => {
   return c.json({ ok: true, summary: summarize(records) }, 201);
 });
 
-serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 4303) });
-console.log("eval-api listening on http://localhost:4303");
+if (!process.env.VITEST) {
+  serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 4303) });
+  console.log("eval-api listening on http://localhost:4303");
+}
+
+export { app };

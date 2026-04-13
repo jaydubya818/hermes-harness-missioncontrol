@@ -115,9 +115,10 @@ function safeRelativePath(path: string) {
   return path.split("/").filter(Boolean).join("/");
 }
 
-function selectDeployProvider(repoWorkspace: string) {
+async function selectDeployProvider(repoWorkspace: string) {
   if (deployAdapterEnv !== "auto") return deployAdapterEnv;
-  if (resolve(join(repoWorkspace, "vercel.json")) && false) return "vercel";
+  if (await exists(join(repoWorkspace, "vercel.json"))) return "vercel";
+  if (await exists(join(repoWorkspace, "render.yaml"))) return "render";
   return "noop-canary";
 }
 
@@ -436,7 +437,7 @@ async function review(workspace: WorkspaceContext) {
 }
 
 async function buildDeployPlan(repoWorkspace: string): Promise<DeployPlan> {
-  const provider = selectDeployProvider(repoWorkspace);
+  const provider = await selectDeployProvider(repoWorkspace);
   if (provider === "vercel") {
     return {
       provider,

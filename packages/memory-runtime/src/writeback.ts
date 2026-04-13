@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename, access, rm } from "node:fs/promises";
 import { dirname, join, resolve, relative } from "node:path";
 import { makeId, type CloseTaskRequest, type CloseTaskResponse, type PromoteLearningRequest, type PromoteLearningResponse } from "@hermes-harness-with-missioncontrol/shared-types";
 
@@ -18,11 +18,76 @@ async function readText(path: string) {
   }
 }
 
+async function exists(path: string) {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function writeTextAtomically(path: string, content: string) {
   await mkdir(dirname(path), { recursive: true });
   const tmpPath = join(dirname(path), `.${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
   await writeFile(tmpPath, content, "utf8");
   await rename(tmpPath, path);
+}
+
+type PendingWrite = { path: string; content: string };
+
+async function commitTextBatchAtomically(writes: PendingWrite[]) {
+  const staged = await Promise.all(writes.map(async ({ path, content }) => {
+    await mkdir(dirname(path), { recursive: true });
+    const tmpPath = join(dirname(path), `.${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
+    await writeFile(tmpPath, content, "utf8");
+    return { path, tmpPath, backupPath: join(dirname(path), `.${Date.now()}-${Math.random().toString(36).slice(2)}.bak`) };
+  }));
+
+  const applied: Array<{ path: string; backupPath?: string }> = [];
+  try {
+    for (const item of staged) {
+      let backupPath: string | undefined;
+      if (await exists(item.path)) {
+        backupPath = item.backupPath;
+        await rename(item.path, backupPath);
+      }
+      await rename(item.tmpPath, item.path);
+      applied.push({ path: item.path, backupPath });
+    }
+
+    for (const item of applied) {
+      if (item.backupPath && await exists(item.backupPath)) {
+        await rm(item.backupPath, { force: true });
+      }
+    }
+  } catch (error) {
+    for (const item of staged) {
+      if (await exists(item.tmpPath)) {
+        await rm(item.tmpPath, { force: true });
+      }
+    }
+
+    for (const item of applied.reverse()) {
+      if (await exists(item.path)) {
+        await rm(item.path, { force: true });
+      }
+      if (item.backupPath && await exists(item.backupPath)) {
+        await rename(item.backupPath, item.path);
+      }
+    }
+
+    for (const item of staged) {
+      if (await exists(item.backupPath) && !await exists(item.path)) {
+        await rename(item.backupPath, item.path);
+      }
+      if (await exists(item.backupPath)) {
+        await rm(item.backupPath, { force: true });
+      }
+    }
+
+    throw error;
+  }
 }
 
 export async function closeTask(vaultRoot: string, request: CloseTaskRequest): Promise<CloseTaskResponse> {
@@ -37,15 +102,18 @@ export async function closeTask(vaultRoot: string, request: CloseTaskRequest): P
 ## ${new Date().toISOString()} ${request.step_id ?? "task"}
 ${request.summary}
 `;
+
+  const pendingWrites: PendingWrite[] = [];
+
   const nextTaskLog = `${await readText(taskLogPath)}${stamp}`;
-  await writeTextAtomically(taskLogPath, nextTaskLog);
+  pendingWrites.push({ path: taskLogPath, content: nextTaskLog });
   writes.push({ path: taskLogPath, memory_class: "working" });
 
   if ((request.gotchas ?? []).length > 0) {
     const learnedAppend = (request.gotchas ?? []).map((note) => `
 - ${note.title}: ${note.body}
 `).join("");
-    await writeTextAtomically(learnedPath, `${await readText(learnedPath)}${learnedAppend}`);
+    pendingWrites.push({ path: learnedPath, content: `${await readText(learnedPath)}${learnedAppend}` });
     writes.push({ path: learnedPath, memory_class: "learned" });
   }
 
@@ -54,9 +122,11 @@ ${request.summary}
 ### ${rewrite.target}
 ${rewrite.content}
 `).join("");
-    await writeTextAtomically(rewritesPath, `${await readText(rewritesPath)}${rewritesAppend}`);
+    pendingWrites.push({ path: rewritesPath, content: `${await readText(rewritesPath)}${rewritesAppend}` });
     writes.push({ path: rewritesPath, memory_class: "rewrite" });
   }
+
+  await commitTextBatchAtomically(pendingWrites);
 
   return {
     writeback_id: makeId("wb"),

@@ -8,6 +8,7 @@
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "dev:console": "pnpm --filter harness-console dev",
+    "dev:console:auth": "sh -c 'VITE_OPERATOR_TOKEN=${VITE_OPERATOR_TOKEN:-prod-secret} pnpm --filter harness-console dev'",
     "dev:memory": "pnpm --filter memory-api dev",
     "dev:orchestrator": "pnpm --filter orchestrator-api dev",
     "dev:eval": "pnpm --filter eval-api dev",
