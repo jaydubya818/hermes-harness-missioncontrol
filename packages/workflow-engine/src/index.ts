@@ -105,7 +105,7 @@ export function startCurrentStep(run: WorkflowRun): WorkflowRun {
 }
 
 export function attachArtifact(run: WorkflowRun, step_id: string, artifact: WorkflowArtifact): WorkflowRun {
-  const step = run.steps.find((item) => item.id == step_id);
+  const step = run.steps.find((item) => item.id === step_id);
   if (step) step.artifacts.push(artifact);
   run.updated_at = new Date().toISOString();
   return run;

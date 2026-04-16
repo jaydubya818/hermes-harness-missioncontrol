@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { resolve } from "node:path";
-import { attachArtifact, createWorkflowRun, getCurrentStep, startCurrentStep, advanceRun, type WorkflowRun } from "@hermes-harness-with-missioncontrol/workflow-engine";
+import { attachArtifact, createWorkflowRun, getCurrentStep, startCurrentStep, advanceRun, type WorkflowArtifact, type WorkflowRun } from "@hermes-harness-with-missioncontrol/workflow-engine";
 import { evaluateStepPolicy } from "@hermes-harness-with-missioncontrol/policy-engine";
 import { loadJsonFile, saveJsonFile } from "@hermes-harness-with-missioncontrol/state-store";
 import { makeId, type HarnessEvent } from "@hermes-harness-with-missioncontrol/shared-types";
@@ -105,8 +105,8 @@ function getMissionForRun(run: WorkflowRun) {
   return state.missions.find((item) => item.mission_id === run.mission_id);
 }
 
-function getStepArtifact(run: WorkflowRun, stepId: string, type: string): (WorkerArtifact & { artifact_id?: string }) | undefined {
-  return run.steps.find((step) => step.id === stepId)?.artifacts.find((artifact) => artifact.type === type) as any;
+function getStepArtifact(run: WorkflowRun, stepId: string, type: string): WorkflowArtifact | undefined {
+  return run.steps.find((step) => step.id === stepId)?.artifacts.find((artifact) => artifact.type === type);
 }
 
 async function recordEval(run: WorkflowRun, approvalCount: number) {
@@ -124,8 +124,8 @@ async function recordEval(run: WorkflowRun, approvalCount: number) {
         created_at: new Date().toISOString()
       })
     });
-  } catch {
-    // optional runtime dependency
+  } catch (err) {
+    console.error("[orchestrator] recordEval failed (eval-api unavailable):", err instanceof Error ? err.message : err);
   }
 }
 
@@ -147,8 +147,8 @@ async function writebackStep(run: WorkflowRun, stepId: string, outcome: "success
         artifacts: (current?.artifacts ?? []).map((artifact) => ({ type: artifact.type, uri: artifact.uri }))
       })
     });
-  } catch {
-    // optional runtime dependency
+  } catch (err) {
+    console.error("[orchestrator] writebackStep failed (memory-api unavailable):", err instanceof Error ? err.message : err);
   }
 }
 
@@ -169,8 +169,8 @@ async function publishDiscovery(run: WorkflowRun, stepId: string, title: string,
         tags: [stepId, "automation"]
       })
     });
-  } catch {
-    // optional runtime dependency
+  } catch (err) {
+    console.error("[orchestrator] publishDiscovery failed (memory-api unavailable):", err instanceof Error ? err.message : err);
   }
 }
 
@@ -183,8 +183,8 @@ async function cleanupExecutionWorkspace(run: WorkflowRun, mission?: Mission, ex
       headers: authHeaders(),
       body: JSON.stringify({ run_id: run.run_id, source_repo: sourceRepo, branch_name: branchName })
     });
-  } catch {
-    // cleanup is best effort
+  } catch (err) {
+    console.error("[orchestrator] cleanupExecutionWorkspace failed (worker-api unavailable):", err instanceof Error ? err.message : err);
   }
 }
 

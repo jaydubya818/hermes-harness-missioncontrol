@@ -1,4 +1,4 @@
-import { readFile, stat } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { makeId, type ContextRequest, type ContextResponse, type MemoryClass } from "@hermes-harness-with-missioncontrol/shared-types";
 
@@ -25,7 +25,6 @@ export async function loadContextBundle(vaultRoot: string, request: ContextReque
   let used = 0;
   for (const path of candidates) {
     try {
-      const meta = await stat(path);
       const content = await readFile(path, "utf8");
       const bytes = Buffer.byteLength(content, "utf8");
       if (used + bytes > request.budget_bytes) {
@@ -36,7 +35,6 @@ export async function loadContextBundle(vaultRoot: string, request: ContextReque
       const memory_class = classify(path);
       files.push({ path, memory_class, priority: files.length + 1, reason: "default-runtime-scope", content });
       included.push({ path, class: memory_class, reason: "default-runtime-scope", bytes, priority: files.length });
-      void meta;
     } catch {
       excluded.push({ path, reason: "missing" });
     }

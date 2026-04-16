@@ -8,3 +8,10 @@ coverage
 *.log
 *.tsbuildinfo
 data/
+
+# Auto-generated text export files
+text_*.json
+*.session.json
+
+# Claude worktrees
+.claude/
