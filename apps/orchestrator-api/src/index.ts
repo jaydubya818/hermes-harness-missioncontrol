@@ -54,10 +54,12 @@ type WorkerArtifact = {
 };
 
 type WorkerExecution = {
+  execution_id?: string;
   summary: string;
   confidence: number;
   success: boolean;
   artifacts: WorkerArtifact[];
+  step_events?: Array<Record<string, unknown>>;
   sourceRepo?: string;
   branchName?: string;
   source_repo?: string;
@@ -80,7 +82,7 @@ function toTaskExecutionResult(run: WorkflowRun, stepId: string, execution: Work
     .filter((value): value is string => typeof value === "string");
 
   return {
-    execution_id: makeId("exec"),
+    execution_id: execution.execution_id ?? makeId("exec"),
     mission_id: run.mission_id,
     run_id: run.run_id,
     step_id: stepId,
@@ -127,8 +129,8 @@ async function persist() {
   await saveJsonFile(stateFile, state);
 }
 
-function recordEvent(event: HarnessEvent) {
-  state.events.unshift(event);
+function recordEvent(event: HarnessEvent | Record<string, unknown>) {
+  state.events.unshift(event as any);
   state.audit.unshift({ ...event, audit_id: makeId("audit") });
   if (state.events.length > 200) state.events.length = 200;
   if (state.audit.length > 500) state.audit.length = 500;
@@ -241,15 +243,17 @@ async function failRun(run: WorkflowRun, stepId: string, summary: string, execut
 }
 
 async function fetchWorkerExecution(run: WorkflowRun, stepId: string, stepKind: string, repoPath?: string): Promise<WorkerExecution> {
+  const executionId = makeId("exec");
   const response = await fetch(`${workerApi}/api/execute-step`, {
     method: "POST",
     headers: authHeaders(),
-    body: JSON.stringify({ run_id: run.run_id, step_id: stepId, kind: stepKind, repo_path: repoPath, branch_name: `hermes/${run.run_id}` })
+    body: JSON.stringify({ mission_id: run.mission_id, execution_id: executionId, run_id: run.run_id, step_id: stepId, kind: stepKind, repo_path: repoPath, branch_name: `hermes/${run.run_id}` })
   });
   const payload = await response.json() as WorkerExecution & { error?: string };
   if (!response.ok) {
     throw new Error(payload.summary || payload.error || `worker execution failed with status ${response.status}`);
   }
+  payload.execution_id ??= executionId;
   return payload;
 }
 
@@ -320,6 +324,9 @@ app.post("/api/runs/:id/execute-current", async (c) => {
 
   for (const artifact of execution.artifacts) {
     attachArtifact(run, step.id, { artifact_id: makeId("art"), type: artifact.type, uri: artifact.uri, content: artifact.content, metadata: artifact.metadata } as any);
+  }
+  for (const event of execution.step_events ?? []) {
+    recordEvent(event);
   }
 
   if (!execution.success) {

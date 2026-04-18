@@ -120,6 +120,9 @@ importers:
 
   apps/worker-runtime:
     dependencies:
+      '@hermes-harness-with-missioncontrol/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@hermes-harness-with-missioncontrol/state-store':
         specifier: workspace:*
         version: link:../../packages/state-store

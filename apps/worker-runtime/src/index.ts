@@ -6,6 +6,7 @@ import { resolve, join, relative, dirname } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { loadJsonFile, saveJsonFile } from "@hermes-harness-with-missioncontrol/state-store";
+import { EventSource, type EventEnvelope } from "@hermes-harness-with-missioncontrol/contracts";
 
 const execFileAsync = promisify(execFile);
 const app = new Hono();
@@ -18,6 +19,8 @@ const deployBaseUrl = process.env.DEPLOY_BASE_URL ?? "https://staging.example.in
 const operatorToken = process.env.HARNESS_OPERATOR_TOKEN;
 
 type StepRequest = {
+  mission_id?: string;
+  execution_id?: string;
   run_id: string;
   step_id: string;
   kind: string;
@@ -37,6 +40,7 @@ type StepResult = {
   confidence: number;
   success: boolean;
   artifacts: StepArtifact[];
+  step_events?: EventEnvelope[];
 };
 
 type WorkspaceContext = {
@@ -90,6 +94,52 @@ function assertSafeSegment(value: string) {
 
 function isWriteKind(kind: string) {
   return ["implement", "review", "deploy", "test"].includes(kind);
+}
+
+function buildStepEvents(req: StepRequest, result: StepResult): EventEnvelope[] {
+  const missionId = req.mission_id ?? "mis_unknown";
+  const executionId = req.execution_id ?? `exec_${req.run_id}_${req.step_id}`;
+  const base = {
+    schema_version: "v1" as const,
+    timestamp: new Date().toISOString(),
+    source: EventSource.Hermes,
+    mission_id: missionId,
+    run_id: req.run_id,
+    step_id: req.step_id,
+    execution_id: executionId,
+  };
+
+  const events: EventEnvelope[] = [
+    {
+      ...base,
+      event_id: `${executionId}_1`,
+      sequence: 1,
+      type: "step.started",
+      payload: { step_kind: req.kind },
+    },
+  ];
+
+  let sequence = 2;
+  for (const artifact of result.artifacts) {
+    events.push({
+      ...base,
+      event_id: `${executionId}_${sequence}`,
+      sequence,
+      type: "artifact.created",
+      payload: { kind: artifact.type, uri: artifact.uri },
+    });
+    sequence += 1;
+  }
+
+  events.push({
+    ...base,
+    event_id: `${executionId}_${sequence}`,
+    sequence,
+    type: result.success ? "step.completed" : "step.failed",
+    payload: { summary: result.summary, confidence: result.confidence },
+  });
+
+  return events;
 }
 
 function requireOperator(c: any) {
@@ -516,7 +566,8 @@ app.post("/api/execute-step", async (c) => {
     else if (body.kind === "test") result = await runTests(workspace);
     else if (body.kind === "review") result = await review(workspace);
     else result = await deploy(workspace);
-    return c.json({ run_id: body.run_id, step_id: body.step_id, ...workspace, ...result });
+    const step_events = buildStepEvents(body, result);
+    return c.json({ run_id: body.run_id, mission_id: body.mission_id, execution_id: body.execution_id, step_id: body.step_id, ...workspace, ...result, step_events });
   } catch (error) {
     return c.json({
       run_id: "unknown",
@@ -524,7 +575,8 @@ app.post("/api/execute-step", async (c) => {
       success: false,
       confidence: 0,
       summary: String(error instanceof Error ? error.message : error),
-      artifacts: []
+      artifacts: [],
+      step_events: []
     }, 400);
   }
 });
