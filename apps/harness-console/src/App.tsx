@@ -45,6 +45,15 @@ async function authJson(url: string, init: RequestInit = {}) {
 
 const fetcher = (url: string) => authFetch(url).then((r) => r.json());
 
+function withQuery(url: string, params: Record<string, string | undefined>) {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value) search.set(key, value);
+  }
+  const suffix = search.toString();
+  return suffix ? `${url}?${suffix}` : url;
+}
+
 function Button(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return <button {...props} style={{ borderRadius: 10, border: "1px solid #334155", background: "#0f172a", color: "#e2e8f0", padding: "10px 14px", cursor: "pointer", ...(props.style ?? {}) }} />;
 }
@@ -87,6 +96,18 @@ function Missions() {
   const [repoPath, setRepoPath] = useState("/Users/jaywest/projects/Hermes-harness-with-missioncontrol");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectedMissionId, setSelectedMissionId] = useState<string | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!selectedMissionId && data?.mission_queue?.[0]?.mission_id) setSelectedMissionId(data.mission_queue[0].mission_id);
+    if (!selectedRunId && data?.run_cards?.[0]?.run_id) setSelectedRunId(data.run_cards[0].run_id);
+  }, [data, selectedMissionId, selectedRunId]);
+
+  const missionDetailUrl = selectedMissionId ? `${ORCH}/api/read-models/missions/${selectedMissionId}` : null;
+  const runDetailUrl = selectedRunId ? `${ORCH}/api/read-models/runs/${selectedRunId}` : null;
+  const { data: missionDetail } = useSWR(missionDetailUrl, fetcher, { refreshInterval: 3000 });
+  const { data: runDetail } = useSWR(runDetailUrl, fetcher, { refreshInterval: 3000 });
 
   async function runAction(action: () => Promise<unknown>, successMessage: string) {
     setError(null);
@@ -99,6 +120,22 @@ function Missions() {
     }
   }
 
+  async function refreshAll() {
+    mutate(`${ORCH}/api/missions`);
+    mutate(`${ORCH}/api/runs`);
+    mutate(`${ORCH}/api/approvals`);
+    mutate(`${ORCH}/api/events`);
+    mutate(`${ORCH}/api/read-models/missions`);
+    mutate(`${ORCH}/api/read-models/approvals`);
+    mutate(`${ORCH}/api/read-models/approval-history`);
+    mutate(`${ORCH}/api/read-models/audit`);
+    mutate(`${ORCH}/api/read-models/overview`);
+    if (selectedMissionId) mutate(`${ORCH}/api/read-models/missions/${selectedMissionId}`);
+    if (selectedRunId) mutate(`${ORCH}/api/read-models/runs/${selectedRunId}`);
+    mutate(`${EVAL}/api/evals`);
+    mutate(`${MEM}/api/memory/agents/agent_demo/summary`);
+  }
+
   async function createMission() {
     await runAction(async () => {
       await authJson(`${ORCH}/api/missions`, {
@@ -106,60 +143,31 @@ function Missions() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ title, project_id: "proj_demo", workflow_id: "bugfix", repo_path: repoPath })
       });
-      mutate(`${ORCH}/api/missions`);
-      mutate(`${ORCH}/api/read-models/missions`);
-      mutate(`${ORCH}/api/read-models/approvals`);
-      mutate(`${ORCH}/api/read-models/approval-history`);
-      mutate(`${ORCH}/api/read-models/audit`);
-      mutate(`${ORCH}/api/read-models/overview`);
+      await refreshAll();
     }, "Mission created.");
   }
 
   async function startMission(missionId: string) {
     await runAction(async () => {
       await authJson(`${ORCH}/api/missions/${missionId}/start`, { method: "POST" });
-      mutate(`${ORCH}/api/missions`);
-      mutate(`${ORCH}/api/runs`);
-      mutate(`${ORCH}/api/events`);
-      mutate(`${ORCH}/api/read-models/missions`);
-      mutate(`${ORCH}/api/read-models/approvals`);
-      mutate(`${ORCH}/api/read-models/approval-history`);
-      mutate(`${ORCH}/api/read-models/audit`);
-      mutate(`${ORCH}/api/read-models/overview`);
+      setSelectedMissionId(missionId);
+      await refreshAll();
     }, "Mission started.");
   }
 
   async function completeStep(runId: string, stepId: string) {
     await runAction(async () => {
       await authJson(`${ORCH}/api/runs/${runId}/steps/${stepId}/complete`, { method: "POST" });
-      mutate(`${ORCH}/api/missions`);
-      mutate(`${ORCH}/api/runs`);
-      mutate(`${ORCH}/api/approvals`);
-      mutate(`${ORCH}/api/events`);
-      mutate(`${ORCH}/api/read-models/missions`);
-      mutate(`${ORCH}/api/read-models/approvals`);
-      mutate(`${ORCH}/api/read-models/approval-history`);
-      mutate(`${ORCH}/api/read-models/audit`);
-      mutate(`${ORCH}/api/read-models/overview`);
-      mutate(`${EVAL}/api/evals`);
-      mutate(`${MEM}/api/memory/agents/agent_demo/summary`);
+      setSelectedRunId(runId);
+      await refreshAll();
     }, `Step ${stepId} completed.`);
   }
 
   async function executeCurrent(runId: string) {
     await runAction(async () => {
       await authJson(`${ORCH}/api/runs/${runId}/execute-current`, { method: "POST" });
-      mutate(`${ORCH}/api/missions`);
-      mutate(`${ORCH}/api/runs`);
-      mutate(`${ORCH}/api/approvals`);
-      mutate(`${ORCH}/api/events`);
-      mutate(`${ORCH}/api/read-models/missions`);
-      mutate(`${ORCH}/api/read-models/approvals`);
-      mutate(`${ORCH}/api/read-models/approval-history`);
-      mutate(`${ORCH}/api/read-models/audit`);
-      mutate(`${ORCH}/api/read-models/overview`);
-      mutate(`${EVAL}/api/evals`);
-      mutate(`${MEM}/api/memory/agents/agent_demo/summary`);
+      setSelectedRunId(runId);
+      await refreshAll();
     }, "Current step executed.");
   }
 
@@ -168,18 +176,9 @@ function Missions() {
       await authJson(`${ORCH}/api/approvals/${approvalId}/respond`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ decision })
+        body: JSON.stringify({ decision, actor: "jay" })
       });
-      mutate(`${ORCH}/api/approvals`);
-      mutate(`${ORCH}/api/runs`);
-      mutate(`${ORCH}/api/missions`);
-      mutate(`${ORCH}/api/events`);
-      mutate(`${ORCH}/api/read-models/missions`);
-      mutate(`${ORCH}/api/read-models/approvals`);
-      mutate(`${ORCH}/api/read-models/approval-history`);
-      mutate(`${ORCH}/api/read-models/audit`);
-      mutate(`${ORCH}/api/read-models/overview`);
-      mutate(`${EVAL}/api/evals`);
+      await refreshAll();
     }, `Approval ${decision}.`);
   }
 
@@ -204,6 +203,7 @@ function Missions() {
               <div style={{ height: 8 }} />
               <div style={{ display: "flex", gap: 8 }}>
                 <Button onClick={() => startMission(mission.mission_id)}>Start</Button>
+                <Button onClick={() => setSelectedMissionId(mission.mission_id)} style={{ background: selectedMissionId === mission.mission_id ? "#111827" : "transparent" }}>Inspect</Button>
               </div>
             </div>
           ))}
@@ -231,13 +231,47 @@ function Missions() {
                   <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6 }}>Risk: {step.risk} · Artifacts: {step.artifacts_count}</div>
                   {step.blocked_reason && <div style={{ color: "#fbbf24", fontSize: 12, marginTop: 6 }}>{step.blocked_reason}</div>}
                   {step.latest_artifact_uri && <div style={{ color: "#7dd3fc", fontSize: 12, marginTop: 6 }}>Latest artifact: {step.latest_artifact_uri}</div>}
-                  {step.state === "running" && <div style={{ marginTop: 8, display: "flex", gap: 8 }}><Button onClick={() => executeCurrent(run.run_id)}>Execute current step</Button><Button onClick={() => completeStep(run.run_id, step.step_id)}>Mark step complete</Button></div>}
+                  <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {step.state === "running" && <><Button onClick={() => executeCurrent(run.run_id)}>Execute current step</Button><Button onClick={() => completeStep(run.run_id, step.step_id)}>Mark step complete</Button></>}
+                    <Button onClick={() => setSelectedRunId(run.run_id)} style={{ background: selectedRunId === run.run_id ? "#111827" : "transparent" }}>Inspect run</Button>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
         ))}
       </Panel>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <Panel title="Mission Detail">
+          {!missionDetail ? <div>Select mission.</div> : <>
+            <StatusRow label={missionDetail.mission.title} value={missionDetail.mission.status} />
+            <StatusRow label="Active run" value={missionDetail.mission.active_run_id ?? "none"} />
+            <StatusRow label="Pending approvals" value={missionDetail.approval_summary.pending} />
+            <StatusRow label="Artifacts" value={missionDetail.artifact_summary.total_artifacts} />
+            <div style={{ height: 12 }} />
+            <div style={{ color: "#94a3b8", fontSize: 12 }}>{missionDetail.mission.summary}</div>
+            <div style={{ height: 12 }} />
+            {(missionDetail.timeline_summary?.recent ?? []).slice(0, 5).map((item: any, index: number) => (
+              <div key={`${item.occurred_at}-${index}`} style={{ color: "#64748b", fontSize: 12, marginTop: 4 }}>{item.title} · {item.occurred_at}</div>
+            ))}
+          </>}
+        </Panel>
+        <Panel title="Run Detail">
+          {!runDetail ? <div>Select run.</div> : <>
+            <StatusRow label={runDetail.run.run_id} value={runDetail.run.status} />
+            <StatusRow label="Current step" value={runDetail.run.current_step_id ?? "none"} />
+            <StatusRow label="Pending approvals" value={runDetail.approval_summary.pending} />
+            <StatusRow label="Artifacts" value={runDetail.artifact_summary.total_artifacts} />
+            <div style={{ height: 12 }} />
+            {(runDetail.steps ?? []).map((step: any) => (
+              <div key={step.step_id} style={{ borderTop: "1px solid #1e293b", paddingTop: 8, marginTop: 8 }}>
+                <StatusRow label={`${step.step_id} (${step.kind})`} value={step.state} />
+                <div style={{ color: "#64748b", fontSize: 12, marginTop: 4 }}>Artifacts: {step.artifacts_count}{step.latest_artifact_uri ? ` · ${step.latest_artifact_uri}` : ""}</div>
+              </div>
+            ))}
+          </>}
+        </Panel>
+      </div>
     </div>
   );
 }
@@ -403,30 +437,99 @@ function Code() {
 }
 
 function Audit() {
-  const { data: auditView } = useSWR(`${ORCH}/api/read-models/audit`, fetcher, { refreshInterval: 3000 });
-  const { data: approvalHistory } = useSWR(`${ORCH}/api/read-models/approval-history`, fetcher, { refreshInterval: 3000 });
+  const [missionFilter, setMissionFilter] = useState("");
+  const [runFilter, setRunFilter] = useState("");
+  const [stepFilter, setStepFilter] = useState("");
+  const [actorFilter, setActorFilter] = useState("");
+  const [outcomeFilter, setOutcomeFilter] = useState("");
+  const [approvalSort, setApprovalSort] = useState("newest");
+  const [timelineKind, setTimelineKind] = useState("");
+  const [eventTypeFilter, setEventTypeFilter] = useState("");
+  const [timelineSort, setTimelineSort] = useState("newest");
+
+  const auditUrl = withQuery(`${ORCH}/api/read-models/audit`, {
+    mission_id: missionFilter || undefined,
+    run_id: runFilter || undefined,
+    step_id: stepFilter || undefined,
+    kind: timelineKind || undefined,
+    event_type: eventTypeFilter || undefined,
+    sort: timelineSort
+  });
+  const approvalHistoryUrl = withQuery(`${ORCH}/api/read-models/approval-history`, {
+    mission_id: missionFilter || undefined,
+    run_id: runFilter || undefined,
+    step_id: stepFilter || undefined,
+    actor: actorFilter || undefined,
+    outcome: outcomeFilter || undefined,
+    sort: approvalSort
+  });
+
+  const { data: auditView } = useSWR(auditUrl, fetcher, { refreshInterval: 3000 });
+  const { data: approvalHistory } = useSWR(approvalHistoryUrl, fetcher, { refreshInterval: 3000 });
   const { data: evals } = useSWR(`${EVAL}/api/evals`, fetcher, { refreshInterval: 4000 });
   return (
-    <div style={{ padding: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-      <Panel title="Run Timeline">
-        {(auditView?.timeline ?? []).length === 0 ? <div>No timeline yet.</div> : (auditView?.timeline ?? []).map((item: any, index: number) => (
-          <div key={`${item.occurred_at}-${index}`} style={{ padding: 12, borderBottom: "1px solid #1e293b" }}>
-            <StatusRow label={item.title} value={item.kind} />
-            <div style={{ color: "#64748b", fontSize: 12, marginTop: 6 }}>{item.occurred_at}</div>
-            <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 4 }}>{[item.mission_id, item.run_id, item.step_id].filter(Boolean).join(" · ")}</div>
-          </div>
-        ))}
+    <div style={{ padding: 16, display: "grid", gap: 16 }}>
+      <Panel title="Filters">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
+          <input value={missionFilter} onChange={(event) => setMissionFilter(event.target.value)} placeholder="mission" style={{ borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+          <input value={runFilter} onChange={(event) => setRunFilter(event.target.value)} placeholder="run" style={{ borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+          <input value={stepFilter} onChange={(event) => setStepFilter(event.target.value)} placeholder="step" style={{ borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+          <input value={actorFilter} onChange={(event) => setActorFilter(event.target.value)} placeholder="actor" style={{ borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+          <select value={outcomeFilter} onChange={(event) => setOutcomeFilter(event.target.value)} style={{ borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }}>
+            <option value="">all outcomes</option>
+            <option value="approved">approved</option>
+            <option value="rejected">rejected</option>
+            <option value="pending">pending</option>
+          </select>
+          <select value={approvalSort} onChange={(event) => setApprovalSort(event.target.value)} style={{ borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }}>
+            <option value="newest">approval newest</option>
+            <option value="oldest">approval oldest</option>
+            <option value="rejected_first">rejected first</option>
+            <option value="mission">by mission</option>
+            <option value="run">by run</option>
+          </select>
+          <select value={timelineKind} onChange={(event) => setTimelineKind(event.target.value)} style={{ borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }}>
+            <option value="">all kinds</option>
+            <option value="approval">approval</option>
+            <option value="step">step</option>
+            <option value="run">run</option>
+            <option value="mission">mission</option>
+            <option value="deployment">deployment</option>
+          </select>
+          <select value={timelineSort} onChange={(event) => setTimelineSort(event.target.value)} style={{ borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }}>
+            <option value="newest">timeline newest</option>
+            <option value="oldest">timeline oldest</option>
+            <option value="mission">by mission</option>
+            <option value="run">by run</option>
+          </select>
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <input value={eventTypeFilter} onChange={(event) => setEventTypeFilter(event.target.value)} placeholder="event type" style={{ flex: 1, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+          <Button onClick={() => { setMissionFilter(""); setRunFilter(""); setStepFilter(""); setActorFilter(""); setOutcomeFilter(""); setApprovalSort("newest"); setTimelineKind(""); setEventTypeFilter(""); setTimelineSort("newest"); }}>Clear</Button>
+        </div>
       </Panel>
-      <Panel title="Approval History + Eval">
-        {(approvalHistory?.approvals ?? []).length === 0 ? <div>No approval history yet.</div> : (approvalHistory?.approvals ?? []).map((approval: any) => (
-          <div key={approval.approval_id} style={{ padding: 12, borderBottom: "1px solid #1e293b" }}>
-            <StatusRow label={`${approval.step_id}`} value={approval.outcome} />
-            <div style={{ color: "#94a3b8", fontSize: 13, marginTop: 6 }}>{approval.reason}</div>
-            <div style={{ color: "#64748b", fontSize: 12, marginTop: 4 }}>Actor: {approval.actor} · Resolved: {approval.resolved_at}</div>
-          </div>
-        ))}
-        {evals?.summary && <pre style={{ whiteSpace: "pre-wrap", marginTop: 12 }}>{JSON.stringify(evals.summary, null, 2)}</pre>}
-      </Panel>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <Panel title="Run Timeline">
+          {(auditView?.timeline ?? []).length === 0 ? <div>No timeline yet.</div> : (auditView?.timeline ?? []).map((item: any, index: number) => (
+            <div key={`${item.occurred_at}-${index}`} style={{ padding: 12, borderBottom: "1px solid #1e293b" }}>
+              <StatusRow label={item.title} value={item.kind} />
+              <div style={{ color: "#64748b", fontSize: 12, marginTop: 6 }}>{item.occurred_at}</div>
+              <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 4 }}>{[item.mission_id, item.run_id, item.step_id].filter(Boolean).join(" · ")}</div>
+            </div>
+          ))}
+        </Panel>
+        <Panel title="Approval History + Eval">
+          {(approvalHistory?.approvals ?? []).length === 0 ? <div>No approval history yet.</div> : (approvalHistory?.approvals ?? []).map((approval: any) => (
+            <div key={approval.approval_id} style={{ padding: 12, borderBottom: "1px solid #1e293b" }}>
+              <StatusRow label={`${approval.step_id}`} value={approval.outcome} />
+              <div style={{ color: "#94a3b8", fontSize: 13, marginTop: 6 }}>{approval.reason}</div>
+              <div style={{ color: "#64748b", fontSize: 12, marginTop: 4 }}>Actor: {approval.actor} · Resolved: {approval.resolved_at}</div>
+              <div style={{ color: "#64748b", fontSize: 12, marginTop: 4 }}>{[approval.mission_id, approval.run_id].filter(Boolean).join(" · ")}</div>
+            </div>
+          ))}
+          {evals?.summary && <pre style={{ whiteSpace: "pre-wrap", marginTop: 12 }}>{JSON.stringify(evals.summary, null, 2)}</pre>}
+        </Panel>
+      </div>
     </div>
   );
 }

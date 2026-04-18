@@ -225,24 +225,87 @@ function toApprovalOperatorView(approval: Approval) {
   };
 }
 
-function buildApprovalsReadModel() {
-  const operatorApprovals = state.approvals.map(toApprovalOperatorView);
+function inDateRange(value: string | undefined, from?: string, to?: string) {
+  if (!value) return false;
+  if (from && value < from) return false;
+  if (to && value > to) return false;
+  return true;
+}
+
+function sortApprovalViews<T extends { outcome: string; requested_at?: string; resolved_at?: string; mission_id?: string; run_id?: string }>(items: T[], sort = "newest") {
+  return [...items].sort((a, b) => {
+    if (sort === "oldest") return (a.resolved_at ?? a.requested_at ?? "").localeCompare(b.resolved_at ?? b.requested_at ?? "");
+    if (sort === "pending_first") {
+      const rank = (value: string) => value === "pending" ? 0 : 1;
+      const diff = rank(a.outcome) - rank(b.outcome);
+      if (diff !== 0) return diff;
+    }
+    if (sort === "rejected_first") {
+      const rank = (value: string) => value === "rejected" ? 0 : value === "pending" ? 1 : 2;
+      const diff = rank(a.outcome) - rank(b.outcome);
+      if (diff !== 0) return diff;
+    }
+    if (sort === "mission") {
+      const diff = (a.mission_id ?? "").localeCompare(b.mission_id ?? "");
+      if (diff !== 0) return diff;
+    }
+    if (sort === "run") {
+      const diff = (a.run_id ?? "").localeCompare(b.run_id ?? "");
+      if (diff !== 0) return diff;
+    }
+    return (b.resolved_at ?? b.requested_at ?? "").localeCompare(a.resolved_at ?? a.requested_at ?? "");
+  });
+}
+
+function buildApprovalsReadModel(query: Record<string, string | undefined> = {}) {
+  const filtered = state.approvals
+    .map(toApprovalOperatorView)
+    .filter((approval) => (!query.mission_id || approval.mission_id === query.mission_id)
+      && (!query.run_id || approval.run_id === query.run_id)
+      && (!query.step_id || approval.step_id === query.step_id)
+      && (!query.actor || approval.actor === query.actor)
+      && (!query.outcome || approval.outcome === query.outcome)
+      && inDateRange(approval.requested_at, query.from, query.to));
+
   return {
-    pending_approvals: operatorApprovals.filter((approval) => approval.outcome === "pending"),
-    history: operatorApprovals.filter((approval) => approval.outcome !== "pending").sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? ""))
+    pending_approvals: sortApprovalViews(filtered.filter((approval) => approval.outcome === "pending"), query.sort),
+    history: sortApprovalViews(filtered.filter((approval) => approval.outcome !== "pending"), query.sort)
   };
 }
 
-function buildApprovalHistoryReadModel() {
+function buildApprovalHistoryReadModel(query: Record<string, string | undefined> = {}) {
   return {
-    approvals: state.approvals
-      .filter((approval) => approval.status !== "pending")
-      .map(toApprovalOperatorView)
-      .sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? ""))
+    approvals: sortApprovalViews(
+      state.approvals
+        .filter((approval) => approval.status !== "pending")
+        .map(toApprovalOperatorView)
+        .filter((approval) => (!query.mission_id || approval.mission_id === query.mission_id)
+          && (!query.run_id || approval.run_id === query.run_id)
+          && (!query.step_id || approval.step_id === query.step_id)
+          && (!query.actor || approval.actor === query.actor)
+          && (!query.outcome || approval.outcome === query.outcome)
+          && inDateRange(approval.resolved_at ?? approval.requested_at, query.from, query.to)),
+      query.sort
+    )
   };
 }
 
-function buildAuditReadModel() {
+function sortTimeline<T extends { occurred_at: string; mission_id?: string; run_id?: string }>(items: T[], sort = "newest") {
+  return [...items].sort((a, b) => {
+    if (sort === "oldest") return a.occurred_at.localeCompare(b.occurred_at);
+    if (sort === "mission") {
+      const diff = (a.mission_id ?? "").localeCompare(b.mission_id ?? "");
+      if (diff !== 0) return diff;
+    }
+    if (sort === "run") {
+      const diff = (a.run_id ?? "").localeCompare(b.run_id ?? "");
+      if (diff !== 0) return diff;
+    }
+    return b.occurred_at.localeCompare(a.occurred_at);
+  });
+}
+
+function buildAuditReadModel(query: Record<string, string | undefined> = {}) {
   const titleMap: Record<string, { kind: string; title: string }> = {
     "approval.requested": { kind: "approval", title: "Approval requested" },
     "approval.resolved": { kind: "approval", title: "Approval resolved" },
@@ -256,18 +319,117 @@ function buildAuditReadModel() {
     "rollback.triggered": { kind: "deployment", title: "Rollback triggered" }
   };
 
+  const timeline = state.events.map((event: any) => {
+    const meta = titleMap[event.type] ?? { kind: "event", title: String(event.type ?? "Event") };
+    return {
+      kind: meta.kind,
+      title: meta.title,
+      event_type: event.type,
+      occurred_at: event.ts ?? event.timestamp ?? "",
+      mission_id: event.mission_id,
+      run_id: event.run_id,
+      step_id: event.step_id
+    };
+  }).filter((event) => (!query.mission_id || event.mission_id === query.mission_id)
+    && (!query.run_id || event.run_id === query.run_id)
+    && (!query.step_id || event.step_id === query.step_id)
+    && (!query.kind || event.kind === query.kind)
+    && (!query.event_type || event.event_type === query.event_type)
+    && inDateRange(event.occurred_at, query.from, query.to));
+
   return {
-    timeline: state.events.map((event: any) => {
-      const meta = titleMap[event.type] ?? { kind: "event", title: String(event.type ?? "Event") };
-      return {
-        kind: meta.kind,
-        title: meta.title,
-        occurred_at: event.ts ?? event.timestamp ?? "",
-        mission_id: event.mission_id,
-        run_id: event.run_id,
-        step_id: event.step_id
-      };
-    }).sort((a, b) => b.occurred_at.localeCompare(a.occurred_at))
+    timeline: sortTimeline(timeline, query.sort)
+  };
+}
+
+function buildMissionDetailReadModel(missionId: string) {
+  const mission = state.missions.find((item) => item.mission_id === missionId);
+  if (!mission) return null;
+
+  const runs = state.runs.filter((run) => run.mission_id === missionId);
+  const approvals = state.approvals.filter((approval) => approval.mission_id === missionId);
+  const timeline = buildAuditReadModel({ mission_id: missionId }).timeline;
+  const totalArtifacts = runs.reduce((sum, run) => sum + run.steps.reduce((stepSum, step) => stepSum + step.artifacts.length, 0), 0);
+  const activeRun = mission.active_run_id ? runs.find((run) => run.run_id === mission.active_run_id) : undefined;
+
+  return {
+    mission,
+    active_run: activeRun ? {
+      run_id: activeRun.run_id,
+      workflow_id: activeRun.workflow_id,
+      status: activeRun.status,
+      current_step_id: activeRun.current_step_id,
+      summary: activeRun.summary
+    } : null,
+    runs: runs.map((run) => ({
+      run_id: run.run_id,
+      workflow_id: run.workflow_id,
+      status: run.status,
+      current_step_id: run.current_step_id,
+      summary: run.summary
+    })),
+    approval_summary: {
+      pending: approvals.filter((approval) => approval.status === "pending").length,
+      approved: approvals.filter((approval) => approval.status === "approved").length,
+      rejected: approvals.filter((approval) => approval.status === "rejected").length
+    },
+    artifact_summary: {
+      total_artifacts: totalArtifacts
+    },
+    timeline_summary: {
+      total_events: timeline.length,
+      recent: timeline.slice(0, 10)
+    }
+  };
+}
+
+function buildRunDetailReadModel(runId: string) {
+  const run = state.runs.find((item) => item.run_id === runId);
+  if (!run) return null;
+
+  const mission = state.missions.find((item) => item.mission_id === run.mission_id);
+  const approvals = state.approvals.filter((approval) => approval.run_id === runId);
+  const timeline = buildAuditReadModel({ run_id: runId }).timeline;
+  const totalArtifacts = run.steps.reduce((sum, step) => sum + step.artifacts.length, 0);
+
+  return {
+    run: {
+      run_id: run.run_id,
+      mission_id: run.mission_id,
+      workflow_id: run.workflow_id,
+      status: run.status,
+      current_step_id: run.current_step_id,
+      summary: run.summary
+    },
+    mission: mission ? {
+      mission_id: mission.mission_id,
+      title: mission.title,
+      status: mission.status,
+      summary: mission.summary
+    } : null,
+    steps: run.steps.map((step) => ({
+      step_id: step.step_id,
+      title: step.title,
+      kind: step.kind,
+      state: step.state,
+      risk: step.risk,
+      blocked_reason: step.blocked_reason,
+      notes: step.notes,
+      artifacts_count: step.artifacts.length,
+      latest_artifact_uri: step.artifacts[step.artifacts.length - 1]?.uri
+    })),
+    approval_summary: {
+      pending: approvals.filter((approval) => approval.status === "pending").length,
+      approved: approvals.filter((approval) => approval.status === "approved").length,
+      rejected: approvals.filter((approval) => approval.status === "rejected").length
+    },
+    artifact_summary: {
+      total_artifacts: totalArtifacts
+    },
+    timeline_summary: {
+      total_events: timeline.length,
+      recent: timeline.slice(0, 10)
+    }
   };
 }
 
@@ -398,9 +560,21 @@ app.get("/api/events", async (c) => { await ensureLoaded(); return c.json({ even
 app.get("/api/audit", async (c) => { await ensureLoaded(); return c.json({ audit: state.audit }); });
 app.get("/api/read-models/overview", async (c) => { await ensureLoaded(); return c.json(buildOverviewReadModel()); });
 app.get("/api/read-models/missions", async (c) => { await ensureLoaded(); return c.json(buildMissionsReadModel()); });
-app.get("/api/read-models/approvals", async (c) => { await ensureLoaded(); return c.json(buildApprovalsReadModel()); });
-app.get("/api/read-models/approval-history", async (c) => { await ensureLoaded(); return c.json(buildApprovalHistoryReadModel()); });
-app.get("/api/read-models/audit", async (c) => { await ensureLoaded(); return c.json(buildAuditReadModel()); });
+app.get("/api/read-models/missions/:id", async (c) => {
+  await ensureLoaded();
+  const payload = buildMissionDetailReadModel(c.req.param("id"));
+  if (!payload) return c.json({ error: "mission not found" }, 404);
+  return c.json(payload);
+});
+app.get("/api/read-models/runs/:id", async (c) => {
+  await ensureLoaded();
+  const payload = buildRunDetailReadModel(c.req.param("id"));
+  if (!payload) return c.json({ error: "run not found" }, 404);
+  return c.json(payload);
+});
+app.get("/api/read-models/approvals", async (c) => { await ensureLoaded(); return c.json(buildApprovalsReadModel(c.req.query())); });
+app.get("/api/read-models/approval-history", async (c) => { await ensureLoaded(); return c.json(buildApprovalHistoryReadModel(c.req.query())); });
+app.get("/api/read-models/audit", async (c) => { await ensureLoaded(); return c.json(buildAuditReadModel(c.req.query())); });
 
 app.post("/api/missions", async (c) => {
   const authError = requireOperator(c);
