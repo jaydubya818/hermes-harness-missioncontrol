@@ -6,6 +6,7 @@ import { attachArtifact, createWorkflowRun, getCurrentStep, startCurrentStep, ad
 import { evaluateStepPolicy } from "@hermes-harness-with-missioncontrol/policy-engine";
 import { loadJsonFile, saveJsonFile } from "@hermes-harness-with-missioncontrol/state-store";
 import { makeId, type HarnessEvent } from "@hermes-harness-with-missioncontrol/shared-types";
+import { scoreRun } from "@hermes-harness-with-missioncontrol/eval-core";
 
 const app = new Hono();
 const stateFile = process.env.ORCHESTRATOR_STATE_FILE ?? resolve(process.cwd(), "../../data/orchestrator-state.json");
@@ -109,20 +110,25 @@ function getStepArtifact(run: WorkflowRun, stepId: string, type: string): Workfl
   return run.steps.find((step) => step.id === stepId)?.artifacts.find((artifact) => artifact.type === type);
 }
 
-async function recordEval(run: WorkflowRun, approvalCount: number) {
+async function recordEval(run: WorkflowRun, approvals: typeof state.approvals): Promise<void> {
   try {
+    const scored = scoreRun({ run, approvals });
     await fetch(`${evalApi}/api/evals`, {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({
-        mission_id: run.mission_id,
-        run_id: run.run_id,
-        outcome: run.status === "completed" ? "success" : run.status === "failed" ? "failure" : "partial",
-        cost_usd: run.steps.length * 0.12,
-        approval_count: approvalCount,
-        artifact_count: run.steps.reduce((sum, step) => sum + step.artifacts.length, 0),
-        created_at: new Date().toISOString()
-      })
+        mission_id:       run.mission_id,
+        run_id:           run.run_id,
+        outcome:          scored.outcome,
+        cost_usd:         scored.cost_usd,
+        approval_count:   scored.approval_count,
+        artifact_count:   scored.artifact_count,
+        duration_ms:      scored.duration_ms,
+        confidence:       scored.confidence,
+        efficiency_score: scored.efficiency_score,
+        risk_score:       scored.risk_score,
+        created_at:       new Date().toISOString(),
+      }),
     });
   } catch (err) {
     console.error("[orchestrator] recordEval failed (eval-api unavailable):", err instanceof Error ? err.message : err);
@@ -197,7 +203,7 @@ async function failRun(run: WorkflowRun, stepId: string, summary: string, execut
     mission.approval_id = undefined;
   }
   recordEvent({ type: "step.failed", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: stepId as `step_${string}`, payload: { summary, execution } as any });
-  await recordEval(run, state.approvals.filter((item) => item.run_id === run.run_id && item.status === "approved").length);
+  await recordEval(run, state.approvals.filter((item) => item.run_id === run.run_id));
   await cleanupExecutionWorkspace(run, mission, execution ?? null);
   await persist();
 }
@@ -328,7 +334,7 @@ app.post("/api/runs/:id/execute-current", async (c) => {
     startCurrentStep(run);
     recordEvent({ type: "step.started", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: next.id as `step_${string}`, payload: next as any });
   } else {
-    await recordEval(run, state.approvals.filter((item) => item.run_id === run.run_id && item.status === "approved").length);
+    await recordEval(run, state.approvals.filter((item) => item.run_id === run.run_id));
     await cleanupExecutionWorkspace(run, mission, execution);
   }
   await persist();
@@ -388,7 +394,7 @@ app.post("/api/runs/:id/steps/:stepId/complete", async (c) => {
     startCurrentStep(run);
     recordEvent({ type: "step.started", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: next.id as `step_${string}`, payload: next as any });
   } else {
-    await recordEval(run, state.approvals.filter((item) => item.run_id === run.run_id && item.status === "approved").length);
+    await recordEval(run, state.approvals.filter((item) => item.run_id === run.run_id));
     await cleanupExecutionWorkspace(run, mission, null);
   }
   await persist();
@@ -420,7 +426,7 @@ app.post("/api/approvals/:id/respond", async (c) => {
     }
     await writebackStep(run, approval.step_id, "failure", `Approval rejected for ${approval.step_id}`);
     recordEvent({ type: "approval.rejected", ts: new Date().toISOString(), mission_id: mission.mission_id, run_id: run.run_id, step_id: approval.step_id as `step_${string}`, payload: approval as any });
-    await recordEval(run, state.approvals.filter((item) => item.run_id === run.run_id && item.status === "approved").length);
+    await recordEval(run, state.approvals.filter((item) => item.run_id === run.run_id));
     await cleanupExecutionWorkspace(run, mission, null);
     await persist();
     return c.json({ approval, run });
@@ -440,7 +446,7 @@ app.post("/api/approvals/:id/respond", async (c) => {
     startCurrentStep(run);
     recordEvent({ type: "step.started", ts: new Date().toISOString(), mission_id: mission.mission_id, run_id: run.run_id, step_id: next.id as `step_${string}`, payload: next as any });
   } else {
-    await recordEval(run, state.approvals.filter((item) => item.run_id === run.run_id && item.status === "approved").length);
+    await recordEval(run, state.approvals.filter((item) => item.run_id === run.run_id));
     await cleanupExecutionWorkspace(run, mission, null);
   }
   await persist();
