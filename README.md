@@ -126,6 +126,7 @@ The Hermes agent (`~/.claude/agents/hermes.md`) is wired to two live knowledge s
 | `config/agents/agent_demo.yaml` | Harness agent capability spec (read/write/forbidden paths) |
 
 ## Architecture Docs
+- `docs/architecture/2026-04-18-hermes-missioncontrol-approved-target-architecture.md` ← approved target state
 - `docs/architecture/2026-04-10-hermes-harness-with-missioncontrol-v1-system-architecture.md`
 - `docs/architecture/2026-04-10-hermes-harness-with-missioncontrol-repo-service-layout.md`
 - `docs/architecture/2026-04-10-hermes-harness-with-missioncontrol-integration-contract.md`
