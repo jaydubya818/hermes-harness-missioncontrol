@@ -57,7 +57,7 @@ function stepCost(step: WorkflowRun["steps"][number]): number {
   return (stepDurationMs(step) / 60_000) * rate;
 }
 
-/** Extract confidence from step notes ("confidence: 0.85") or estimate from status. */
+/** Extract confidence from step notes ("confidence: 0.85") or estimate from state. */
 function stepConfidence(step: WorkflowRun["steps"][number]): number {
   if (step.notes) {
     const match = step.notes.match(/confidence[:\s]+([0-9.]+)/i);
@@ -66,7 +66,7 @@ function stepConfidence(step: WorkflowRun["steps"][number]): number {
       if (!Number.isNaN(parsed) && parsed >= 0 && parsed <= 1) return parsed;
     }
   }
-  switch (step.status) {
+  switch (step.state) {
     case "completed": return 0.85;
     case "failed":    return 0.10;
     default:          return 0.50;
@@ -120,7 +120,7 @@ export function scoreRun(inputs: ScoreInputs): ScoredEval {
   );
 
   // --- efficiency: step success rate, penalised by rejection ratio ---
-  const completedSteps = run.steps.filter((s) => s.status === "completed").length;
+  const completedSteps = run.steps.filter((s) => s.state === "completed").length;
   const stepSuccessRate =
     run.steps.length === 0 ? 0 : completedSteps / run.steps.length;
   const rejectionPenalty =

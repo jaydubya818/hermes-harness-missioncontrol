@@ -32,6 +32,7 @@ class StepState(str, Enum):
     PENDING = 'pending'
     READY = 'ready'
     RUNNING = 'running'
+    BLOCKED = 'blocked'
     AWAITING_APPROVAL = 'awaiting_approval'
     PAUSED = 'paused'
     FAILED = 'failed'
@@ -80,6 +81,14 @@ class Step(BaseModel):
     title: str
     state: StepState
     approval_mode: ApprovalMode
+    risk: str | None = None
+    execution_id: str | None = None
+    approval_id: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    blocked_reason: str | None = None
+    notes: str | None = None
+    artifacts: list[ArtifactRef]
 
 class ArtifactRef(BaseModel):
     model_config = ConfigDict(extra='forbid')

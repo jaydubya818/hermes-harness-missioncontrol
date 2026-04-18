@@ -32,6 +32,14 @@ export interface Step {
   title: string;
   state: StepState;
   approval_mode: ApprovalMode;
+  risk?: "low" | "medium" | "high";
+  execution_id?: string;
+  approval_id?: string;
+  started_at?: string;
+  completed_at?: string;
+  blocked_reason?: string;
+  notes?: string;
+  artifacts: ArtifactRef[];
 }
 
 export interface ArtifactRef {

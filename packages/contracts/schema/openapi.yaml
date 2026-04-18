@@ -16,7 +16,7 @@ components:
       enum: [plan, implement, test, review, deploy]
     StepState:
       type: string
-      enum: [pending, ready, running, awaiting_approval, paused, failed, completed, cancelled]
+      enum: [pending, ready, running, blocked, awaiting_approval, paused, failed, completed, cancelled]
     ApprovalMode:
       type: string
       enum: [never, on_policy_trigger, always]
@@ -54,7 +54,7 @@ components:
     Step:
       type: object
       additionalProperties: false
-      required: [step_id, kind, title, state, approval_mode]
+      required: [step_id, kind, title, state, approval_mode, artifacts]
       properties:
         step_id: { type: string }
         kind:
@@ -64,6 +64,19 @@ components:
           $ref: '#/components/schemas/StepState'
         approval_mode:
           $ref: '#/components/schemas/ApprovalMode'
+        risk:
+          type: string
+          enum: [low, medium, high]
+        execution_id: { type: string }
+        approval_id: { type: string }
+        started_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+        blocked_reason: { type: string }
+        notes: { type: string }
+        artifacts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtifactRef'
     ArtifactRef:
       type: object
       additionalProperties: false

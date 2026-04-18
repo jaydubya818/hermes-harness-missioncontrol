@@ -9,7 +9,7 @@ import type { WorkflowRun } from "@hermes-harness-with-missioncontrol/workflow-e
 
 function makeRun(overrides: Partial<WorkflowRun> = {}): WorkflowRun {
   const now = new Date("2025-01-01T10:00:00Z");
-  const later = new Date("2025-01-01T10:05:00Z"); // 5 min later
+  const later = new Date("2025-01-01T10:05:00Z");
   return {
     run_id: "run_test",
     mission_id: "mis_test",
@@ -20,37 +20,42 @@ function makeRun(overrides: Partial<WorkflowRun> = {}): WorkflowRun {
     updated_at: later.toISOString(),
     steps: [
       {
-        id: "plan",     title: "Plan fix",         kind: "plan",      risk: "low",
-        status: "completed",
-        started_at:   new Date("2025-01-01T10:00:00Z").toISOString(),
+        step_id: "plan", title: "Plan fix", kind: "plan", risk: "low",
+        approval_mode: "on_policy_trigger",
+        state: "completed",
+        started_at: new Date("2025-01-01T10:00:00Z").toISOString(),
         completed_at: new Date("2025-01-01T10:01:00Z").toISOString(),
         artifacts: [],
       },
       {
-        id: "implement", title: "Implement patch",  kind: "implement", risk: "medium",
-        status: "completed",
-        started_at:   new Date("2025-01-01T10:01:00Z").toISOString(),
+        step_id: "implement", title: "Implement patch", kind: "implement", risk: "medium",
+        approval_mode: "on_policy_trigger",
+        state: "completed",
+        started_at: new Date("2025-01-01T10:01:00Z").toISOString(),
         completed_at: new Date("2025-01-01T10:03:00Z").toISOString(),
-        artifacts: [{ artifact_id: "a1", type: "diff", uri: "patch.diff" }],
+        artifacts: [{ artifact_id: "a1", kind: "diff", label: "diff", type: "diff", uri: "patch.diff" }],
       },
       {
-        id: "test",     title: "Run tests",         kind: "test",      risk: "low",
-        status: "completed",
-        started_at:   new Date("2025-01-01T10:03:00Z").toISOString(),
+        step_id: "test", title: "Run tests", kind: "test", risk: "low",
+        approval_mode: "on_policy_trigger",
+        state: "completed",
+        started_at: new Date("2025-01-01T10:03:00Z").toISOString(),
         completed_at: new Date("2025-01-01T10:04:00Z").toISOString(),
         artifacts: [],
       },
       {
-        id: "review",   title: "Review diff",       kind: "review",    risk: "medium",
-        status: "completed",
-        started_at:   new Date("2025-01-01T10:04:00Z").toISOString(),
+        step_id: "review", title: "Review diff", kind: "review", risk: "medium",
+        approval_mode: "on_policy_trigger",
+        state: "completed",
+        started_at: new Date("2025-01-01T10:04:00Z").toISOString(),
         completed_at: new Date("2025-01-01T10:04:30Z").toISOString(),
         artifacts: [],
       },
       {
-        id: "deploy",   title: "Canary deploy",     kind: "deploy",    risk: "high",
-        status: "completed",
-        started_at:   new Date("2025-01-01T10:04:30Z").toISOString(),
+        step_id: "deploy", title: "Canary deploy", kind: "deploy", risk: "high",
+        approval_mode: "on_policy_trigger",
+        state: "completed",
+        started_at: new Date("2025-01-01T10:04:30Z").toISOString(),
         completed_at: new Date("2025-01-01T10:05:00Z").toISOString(),
         artifacts: [],
       },

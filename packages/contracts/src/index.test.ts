@@ -83,6 +83,10 @@ describe("contracts package exports", () => {
       title: "Implement package",
       state: StepState.Running,
       approval_mode: ApprovalMode.OnPolicyTrigger,
+      risk: "medium",
+      execution_id: "exec_123",
+      artifacts: [artifact],
+      started_at: "2026-04-18T18:00:00Z",
     };
 
     const run: Run = {

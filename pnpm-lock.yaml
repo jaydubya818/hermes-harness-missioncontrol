@@ -179,6 +179,9 @@ importers:
 
   packages/workflow-engine:
     dependencies:
+      '@hermes-harness-with-missioncontrol/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@hermes-harness-with-missioncontrol/shared-types':
         specifier: workspace:*
         version: link:../shared-types

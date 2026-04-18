@@ -12,6 +12,7 @@ export const StepState = {
   Pending: "pending",
   Ready: "ready",
   Running: "running",
+  Blocked: "blocked",
   AwaitingApproval: "awaiting_approval",
   Paused: "paused",
   Failed: "failed",

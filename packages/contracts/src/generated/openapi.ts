@@ -14,7 +14,7 @@ export interface components {
         /** @enum {string} */
         StepKind: "plan" | "implement" | "test" | "review" | "deploy";
         /** @enum {string} */
-        StepState: "pending" | "ready" | "running" | "awaiting_approval" | "paused" | "failed" | "completed" | "cancelled";
+        StepState: "pending" | "ready" | "running" | "blocked" | "awaiting_approval" | "paused" | "failed" | "completed" | "cancelled";
         /** @enum {string} */
         ApprovalMode: "never" | "on_policy_trigger" | "always";
         /** @enum {string} */
@@ -48,6 +48,17 @@ export interface components {
             title: string;
             state: components["schemas"]["StepState"];
             approval_mode: components["schemas"]["ApprovalMode"];
+            /** @enum {string} */
+            risk?: "low" | "medium" | "high";
+            execution_id?: string;
+            approval_id?: string;
+            /** Format: date-time */
+            started_at?: string;
+            /** Format: date-time */
+            completed_at?: string;
+            blocked_reason?: string;
+            notes?: string;
+            artifacts: components["schemas"]["ArtifactRef"][];
         };
         ArtifactRef: {
             artifact_id: string;

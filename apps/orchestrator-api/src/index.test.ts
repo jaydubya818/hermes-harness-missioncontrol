@@ -165,7 +165,7 @@ describe("orchestrator-api", () => {
 
     expect(execute.status).toBe(400);
     expect(payload.run.status).toBe("failed");
-    expect(payload.run.steps[0]).toMatchObject({ id: "plan", notes: "tests failed" });
+    expect(payload.run.steps[0]).toMatchObject({ step_id: "plan", notes: "tests failed", state: "failed" });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/api/cleanup-run"),
       expect.any(Object)
@@ -196,11 +196,11 @@ describe("orchestrator-api", () => {
         created_at: "2026-04-11T00:00:00.000Z",
         updated_at: "2026-04-11T00:00:00.000Z",
         steps: [
-          { id: "plan", title: "Plan fix", kind: "plan", risk: "low", status: "completed", artifacts: [], completed_at: "2026-04-11T00:00:00.000Z" },
-          { id: "implement", title: "Implement patch", kind: "implement", risk: "medium", status: "completed", artifacts: [], completed_at: "2026-04-11T00:00:00.000Z" },
-          { id: "test", title: "Run tests", kind: "test", risk: "low", status: "running", artifacts: [], started_at: "2026-04-11T00:00:00.000Z" },
-          { id: "review", title: "Review diff", kind: "review", risk: "medium", status: "pending", artifacts: [] },
-          { id: "deploy", title: "Canary deploy", kind: "deploy", risk: "high", status: "pending", artifacts: [] }
+          { step_id: "plan", title: "Plan fix", kind: "plan", risk: "low", approval_mode: "on_policy_trigger", state: "completed", artifacts: [], completed_at: "2026-04-11T00:00:00.000Z" },
+          { step_id: "implement", title: "Implement patch", kind: "implement", risk: "medium", approval_mode: "on_policy_trigger", state: "completed", artifacts: [], completed_at: "2026-04-11T00:00:00.000Z" },
+          { step_id: "test", title: "Run tests", kind: "test", risk: "low", approval_mode: "on_policy_trigger", state: "awaiting_approval", approval_id: "approval_demo", execution_id: "exec_demo", artifacts: [], started_at: "2026-04-11T00:00:00.000Z" },
+          { step_id: "review", title: "Review diff", kind: "review", risk: "medium", approval_mode: "on_policy_trigger", state: "pending", artifacts: [] },
+          { step_id: "deploy", title: "Canary deploy", kind: "deploy", risk: "high", approval_mode: "on_policy_trigger", state: "pending", artifacts: [] }
         ]
       }],
       approvals: [{
