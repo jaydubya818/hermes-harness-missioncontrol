@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { createWorkflowRun, startCurrentStep, advanceRun, markCurrentStepAwaitingApproval, markCurrentStepCompleted } from "./index.js";
+import {
+  createWorkflowRun,
+  startCurrentStep,
+  advanceRun,
+  markCurrentStepAwaitingApproval,
+  markCurrentStepCompleted,
+  pauseCurrentStep,
+  resumeCurrentStep,
+  retryCurrentStep,
+  cancelCurrentStep,
+} from "./index.js";
 
 describe("workflow-engine", () => {
   it("creates contract-shaped steps and advances a workflow", () => {
@@ -47,6 +57,58 @@ describe("workflow-engine", () => {
       approval_id: "approval_demo",
       notes: "worker summary approved",
       blocked_reason: undefined
+    });
+  });
+
+  it("pauses and resumes current step without losing execution context", () => {
+    const run = createWorkflowRun("run_demo", "mis_demo", "bugfix");
+    startCurrentStep(run, "exec_demo");
+
+    pauseCurrentStep(run, "operator interrupt");
+    expect(run.status).toBe("paused");
+    expect(run.steps[0]).toMatchObject({
+      state: "paused",
+      execution_id: "exec_demo",
+      notes: "operator interrupt"
+    });
+
+    resumeCurrentStep(run, "resume after interrupt");
+    expect(run.status).toBe("running");
+    expect(run.steps[0]).toMatchObject({
+      state: "running",
+      execution_id: "exec_demo",
+      notes: "resume after interrupt"
+    });
+  });
+
+  it("retries current step by clearing terminal blockers and returning to running", () => {
+    const run = createWorkflowRun("run_demo", "mis_demo", "bugfix");
+    startCurrentStep(run, "exec_demo");
+    markCurrentStepAwaitingApproval(run, "approval_demo", "worker summary", "needs approval");
+
+    retryCurrentStep(run, "retry requested");
+
+    expect(run.status).toBe("running");
+    expect(run.approval_id).toBeUndefined();
+    expect(run.steps[0]).toMatchObject({
+      state: "running",
+      execution_id: "exec_demo",
+      approval_id: undefined,
+      blocked_reason: undefined,
+      notes: "retry requested"
+    });
+  });
+
+  it("cancels current step and run", () => {
+    const run = createWorkflowRun("run_demo", "mis_demo", "bugfix");
+    startCurrentStep(run, "exec_demo");
+
+    cancelCurrentStep(run, "operator cancelled");
+
+    expect(run.status).toBe("cancelled");
+    expect(run.steps[0]).toMatchObject({
+      state: "cancelled",
+      notes: "operator cancelled"
     });
   });
 });

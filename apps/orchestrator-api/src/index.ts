@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { resolve } from "node:path";
-import { attachArtifact, createWorkflowRun, getCurrentStep, startCurrentStep, advanceRun, markCurrentStepAwaitingApproval, markCurrentStepCompleted, markCurrentStepFailed, type WorkflowArtifact, type WorkflowRun } from "@hermes-harness-with-missioncontrol/workflow-engine";
+import { attachArtifact, createWorkflowRun, getCurrentStep, startCurrentStep, advanceRun, markCurrentStepAwaitingApproval, markCurrentStepCompleted, markCurrentStepFailed, pauseCurrentStep, resumeCurrentStep, retryCurrentStep, cancelCurrentStep, type WorkflowArtifact, type WorkflowRun } from "@hermes-harness-with-missioncontrol/workflow-engine";
 import { evaluateStepPolicy } from "@hermes-harness-with-missioncontrol/policy-engine";
 import { loadJsonFile, saveJsonFile } from "@hermes-harness-with-missioncontrol/state-store";
 import { makeId, type HarnessEvent } from "@hermes-harness-with-missioncontrol/shared-types";
@@ -640,6 +640,18 @@ async function cleanupExecutionWorkspace(run: WorkflowRun, mission?: Mission, ex
   }
 }
 
+function rejectPendingApprovalForCurrentStep(run: WorkflowRun, actor = "operator") {
+  const current = getCurrentStep(run);
+  if (!current?.approval_id) return undefined;
+  const approval = state.approvals.find((item) => item.approval_id === current.approval_id && item.status === "pending");
+  if (!approval) return undefined;
+  approval.status = "rejected";
+  approval.resolved_at = new Date().toISOString();
+  approval.resolved_by = actor;
+  recordEvent({ type: "approval.resolved", ts: approval.resolved_at, mission_id: approval.mission_id, run_id: approval.run_id, step_id: approval.step_id as `step_${string}`, payload: { approval_id: approval.approval_id, decision: "rejected", resolved_at: approval.resolved_at, resolved_by: actor, reason: approval.reason, step_id: approval.step_id } as any });
+  return approval;
+}
+
 async function failRun(run: WorkflowRun, stepId: string, summary: string, execution?: WorkerExecution | null) {
   const mission = getMissionForRun(run);
   markCurrentStepFailed(run, summary);
@@ -759,6 +771,8 @@ app.post("/api/runs/:id/execute-current", async (c) => {
   const run = state.runs.find((item) => item.run_id === c.req.param("id"));
   if (!run) return c.json({ error: "run not found" }, 404);
   if (run.status === "awaiting_approval") return c.json({ error: "run awaiting approval" }, 409);
+  if (run.status === "paused") return c.json({ error: "run paused" }, 409);
+  if (["cancelled", "completed"].includes(run.status)) return c.json({ error: "run not executable" }, 409);
   const step = getCurrentStep(run);
   if (!step) return c.json({ error: "no current step" }, 400);
   if (step.state !== "running") startCurrentStep(run);
@@ -834,6 +848,108 @@ app.post("/api/runs/:id/execute-current", async (c) => {
   }
   await persist();
   return c.json({ run, policy, execution, execution_result: executionResult });
+});
+
+app.post("/api/runs/:id/interrupt-step", async (c) => {
+  const authError = requireOperator(c);
+  if (authError) return authError;
+  await ensureLoaded();
+  const run = state.runs.find((item) => item.run_id === c.req.param("id"));
+  if (!run) return c.json({ error: "run not found" }, 404);
+  const mission = getMissionForRun(run);
+  const current = getCurrentStep(run);
+  if (!current || current.state !== "running") return c.json({ error: "current step not running" }, 409);
+  pauseCurrentStep(run, "operator interrupted current step");
+  if (mission) {
+    mission.status = "paused";
+    mission.summary = "operator interrupted current step";
+    mission.updated_at = new Date().toISOString();
+  }
+  recordEvent({ type: "step.blocked", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: current.step_id as `step_${string}`, payload: { control_action: "interrupt", reason: "operator interrupted current step" } as any });
+  await persist();
+  return c.json({ run, mission });
+});
+
+app.post("/api/runs/:id/resume-step", async (c) => {
+  const authError = requireOperator(c);
+  if (authError) return authError;
+  await ensureLoaded();
+  const run = state.runs.find((item) => item.run_id === c.req.param("id"));
+  if (!run) return c.json({ error: "run not found" }, 404);
+  const mission = getMissionForRun(run);
+  const current = getCurrentStep(run);
+  if (!current || current.state !== "paused" || run.status !== "paused") return c.json({ error: "current step not paused" }, 409);
+  resumeCurrentStep(run, "operator resumed current step");
+  if (mission) {
+    mission.status = "running";
+    mission.summary = "operator resumed current step";
+    mission.updated_at = new Date().toISOString();
+  }
+  recordEvent({ type: "step.started", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: current.step_id as `step_${string}`, payload: { resumed: true } as any });
+  await persist();
+  return c.json({ run, mission });
+});
+
+app.post("/api/runs/:id/retry-step", async (c) => {
+  const authError = requireOperator(c);
+  if (authError) return authError;
+  await ensureLoaded();
+  const run = state.runs.find((item) => item.run_id === c.req.param("id"));
+  if (!run) return c.json({ error: "run not found" }, 404);
+  const mission = getMissionForRun(run);
+  const current = getCurrentStep(run);
+  if (!current || !["failed", "paused", "cancelled", "blocked"].includes(current.state)) return c.json({ error: "current step not retryable" }, 409);
+  retryCurrentStep(run, "operator retried current step");
+  if (mission) {
+    mission.status = "running";
+    mission.summary = "operator retried current step";
+    mission.updated_at = new Date().toISOString();
+  }
+  recordEvent({ type: "step.started", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: current.step_id as `step_${string}`, payload: { retried: true } as any });
+  await persist();
+  return c.json({ run, mission });
+});
+
+app.post("/api/runs/:id/cancel-step", async (c) => {
+  const authError = requireOperator(c);
+  if (authError) return authError;
+  await ensureLoaded();
+  const run = state.runs.find((item) => item.run_id === c.req.param("id"));
+  if (!run) return c.json({ error: "run not found" }, 404);
+  const mission = getMissionForRun(run);
+  const current = getCurrentStep(run);
+  if (!current || ["completed", "failed", "cancelled"].includes(current.state)) return c.json({ error: "current step not cancellable" }, 409);
+  const approval = rejectPendingApprovalForCurrentStep(run);
+  cancelCurrentStep(run, "operator cancelled current step");
+  if (mission) {
+    mission.status = "cancelled";
+    mission.summary = "operator cancelled current step";
+    mission.updated_at = new Date().toISOString();
+  }
+  recordEvent({ type: "run.cancelled", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: current.step_id as `step_${string}`, payload: { control_action: "cancel_step" } as any });
+  await persist();
+  return c.json({ run, mission, approval });
+});
+
+app.post("/api/runs/:id/cancel", async (c) => {
+  const authError = requireOperator(c);
+  if (authError) return authError;
+  await ensureLoaded();
+  const run = state.runs.find((item) => item.run_id === c.req.param("id"));
+  if (!run) return c.json({ error: "run not found" }, 404);
+  const mission = getMissionForRun(run);
+  const current = getCurrentStep(run);
+  if (!current) return c.json({ error: "no current step" }, 400);
+  const approval = rejectPendingApprovalForCurrentStep(run);
+  cancelCurrentStep(run, "operator cancelled run");
+  if (mission) {
+    mission.status = "cancelled";
+    mission.summary = "operator cancelled run";
+    mission.updated_at = new Date().toISOString();
+  }
+  recordEvent({ type: "run.cancelled", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: current.step_id as `step_${string}`, payload: { control_action: "cancel_run" } as any });
+  await persist();
+  return c.json({ run, mission, approval });
 });
 
 app.post("/api/runs/:id/artifacts", async (c) => {

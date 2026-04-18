@@ -980,6 +980,91 @@ describe("orchestrator-api", () => {
     expect(auditPayload.pagination).toEqual({ total: 3, limit: 2, offset: 0, has_more: true });
   });
 
+  it("interrupts current step and pauses run + mission", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-interrupt-step-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [{ mission_id: "mis_demo", title: "Interrupt flow", objective: "Interrupt flow", project_id: "proj_demo", workflow: "bugfix", status: "running", active_run_id: "run_demo", summary: "Mission started", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z" }],
+      runs: [{ run_id: "run_demo", mission_id: "mis_demo", workflow_id: "bugfix", status: "running", current_step_index: 0, current_step_id: "plan", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z", steps: [{ step_id: "plan", title: "Plan fix", kind: "plan", risk: "low", approval_mode: "on_policy_trigger", state: "running", execution_id: "exec_demo", artifacts: [], started_at: "2026-04-11T00:00:00.000Z" }] }],
+      approvals: [], events: [], audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const response = await app.request("/api/runs/run_demo/interrupt-step", { method: "POST" });
+    const payload = await response.json() as { run: { status: string; steps: Array<{ state: string; notes?: string }> }; mission: { status: string } };
+
+    expect(response.status).toBe(200);
+    expect(payload.run.status).toBe("paused");
+    expect(payload.mission.status).toBe("paused");
+    expect(payload.run.steps[0]).toMatchObject({ state: "paused", notes: "operator interrupted current step" });
+  });
+
+  it("resumes paused current step", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-resume-step-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [{ mission_id: "mis_demo", title: "Resume flow", objective: "Resume flow", project_id: "proj_demo", workflow: "bugfix", status: "paused", active_run_id: "run_demo", summary: "Paused", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z" }],
+      runs: [{ run_id: "run_demo", mission_id: "mis_demo", workflow_id: "bugfix", status: "paused", current_step_index: 0, current_step_id: "plan", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z", steps: [{ step_id: "plan", title: "Plan fix", kind: "plan", risk: "low", approval_mode: "on_policy_trigger", state: "paused", execution_id: "exec_demo", notes: "operator interrupted current step", artifacts: [], started_at: "2026-04-11T00:00:00.000Z" }] }],
+      approvals: [], events: [], audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const response = await app.request("/api/runs/run_demo/resume-step", { method: "POST" });
+    const payload = await response.json() as { run: { status: string; steps: Array<{ state: string; notes?: string }> }; mission: { status: string } };
+
+    expect(response.status).toBe(200);
+    expect(payload.run.status).toBe("running");
+    expect(payload.mission.status).toBe("running");
+    expect(payload.run.steps[0]).toMatchObject({ state: "running", notes: "operator resumed current step" });
+  });
+
+  it("retries failed current step and returns run to running", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-retry-step-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [{ mission_id: "mis_demo", title: "Retry flow", objective: "Retry flow", project_id: "proj_demo", workflow: "bugfix", status: "failed", active_run_id: "run_demo", summary: "tests failed", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z" }],
+      runs: [{ run_id: "run_demo", mission_id: "mis_demo", workflow_id: "bugfix", status: "failed", current_step_index: 0, current_step_id: "plan", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z", steps: [{ step_id: "plan", title: "Plan fix", kind: "plan", risk: "low", approval_mode: "on_policy_trigger", state: "failed", execution_id: "exec_demo", notes: "tests failed", artifacts: [], started_at: "2026-04-11T00:00:00.000Z", completed_at: "2026-04-11T00:01:00.000Z" }] }],
+      approvals: [], events: [], audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const response = await app.request("/api/runs/run_demo/retry-step", { method: "POST" });
+    const payload = await response.json() as { run: { status: string; steps: Array<{ state: string; notes?: string; execution_id?: string }> }; mission: { status: string } };
+
+    expect(response.status).toBe(200);
+    expect(payload.run.status).toBe("running");
+    expect(payload.mission.status).toBe("running");
+    expect(payload.run.steps[0]).toMatchObject({ state: "running", notes: "operator retried current step", execution_id: "exec_demo" });
+  });
+
+  it("cancels run and resolves pending approval", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-cancel-run-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [{ mission_id: "mis_demo", title: "Cancel flow", objective: "Cancel flow", project_id: "proj_demo", workflow: "bugfix", status: "awaiting_approval", active_run_id: "run_demo", summary: "waiting approval", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z" }],
+      runs: [{ run_id: "run_demo", mission_id: "mis_demo", workflow_id: "bugfix", status: "awaiting_approval", current_step_index: 0, current_step_id: "deploy", approval_id: "approval_demo", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z", steps: [{ step_id: "deploy", title: "Canary deploy", kind: "deploy", risk: "high", approval_mode: "on_policy_trigger", state: "awaiting_approval", approval_id: "approval_demo", notes: "waiting approval", blocked_reason: "needs approval", artifacts: [], started_at: "2026-04-11T00:00:00.000Z" }] }],
+      approvals: [{ approval_id: "approval_demo", mission_id: "mis_demo", run_id: "run_demo", step_id: "deploy", status: "pending", reason: "needs approval", decision_scope: "step", requested_at: "2026-04-11T00:00:00.000Z" }], events: [], audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const response = await app.request("/api/runs/run_demo/cancel", { method: "POST" });
+    const payload = await response.json() as { run: { status: string; steps: Array<{ state: string }> }; mission: { status: string }; approval?: { status: string; resolved_by?: string } };
+
+    expect(response.status).toBe(200);
+    expect(payload.run.status).toBe("cancelled");
+    expect(payload.mission.status).toBe("cancelled");
+    expect(payload.run.steps[0]).toMatchObject({ state: "cancelled" });
+    expect(payload.approval).toMatchObject({ status: "rejected", resolved_by: "operator" });
+  });
+
   it("keeps approval pending when a stale approval response is rejected", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
 

@@ -35,6 +35,7 @@ export interface WorkflowRun extends Run {
 
 type StepTransition =
   | "running"
+  | "paused"
   | "awaiting_approval"
   | "completed"
   | "failed"
@@ -122,7 +123,7 @@ function transitionCurrentStep(
   options: {
     notes?: string;
     execution_id?: string;
-    approval_id?: string;
+    approval_id?: string | null;
     blocked_reason?: string;
   } = {}
 ): WorkflowRun {
@@ -132,8 +133,12 @@ function transitionCurrentStep(
   const now = new Date().toISOString();
   current.state = state;
   if (options.execution_id) current.execution_id = options.execution_id;
-  if (options.approval_id !== undefined) current.approval_id = options.approval_id;
+  if (options.approval_id !== undefined) current.approval_id = options.approval_id ?? undefined;
   if (options.notes !== undefined) current.notes = options.notes;
+
+  if (["running", "paused", "awaiting_approval", "blocked"].includes(state)) {
+    current.completed_at = undefined;
+  }
 
   if (state === "awaiting_approval" || state === "blocked") {
     current.blocked_reason = options.blocked_reason;
@@ -144,8 +149,14 @@ function transitionCurrentStep(
   if (state === "running") {
     current.started_at ??= now;
     run.status = "running";
+  } else if (state === "paused") {
+    current.started_at ??= now;
+    run.status = "paused";
   } else if (state === "awaiting_approval") {
     run.status = "awaiting_approval";
+  } else if (state === "blocked") {
+    current.started_at ??= now;
+    run.status = "paused";
   } else if (state === "completed") {
     current.completed_at = now;
     const nextIndex = run.current_step_index + 1;
@@ -171,8 +182,24 @@ export function startCurrentStep(run: WorkflowRun, execution_id?: string): Workf
   return transitionCurrentStep(run, "running", { execution_id });
 }
 
+export function pauseCurrentStep(run: WorkflowRun, notes?: string): WorkflowRun {
+  return transitionCurrentStep(run, "paused", { notes });
+}
+
+export function resumeCurrentStep(run: WorkflowRun, notes?: string): WorkflowRun {
+  return transitionCurrentStep(run, "running", { notes });
+}
+
 export function markCurrentStepAwaitingApproval(run: WorkflowRun, approval_id: string, notes?: string, blocked_reason?: string): WorkflowRun {
   return transitionCurrentStep(run, "awaiting_approval", { approval_id, notes, blocked_reason });
+}
+
+export function retryCurrentStep(run: WorkflowRun, notes?: string): WorkflowRun {
+  const current = getCurrentStep(run);
+  if (!current) return run;
+  current.started_at = undefined;
+  current.completed_at = undefined;
+  return transitionCurrentStep(run, "running", { notes, approval_id: null, blocked_reason: undefined });
 }
 
 export function markCurrentStepCompleted(run: WorkflowRun, notes?: string): WorkflowRun {
@@ -183,8 +210,12 @@ export function markCurrentStepFailed(run: WorkflowRun, notes?: string): Workflo
   return transitionCurrentStep(run, "failed", { notes });
 }
 
+export function cancelCurrentStep(run: WorkflowRun, notes?: string): WorkflowRun {
+  return transitionCurrentStep(run, "cancelled", { notes, approval_id: null });
+}
+
 export function markCurrentStepCancelled(run: WorkflowRun, notes?: string): WorkflowRun {
-  return transitionCurrentStep(run, "cancelled", { notes });
+  return cancelCurrentStep(run, notes);
 }
 
 export function markCurrentStepBlocked(run: WorkflowRun, blocked_reason: string, notes?: string): WorkflowRun {
