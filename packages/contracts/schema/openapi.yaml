@@ -1,0 +1,204 @@
+openapi: 3.1.0
+info:
+  title: Hermes MissionControl Contracts
+  version: v1
+paths: {}
+components:
+  schemas:
+    MissionState:
+      type: string
+      enum: [pending, running, awaiting_approval, failed, completed, cancelled]
+    RunState:
+      type: string
+      enum: [pending, running, paused, failed, completed, cancelled]
+    StepKind:
+      type: string
+      enum: [plan, implement, test, review, deploy]
+    StepState:
+      type: string
+      enum: [pending, ready, running, awaiting_approval, paused, failed, completed, cancelled]
+    ApprovalMode:
+      type: string
+      enum: [never, on_policy_trigger, always]
+    FinalOutcome:
+      type: string
+      enum: [success, partial, blocked, failed, cancelled]
+    EventSource:
+      type: string
+      enum: [hermes, missioncontrol]
+    Mission:
+      type: object
+      additionalProperties: false
+      required: [mission_id, title, workflow, status, created_at, updated_at]
+      properties:
+        mission_id: { type: string }
+        title: { type: string }
+        workflow: { type: string }
+        repo_path: { type: string }
+        status:
+          $ref: '#/components/schemas/MissionState'
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Run:
+      type: object
+      additionalProperties: false
+      required: [run_id, mission_id, status, created_at, updated_at]
+      properties:
+        run_id: { type: string }
+        mission_id: { type: string }
+        status:
+          $ref: '#/components/schemas/RunState'
+        current_step_id: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Step:
+      type: object
+      additionalProperties: false
+      required: [step_id, kind, title, state, approval_mode]
+      properties:
+        step_id: { type: string }
+        kind:
+          $ref: '#/components/schemas/StepKind'
+        title: { type: string }
+        state:
+          $ref: '#/components/schemas/StepState'
+        approval_mode:
+          $ref: '#/components/schemas/ApprovalMode'
+    ArtifactRef:
+      type: object
+      additionalProperties: false
+      required: [artifact_id, kind, uri, label]
+      properties:
+        artifact_id: { type: string }
+        kind: { type: string }
+        uri: { type: string }
+        label: { type: string }
+        content_type: { type: string }
+        created_at: { type: string, format: date-time }
+        metadata:
+          type: object
+          additionalProperties: true
+    ApprovalRequest:
+      type: object
+      additionalProperties: false
+      required: [approval_id, mission_id, run_id, step_id, reason, decision_scope, requested_at]
+      properties:
+        approval_id: { type: string }
+        mission_id: { type: string }
+        run_id: { type: string }
+        step_id: { type: string }
+        reason: { type: string }
+        decision_scope:
+          type: string
+          enum: [step, run]
+        requested_at: { type: string, format: date-time }
+    ApprovalResult:
+      type: object
+      additionalProperties: false
+      required: [approval_id, decision, resolved_at]
+      properties:
+        approval_id: { type: string }
+        decision:
+          type: string
+          enum: [approved, rejected]
+        resolved_at: { type: string, format: date-time }
+        resolved_by: { type: string }
+    TaskExecutionResult:
+      type: object
+      additionalProperties: false
+      required:
+        [execution_id, mission_id, run_id, step_id, final_outcome, summary, artifacts, changed_files, issues, approval_needed]
+      properties:
+        execution_id: { type: string }
+        mission_id: { type: string }
+        run_id: { type: string }
+        step_id: { type: string }
+        final_outcome:
+          $ref: '#/components/schemas/FinalOutcome'
+        summary: { type: string }
+        artifacts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtifactRef'
+        changed_files:
+          type: array
+          items: { type: string }
+        issues:
+          type: array
+          items: { type: string }
+        approval_needed: { type: boolean }
+        recommended_next_step:
+          $ref: '#/components/schemas/StepKind'
+        confidence: { type: number }
+        command_refs:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [kind, label, ref]
+            properties:
+              kind: { type: string }
+              label: { type: string }
+              ref: { type: string }
+    EventEnvelope:
+      type: object
+      additionalProperties: false
+      required: [schema_version, event_id, timestamp, sequence, source, type, mission_id, run_id, payload]
+      properties:
+        schema_version:
+          type: string
+          enum: [v1]
+        event_id: { type: string }
+        timestamp: { type: string, format: date-time }
+        sequence: { type: integer }
+        source:
+          $ref: '#/components/schemas/EventSource'
+        type:
+          type: string
+          enum:
+            - mission.created
+            - run.started
+            - step.started
+            - step.progress
+            - tool.started
+            - tool.completed
+            - artifact.created
+            - approval.requested
+            - approval.resolved
+            - step.blocked
+            - step.failed
+            - step.completed
+            - run.completed
+            - run.cancelled
+        mission_id: { type: string }
+        run_id: { type: string }
+        step_id: { type: string }
+        execution_id: { type: string }
+        payload:
+          type: object
+          additionalProperties: true
+    ContractError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, retryable]
+          properties:
+            code:
+              type: string
+              enum:
+                - INVALID_ENVELOPE
+                - UNAUTHORIZED_TOOL
+                - STEP_TIMEOUT
+                - INTERRUPTED
+                - POLICY_BLOCKED
+                - INTERNAL_EXECUTION_ERROR
+                - CONTEXT_LOAD_FAILED
+            message: { type: string }
+            retryable: { type: boolean }
+            details:
+              type: object
+              additionalProperties: true

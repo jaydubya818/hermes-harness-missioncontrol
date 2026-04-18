@@ -1,0 +1,20 @@
+{
+  "name": "@hermes-harness-with-missioncontrol/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "generate:ts": "openapi-typescript schema/openapi.yaml -o src/generated/openapi.ts",
+    "generate:py": "python3 scripts/generate_python_models.py",
+    "generate": "pnpm run generate:ts && pnpm run generate:py"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.10.1",
+    "vitest": "^3.2.4"
+  }
+}

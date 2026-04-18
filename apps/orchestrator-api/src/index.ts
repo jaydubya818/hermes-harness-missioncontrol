@@ -7,6 +7,7 @@ import { evaluateStepPolicy } from "@hermes-harness-with-missioncontrol/policy-e
 import { loadJsonFile, saveJsonFile } from "@hermes-harness-with-missioncontrol/state-store";
 import { makeId, type HarnessEvent } from "@hermes-harness-with-missioncontrol/shared-types";
 import { scoreRun } from "@hermes-harness-with-missioncontrol/eval-core";
+import { FinalOutcome, StepKind, type ArtifactRef, type TaskExecutionResult } from "@hermes-harness-with-missioncontrol/contracts";
 
 const app = new Hono();
 const stateFile = process.env.ORCHESTRATOR_STATE_FILE ?? resolve(process.cwd(), "../../data/orchestrator-state.json");
@@ -62,6 +63,37 @@ type WorkerExecution = {
   source_repo?: string;
   branch_name?: string;
 };
+
+function toArtifactRef(artifact: WorkerArtifact): ArtifactRef {
+  return {
+    artifact_id: artifact.artifact_id ?? makeId("art"),
+    kind: artifact.type,
+    uri: artifact.uri,
+    label: artifact.type,
+    metadata: artifact.metadata,
+  };
+}
+
+function toTaskExecutionResult(run: WorkflowRun, stepId: string, execution: WorkerExecution, approvalNeeded = false): TaskExecutionResult {
+  const changedFiles = execution.artifacts
+    .flatMap((artifact) => Array.isArray(artifact.metadata?.changed_files) ? artifact.metadata.changed_files : [])
+    .filter((value): value is string => typeof value === "string");
+
+  return {
+    execution_id: makeId("exec"),
+    mission_id: run.mission_id,
+    run_id: run.run_id,
+    step_id: stepId,
+    final_outcome: execution.success ? FinalOutcome.Success : FinalOutcome.Failed,
+    summary: execution.summary,
+    artifacts: execution.artifacts.map(toArtifactRef),
+    changed_files: changedFiles,
+    issues: execution.success ? [] : [execution.summary],
+    approval_needed: approvalNeeded,
+    recommended_next_step: approvalNeeded ? undefined : StepKind.Test,
+    confidence: execution.confidence,
+  };
+}
 
 const state: OrchestratorState = { missions: [], runs: [], approvals: [], events: [], audit: [] };
 let initialized = false;
@@ -292,13 +324,14 @@ app.post("/api/runs/:id/execute-current", async (c) => {
 
   if (!execution.success) {
     await failRun(run, step.id, execution.summary || "worker execution unsuccessful", execution);
-    return c.json({ run, execution }, 400);
+    return c.json({ run, execution, execution_result: toTaskExecutionResult(run, step.id, execution) }, 400);
   }
 
   const policy = evaluateStepPolicy({ kind: step.kind, risk: step.risk, artifactCount: step.artifacts.length, workerConfidence: execution.confidence });
+  const executionResult = toTaskExecutionResult(run, step.id, execution, policy.requires_approval);
   if (!policy.allowed) {
     await failRun(run, step.id, policy.reason, execution);
-    return c.json({ run, policy, execution }, 400);
+    return c.json({ run, policy, execution, execution_result: executionResult }, 400);
   }
 
   if (step.kind === "review") {
@@ -314,9 +347,9 @@ app.post("/api/runs/:id/execute-current", async (c) => {
       mission.status = "awaiting_approval";
       mission.approval_id = approval.approval_id;
     }
-    recordEvent({ type: "step.completed", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: step.id as `step_${string}`, payload: { policy, execution, awaiting_approval: true } as any });
+    recordEvent({ type: "step.completed", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: step.id as `step_${string}`, payload: { policy, execution, execution_result: executionResult, awaiting_approval: true } as any });
     await persist();
-    return c.json({ run, approval, policy, execution });
+    return c.json({ run, approval, policy, execution, execution_result: executionResult });
   }
 
   advanceRun(run, "completed", execution.summary);
@@ -328,7 +361,7 @@ app.post("/api/runs/:id/execute-current", async (c) => {
   if (step.kind === "deploy") {
     recordEvent({ type: "deployment.completed", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: step.id as `step_${string}`, payload: { deploy: getStepArtifact(run, step.id, "deploy-note") } as any });
   }
-  recordEvent({ type: "step.completed", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: step.id as `step_${string}`, payload: { policy, execution } as any });
+  recordEvent({ type: "step.completed", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: step.id as `step_${string}`, payload: { policy, execution, execution_result: executionResult } as any });
   const next = getCurrentStep(run);
   if (next && run.status !== "completed") {
     startCurrentStep(run);
@@ -338,7 +371,7 @@ app.post("/api/runs/:id/execute-current", async (c) => {
     await cleanupExecutionWorkspace(run, mission, execution);
   }
   await persist();
-  return c.json({ run, policy, execution });
+  return c.json({ run, policy, execution, execution_result: executionResult });
 });
 
 app.post("/api/runs/:id/artifacts", async (c) => {

@@ -32,6 +32,57 @@ describe("orchestrator-api", () => {
     process.env.VITEST = "1";
   });
 
+  it("returns a TaskExecutionResult-shaped execution_result payload", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/api/execute-step")) {
+        return jsonResponse({
+          body: {
+            success: true,
+            summary: "implemented change",
+            confidence: 0.91,
+            artifacts: [
+              {
+                type: "diff",
+                uri: "file:///tmp/patch.diff",
+                metadata: { changed_files: ["apps/orchestrator-api/src/index.ts"] }
+              }
+            ]
+          }
+        });
+      }
+      return jsonResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await loadApp();
+    const createMission = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Contracts", project_id: "proj_demo", workflow_id: "bugfix" })
+    });
+    const mission = await createMission.json() as { mission_id: string };
+
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const run = await startRun.json() as { run_id: string };
+
+    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    const payload = await execute.json() as {
+      execution_result?: {
+        execution_id: string;
+        final_outcome: string;
+        artifacts: Array<{ kind: string; label: string }>;
+        changed_files: string[];
+      };
+    };
+
+    expect(execute.status).toBe(200);
+    expect(payload.execution_result).toBeDefined();
+    expect(payload.execution_result?.execution_id).toMatch(/^exec_/);
+    expect(payload.execution_result?.final_outcome).toBe("success");
+    expect(payload.execution_result?.artifacts[0]).toMatchObject({ kind: "diff", label: "diff" });
+    expect(payload.execution_result?.changed_files).toContain("apps/orchestrator-api/src/index.ts");
+  });
+
   it("fails the run when worker execution returns success false", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes("/api/execute-step")) {
