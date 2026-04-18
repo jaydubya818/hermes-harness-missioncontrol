@@ -127,10 +127,17 @@ The Hermes agent (`~/.claude/agents/hermes.md`) is wired to two live knowledge s
 
 ## Architecture Docs
 - `docs/architecture/2026-04-18-hermes-missioncontrol-approved-target-architecture.md` ← approved target state
+- `docs/architecture/hermes-missioncontrol-event-model.md`
 - `docs/architecture/2026-04-10-hermes-harness-with-missioncontrol-v1-system-architecture.md`
 - `docs/architecture/2026-04-10-hermes-harness-with-missioncontrol-repo-service-layout.md`
 - `docs/architecture/2026-04-10-hermes-harness-with-missioncontrol-integration-contract.md`
 - `docs/architecture/2026-04-10-harness-console-surface-map.md`
+
+## Contracts Docs
+- `docs/contracts/hermes-missioncontrol-contracts.md`
+
+## Plans
+- `docs/plans/hermes-missioncontrol-implementation-plan.md`
 
 ## Notes
 - Worker-runtime performs safe repo-local mutation for validation via `.hermes-harness/runs/<run_id>/implementation.json`
