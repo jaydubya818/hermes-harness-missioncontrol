@@ -98,6 +98,7 @@ function Missions() {
   const [error, setError] = useState<string | null>(null);
   const [selectedMissionId, setSelectedMissionId] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [selectedStep, setSelectedStep] = useState<{ runId: string; stepId: string } | null>(null);
 
   useEffect(() => {
     if (!selectedMissionId && data?.mission_queue?.[0]?.mission_id) setSelectedMissionId(data.mission_queue[0].mission_id);
@@ -106,8 +107,12 @@ function Missions() {
 
   const missionDetailUrl = selectedMissionId ? `${ORCH}/api/read-models/missions/${selectedMissionId}` : null;
   const runDetailUrl = selectedRunId ? `${ORCH}/api/read-models/runs/${selectedRunId}` : null;
+  const stepDetailUrl = selectedStep ? `${ORCH}/api/read-models/runs/${selectedStep.runId}/steps/${selectedStep.stepId}` : null;
+  const stepArtifactsUrl = selectedStep ? withQuery(`${ORCH}/api/read-models/artifacts`, { run_id: selectedStep.runId, step_id: selectedStep.stepId, limit: "20", offset: "0" }) : null;
   const { data: missionDetail } = useSWR(missionDetailUrl, fetcher, { refreshInterval: 3000 });
   const { data: runDetail } = useSWR(runDetailUrl, fetcher, { refreshInterval: 3000 });
+  const { data: stepDetail } = useSWR(stepDetailUrl, fetcher, { refreshInterval: 3000 });
+  const { data: stepArtifacts } = useSWR(stepArtifactsUrl, fetcher, { refreshInterval: 3000 });
 
   async function runAction(action: () => Promise<unknown>, successMessage: string) {
     setError(null);
@@ -132,6 +137,10 @@ function Missions() {
     mutate(`${ORCH}/api/read-models/overview`);
     if (selectedMissionId) mutate(`${ORCH}/api/read-models/missions/${selectedMissionId}`);
     if (selectedRunId) mutate(`${ORCH}/api/read-models/runs/${selectedRunId}`);
+    if (selectedStep) {
+      mutate(`${ORCH}/api/read-models/runs/${selectedStep.runId}/steps/${selectedStep.stepId}`);
+      mutate(withQuery(`${ORCH}/api/read-models/artifacts`, { run_id: selectedStep.runId, step_id: selectedStep.stepId, limit: "20", offset: "0" }));
+    }
     mutate(`${EVAL}/api/evals`);
     mutate(`${MEM}/api/memory/agents/agent_demo/summary`);
   }
@@ -234,6 +243,7 @@ function Missions() {
                   <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
                     {step.state === "running" && <><Button onClick={() => executeCurrent(run.run_id)}>Execute current step</Button><Button onClick={() => completeStep(run.run_id, step.step_id)}>Mark step complete</Button></>}
                     <Button onClick={() => setSelectedRunId(run.run_id)} style={{ background: selectedRunId === run.run_id ? "#111827" : "transparent" }}>Inspect run</Button>
+                    <Button onClick={() => setSelectedStep({ runId: run.run_id, stepId: step.step_id })} style={{ background: selectedStep?.runId === run.run_id && selectedStep?.stepId === step.step_id ? "#111827" : "transparent" }}>Inspect step</Button>
                   </div>
                 </div>
               ))}
@@ -270,6 +280,31 @@ function Missions() {
               </div>
             ))}
           </>}
+        </Panel>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <Panel title="Step Detail">
+          {!stepDetail ? <div>Select step.</div> : <>
+            <StatusRow label={`${stepDetail.step.step_id} (${stepDetail.step.kind})`} value={stepDetail.step.state} />
+            <StatusRow label="Execution" value={stepDetail.step.execution_id ?? "none"} />
+            <StatusRow label="Risk" value={stepDetail.step.risk ?? "n/a"} />
+            <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 8 }}>{stepDetail.step.notes ?? "No notes."}</div>
+            {stepDetail.step.blocked_reason && <div style={{ color: "#fbbf24", fontSize: 12, marginTop: 8 }}>{stepDetail.step.blocked_reason}</div>}
+            {stepDetail.approval && <div style={{ color: "#64748b", fontSize: 12, marginTop: 8 }}>Approval: {stepDetail.approval.outcome} · {stepDetail.approval.reason}</div>}
+            <div style={{ height: 12 }} />
+            {(stepDetail.timeline_summary?.recent ?? []).slice(0, 5).map((item: any, index: number) => (
+              <div key={`${item.occurred_at}-${index}`} style={{ color: "#64748b", fontSize: 12, marginTop: 4 }}>{item.title} · {item.occurred_at}</div>
+            ))}
+          </>}
+        </Panel>
+        <Panel title="Step Artifacts">
+          {!selectedStep ? <div>Select step.</div> : ((stepArtifacts?.artifacts ?? []).length === 0 ? <div>No artifacts.</div> : (stepArtifacts?.artifacts ?? []).map((artifact: any) => (
+            <div key={artifact.artifact_id} style={{ borderTop: "1px solid #1e293b", paddingTop: 8, marginTop: 8 }}>
+              <StatusRow label={artifact.artifact_type} value={artifact.artifact_id} />
+              <div style={{ color: "#64748b", fontSize: 12, marginTop: 4 }}>{artifact.ref}</div>
+              <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 4 }}>{artifact.summary}</div>
+            </div>
+          )))}
         </Panel>
       </div>
     </div>
@@ -400,6 +435,24 @@ function Memory() {
 function Code() {
   const { data } = useSWR(`${ORCH}/api/read-models/missions`, fetcher, { refreshInterval: 4000 });
   const [artifactContent, setArtifactContent] = useState("diff --git a/file.ts b/file.ts\n+ bounded autonomy patch");
+  const [missionFilter, setMissionFilter] = useState("");
+  const [runFilter, setRunFilter] = useState("");
+  const [stepFilter, setStepFilter] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
+  const [artifactSort, setArtifactSort] = useState("newest");
+  const [offset, setOffset] = useState(0);
+  const limit = 10;
+
+  const artifactsUrl = withQuery(`${ORCH}/api/read-models/artifacts`, {
+    mission_id: missionFilter || undefined,
+    run_id: runFilter || undefined,
+    step_id: stepFilter || undefined,
+    artifact_type: typeFilter || undefined,
+    sort: artifactSort,
+    limit: String(limit),
+    offset: String(offset)
+  });
+  const { data: artifactsView } = useSWR(artifactsUrl, fetcher, { refreshInterval: 4000 });
 
   async function addArtifact(runId: string, stepId: string) {
     await authFetch(`${ORCH}/api/runs/${runId}/artifacts`, {
@@ -409,12 +462,28 @@ function Code() {
     });
     mutate(`${ORCH}/api/runs`);
     mutate(`${ORCH}/api/read-models/missions`);
+    mutate(artifactsUrl);
   }
 
   return (
     <div style={{ padding: 16, display: "grid", gap: 16 }}>
       <Panel title="Artifact Composer">
         <textarea value={artifactContent} onChange={(event) => setArtifactContent(event.target.value)} style={{ width: "100%", minHeight: 140, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+      </Panel>
+      <Panel title="Artifact Filters">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 8 }}>
+          <input value={missionFilter} onChange={(event) => { setMissionFilter(event.target.value); setOffset(0); }} placeholder="mission" style={{ borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+          <input value={runFilter} onChange={(event) => { setRunFilter(event.target.value); setOffset(0); }} placeholder="run" style={{ borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+          <input value={stepFilter} onChange={(event) => { setStepFilter(event.target.value); setOffset(0); }} placeholder="step" style={{ borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+          <input value={typeFilter} onChange={(event) => { setTypeFilter(event.target.value); setOffset(0); }} placeholder="artifact type" style={{ borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+          <select value={artifactSort} onChange={(event) => { setArtifactSort(event.target.value); setOffset(0); }} style={{ borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }}>
+            <option value="newest">newest</option>
+            <option value="oldest">oldest</option>
+            <option value="mission">by mission</option>
+            <option value="run">by run</option>
+            <option value="step">by step</option>
+          </select>
+        </div>
       </Panel>
       <Panel title="Run Artifacts">
         {(data?.run_cards ?? []).length === 0 ? <div>No runs yet.</div> : (data?.run_cards ?? []).map((run: any) => (
@@ -423,14 +492,30 @@ function Code() {
             {run.steps.map((step: any) => (
               <div key={step.step_id} style={{ border: "1px solid #1e293b", borderRadius: 8, padding: 12, marginBottom: 8 }}>
                 <StatusRow label={`${step.step_id}`} value={`${step.artifacts_count} artifacts`} />
-                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
                   <Button onClick={() => addArtifact(run.run_id, step.step_id)}>Add diff artifact</Button>
+                  <Button onClick={() => { setRunFilter(run.run_id); setStepFilter(step.step_id); setOffset(0); }} style={{ background: "transparent" }}>Filter artifacts</Button>
                 </div>
                 {step.latest_artifact_uri && <pre style={{ whiteSpace: "pre-wrap", marginTop: 8 }}>{step.latest_artifact_uri}</pre>}
               </div>
             ))}
           </div>
         ))}
+      </Panel>
+      <Panel title="Artifact Read Model">
+        {(artifactsView?.artifacts ?? []).length === 0 ? <div>No artifacts found.</div> : (artifactsView?.artifacts ?? []).map((artifact: any) => (
+          <div key={artifact.artifact_id} style={{ borderTop: "1px solid #1e293b", paddingTop: 8, marginTop: 8 }}>
+            <StatusRow label={artifact.artifact_type} value={artifact.artifact_id} />
+            <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 4 }}>{[artifact.mission_id, artifact.run_id, artifact.step_id].filter(Boolean).join(" · ")}</div>
+            <div style={{ color: "#64748b", fontSize: 12, marginTop: 4 }}>{artifact.ref}</div>
+            <div style={{ color: "#64748b", fontSize: 12, marginTop: 4 }}>By: {artifact.created_by}{artifact.eval_linkage ? ` · Eval: ${artifact.eval_linkage}` : ""}</div>
+          </div>
+        ))}
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <Button onClick={() => setOffset(Math.max(0, offset - limit))} style={{ background: "transparent" }}>Prev</Button>
+          <Button onClick={() => setOffset(offset + limit)} disabled={!artifactsView?.pagination?.has_more}>Next</Button>
+          <div style={{ color: "#64748b", fontSize: 12, alignSelf: "center" }}>offset {artifactsView?.pagination?.offset ?? 0} / total {artifactsView?.pagination?.total ?? 0}</div>
+        </div>
       </Panel>
     </div>
   );

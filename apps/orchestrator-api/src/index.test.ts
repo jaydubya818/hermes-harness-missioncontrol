@@ -875,6 +875,111 @@ describe("orchestrator-api", () => {
     expect(payload.timeline_summary.recent[0]).toMatchObject({ title: "Approval requested" });
   });
 
+  it("builds step detail read model with approval, artifact, and timeline summaries", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-step-detail-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [{ mission_id: "mis_demo", title: "Approval flow", objective: "Approval flow", project_id: "proj_demo", workflow: "bugfix", status: "awaiting_approval", active_run_id: "run_demo", summary: "Waiting on deploy approval", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z" }],
+      runs: [{
+        run_id: "run_demo", mission_id: "mis_demo", workflow_id: "bugfix", status: "awaiting_approval", current_step_index: 1, current_step_id: "deploy", approval_id: "approval_demo", summary: "deploy prepared", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z",
+        steps: [
+          { step_id: "plan", title: "Plan fix", kind: "plan", risk: "low", approval_mode: "on_policy_trigger", state: "completed", artifacts: [], completed_at: "2026-04-11T00:00:00.000Z" },
+          { step_id: "deploy", title: "Canary deploy", kind: "deploy", risk: "high", approval_mode: "on_policy_trigger", state: "awaiting_approval", approval_id: "approval_demo", execution_id: "exec_demo", notes: "deploy prepared", blocked_reason: "high-risk action requires approval", artifacts: [{ artifact_id: "art_deploy", kind: "deploy-note", label: "deploy-note", uri: "file:///tmp/deploy.txt", metadata: { eval_id: "eval_123" } }], started_at: "2026-04-11T00:00:00.000Z" }
+        ]
+      }],
+      approvals: [{ approval_id: "approval_demo", mission_id: "mis_demo", run_id: "run_demo", step_id: "deploy", status: "pending", reason: "high-risk action requires approval", decision_scope: "step", requested_at: "2026-04-11T00:00:00.000Z" }],
+      events: [
+        { type: "step.started", ts: "2026-04-11T00:02:00.000Z", mission_id: "mis_demo", run_id: "run_demo", step_id: "deploy", payload: {} },
+        { type: "approval.requested", ts: "2026-04-11T00:03:00.000Z", mission_id: "mis_demo", run_id: "run_demo", step_id: "deploy", payload: { approval_id: "approval_demo" } }
+      ],
+      audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const response = await app.request("/api/read-models/runs/run_demo/steps/deploy");
+    const payload = await response.json() as {
+      step: { step_id: string; execution_id?: string; blocked_reason?: string };
+      approval: { approval_id: string; outcome: string } | null;
+      artifacts: Array<{ artifact_id: string; eval_linkage?: string }>;
+      execution_result_summary: { execution_id?: string; summary?: string; outcome: string };
+      timeline_summary: { total_events: number; recent: Array<{ title: string }> };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.step).toMatchObject({ step_id: "deploy", execution_id: "exec_demo", blocked_reason: "high-risk action requires approval" });
+    expect(payload.approval).toMatchObject({ approval_id: "approval_demo", outcome: "pending" });
+    expect(payload.artifacts[0]).toMatchObject({ artifact_id: "art_deploy", eval_linkage: "eval_123" });
+    expect(payload.execution_result_summary).toMatchObject({ execution_id: "exec_demo", summary: "deploy prepared", outcome: "pending" });
+    expect(payload.timeline_summary.total_events).toBe(2);
+    expect(payload.timeline_summary.recent[0]).toMatchObject({ title: "Approval requested" });
+  });
+
+  it("builds artifact read model with filters and pagination", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-artifact-read-model-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [{ mission_id: "mis_demo", title: "Approval flow", objective: "Approval flow", project_id: "proj_demo", workflow: "bugfix", status: "running", active_run_id: "run_demo", summary: "In progress", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z" }],
+      runs: [{
+        run_id: "run_demo", mission_id: "mis_demo", workflow_id: "bugfix", status: "running", current_step_index: 1, current_step_id: "deploy", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z",
+        steps: [
+          { step_id: "plan", title: "Plan fix", kind: "plan", risk: "low", approval_mode: "on_policy_trigger", state: "completed", artifacts: [{ artifact_id: "art_plan", kind: "note", label: "plan note", uri: "file:///tmp/plan.txt" }], completed_at: "2026-04-11T00:00:00.000Z" },
+          { step_id: "deploy", title: "Canary deploy", kind: "deploy", risk: "high", approval_mode: "on_policy_trigger", state: "running", artifacts: [{ artifact_id: "art_deploy", kind: "deploy-note", label: "deploy note", uri: "file:///tmp/deploy.txt", metadata: { eval_id: "eval_123", created_by: "worker" } }, { artifact_id: "art_diff", kind: "diff", label: "diff", uri: "file:///tmp/patch.diff" }], started_at: "2026-04-11T00:00:00.000Z" }
+        ]
+      }],
+      approvals: [],
+      events: [],
+      audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const response = await app.request("/api/read-models/artifacts?run_id=run_demo&step_id=deploy&limit=1&offset=0");
+    const payload = await response.json() as {
+      artifacts: Array<{ artifact_id: string; artifact_type: string; source_step: string; created_by: string; eval_linkage?: string }>;
+      pagination: { total: number; limit: number; offset: number; has_more: boolean };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.artifacts).toHaveLength(1);
+    expect(payload.artifacts[0]).toMatchObject({ artifact_id: "art_deploy", artifact_type: "deploy-note", source_step: "deploy", created_by: "worker", eval_linkage: "eval_123" });
+    expect(payload.pagination).toEqual({ total: 2, limit: 1, offset: 0, has_more: true });
+  });
+
+  it("adds pagination metadata to approval history and audit read models", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-pagination-read-models-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [{ mission_id: "mis_demo", title: "Approval flow", objective: "Approval flow", project_id: "proj_demo", workflow: "bugfix", status: "completed", active_run_id: "run_demo", summary: "Done", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z" }],
+      runs: [{ run_id: "run_demo", mission_id: "mis_demo", workflow_id: "bugfix", status: "completed", current_step_index: 0, current_step_id: "plan", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z", steps: [] }],
+      approvals: [
+        { approval_id: "approval_1", mission_id: "mis_demo", run_id: "run_demo", step_id: "plan", status: "approved", reason: "ok", decision_scope: "step", requested_at: "2026-04-11T00:00:00.000Z", resolved_at: "2026-04-11T00:10:00.000Z", resolved_by: "jay" },
+        { approval_id: "approval_2", mission_id: "mis_demo", run_id: "run_demo", step_id: "deploy", status: "rejected", reason: "no", decision_scope: "step", requested_at: "2026-04-11T00:20:00.000Z", resolved_at: "2026-04-11T00:30:00.000Z", resolved_by: "jay" }
+      ],
+      events: [
+        { type: "mission.created", ts: "2026-04-11T00:00:00.000Z", mission_id: "mis_demo", payload: {} },
+        { type: "run.started", ts: "2026-04-11T00:01:00.000Z", mission_id: "mis_demo", run_id: "run_demo", payload: {} },
+        { type: "run.completed", ts: "2026-04-11T00:40:00.000Z", mission_id: "mis_demo", run_id: "run_demo", payload: {} }
+      ],
+      audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const historyResponse = await app.request("/api/read-models/approval-history?limit=1&offset=1");
+    const historyPayload = await historyResponse.json() as { pagination: { total: number; limit: number; offset: number; has_more: boolean } };
+    expect(historyResponse.status).toBe(200);
+    expect(historyPayload.pagination).toEqual({ total: 2, limit: 1, offset: 1, has_more: false });
+
+    const auditResponse = await app.request("/api/read-models/audit?limit=2&offset=0");
+    const auditPayload = await auditResponse.json() as { pagination: { total: number; limit: number; offset: number; has_more: boolean } };
+    expect(auditResponse.status).toBe(200);
+    expect(auditPayload.pagination).toEqual({ total: 3, limit: 2, offset: 0, has_more: true });
+  });
+
   it("keeps approval pending when a stale approval response is rejected", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
 

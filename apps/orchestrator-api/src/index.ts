@@ -267,26 +267,36 @@ function buildApprovalsReadModel(query: Record<string, string | undefined> = {})
       && (!query.outcome || approval.outcome === query.outcome)
       && inDateRange(approval.requested_at, query.from, query.to));
 
+  const pending = sortApprovalViews(filtered.filter((approval) => approval.outcome === "pending"), query.sort);
+  const history = sortApprovalViews(filtered.filter((approval) => approval.outcome !== "pending"), query.sort);
+  const pendingPage = paginateItems(pending, query);
+  const historyPage = paginateItems(history, query);
+
   return {
-    pending_approvals: sortApprovalViews(filtered.filter((approval) => approval.outcome === "pending"), query.sort),
-    history: sortApprovalViews(filtered.filter((approval) => approval.outcome !== "pending"), query.sort)
+    pending_approvals: pendingPage.items,
+    pending_pagination: pendingPage.pagination,
+    history: historyPage.items,
+    history_pagination: historyPage.pagination
   };
 }
 
 function buildApprovalHistoryReadModel(query: Record<string, string | undefined> = {}) {
+  const approvals = sortApprovalViews(
+    state.approvals
+      .filter((approval) => approval.status !== "pending")
+      .map(toApprovalOperatorView)
+      .filter((approval) => (!query.mission_id || approval.mission_id === query.mission_id)
+        && (!query.run_id || approval.run_id === query.run_id)
+        && (!query.step_id || approval.step_id === query.step_id)
+        && (!query.actor || approval.actor === query.actor)
+        && (!query.outcome || approval.outcome === query.outcome)
+        && inDateRange(approval.resolved_at ?? approval.requested_at, query.from, query.to)),
+    query.sort
+  );
+  const page = paginateItems(approvals, query);
   return {
-    approvals: sortApprovalViews(
-      state.approvals
-        .filter((approval) => approval.status !== "pending")
-        .map(toApprovalOperatorView)
-        .filter((approval) => (!query.mission_id || approval.mission_id === query.mission_id)
-          && (!query.run_id || approval.run_id === query.run_id)
-          && (!query.step_id || approval.step_id === query.step_id)
-          && (!query.actor || approval.actor === query.actor)
-          && (!query.outcome || approval.outcome === query.outcome)
-          && inDateRange(approval.resolved_at ?? approval.requested_at, query.from, query.to)),
-      query.sort
-    )
+    approvals: page.items,
+    pagination: page.pagination
   };
 }
 
@@ -303,6 +313,22 @@ function sortTimeline<T extends { occurred_at: string; mission_id?: string; run_
     }
     return b.occurred_at.localeCompare(a.occurred_at);
   });
+}
+
+function paginateItems<T>(items: T[], query: Record<string, string | undefined>) {
+  const rawLimit = query.limit ? Number(query.limit) : (items.length || 1);
+  const limit = Math.max(1, Math.min(100, rawLimit));
+  const offset = Math.max(0, Number(query.offset ?? 0));
+  const page = items.slice(offset, offset + limit);
+  return {
+    items: page,
+    pagination: {
+      total: items.length,
+      limit,
+      offset,
+      has_more: offset + limit < items.length
+    }
+  };
 }
 
 function buildAuditReadModel(query: Record<string, string | undefined> = {}) {
@@ -337,8 +363,10 @@ function buildAuditReadModel(query: Record<string, string | undefined> = {}) {
     && (!query.event_type || event.event_type === query.event_type)
     && inDateRange(event.occurred_at, query.from, query.to));
 
+  const page = paginateItems(sortTimeline(timeline, query.sort), query);
   return {
-    timeline: sortTimeline(timeline, query.sort)
+    timeline: page.items,
+    pagination: page.pagination
   };
 }
 
@@ -430,6 +458,101 @@ function buildRunDetailReadModel(runId: string) {
       total_events: timeline.length,
       recent: timeline.slice(0, 10)
     }
+  };
+}
+
+function buildStepDetailReadModel(runId: string, stepId: string) {
+  const run = state.runs.find((item) => item.run_id === runId);
+  if (!run) return null;
+
+  const mission = state.missions.find((item) => item.mission_id === run.mission_id);
+  const step = run.steps.find((item) => item.step_id === stepId);
+  if (!step) return null;
+
+  const approval = step.approval_id ? state.approvals.find((item) => item.approval_id === step.approval_id) : undefined;
+  const timeline = buildAuditReadModel({ run_id: runId, step_id: stepId }).timeline;
+
+  return {
+    mission: mission ? { mission_id: mission.mission_id, title: mission.title, status: mission.status } : null,
+    run: { run_id: run.run_id, mission_id: run.mission_id, workflow_id: run.workflow_id, status: run.status },
+    step: {
+      step_id: step.step_id,
+      title: step.title,
+      kind: step.kind,
+      state: step.state,
+      risk: step.risk,
+      notes: step.notes,
+      blocked_reason: step.blocked_reason,
+      execution_id: step.execution_id,
+      started_at: step.started_at,
+      completed_at: step.completed_at,
+      approval_id: step.approval_id
+    },
+    approval: approval ? toApprovalOperatorView(approval) : null,
+    artifacts: step.artifacts.map((artifact) => ({
+      artifact_id: artifact.artifact_id,
+      artifact_type: artifact.kind,
+      summary: artifact.label,
+      ref: artifact.uri,
+      created_at: artifact.created_at ?? step.completed_at ?? step.started_at,
+      eval_linkage: typeof artifact.metadata?.eval_id === "string" ? artifact.metadata.eval_id : undefined
+    })),
+    execution_result_summary: {
+      execution_id: step.execution_id,
+      summary: step.notes,
+      outcome: step.state === "completed" ? "success" : step.state === "failed" ? "failure" : "pending"
+    },
+    timeline_summary: {
+      total_events: timeline.length,
+      recent: timeline.slice(0, 10)
+    }
+  };
+}
+
+function buildArtifactsReadModel(query: Record<string, string | undefined> = {}) {
+  const artifacts = state.runs.flatMap((run) => run.steps.flatMap((step) => step.artifacts.map((artifact) => ({
+    artifact_id: artifact.artifact_id,
+    artifact_type: artifact.kind,
+    mission_id: run.mission_id,
+    run_id: run.run_id,
+    step_id: step.step_id,
+    source_step: step.step_id,
+    created_at: artifact.created_at ?? step.completed_at ?? step.started_at ?? run.updated_at,
+    created_by: typeof artifact.metadata?.created_by === "string" ? artifact.metadata.created_by : "system",
+    summary: artifact.label,
+    ref: artifact.uri,
+    path: artifact.uri,
+    content_type: artifact.content_type,
+    eval_linkage: typeof artifact.metadata?.eval_id === "string" ? artifact.metadata.eval_id : undefined
+  }))));
+
+  const filtered = artifacts.filter((artifact) => (!query.mission_id || artifact.mission_id === query.mission_id)
+    && (!query.run_id || artifact.run_id === query.run_id)
+    && (!query.step_id || artifact.step_id === query.step_id)
+    && (!query.artifact_type || artifact.artifact_type === query.artifact_type)
+    && inDateRange(artifact.created_at, query.from, query.to));
+
+  const sorted = [...filtered].sort((a, b) => {
+    if (query.sort === "oldest") return (a.created_at ?? "").localeCompare(b.created_at ?? "");
+    if (query.sort === "mission") {
+      const diff = a.mission_id.localeCompare(b.mission_id);
+      if (diff !== 0) return diff;
+    }
+    if (query.sort === "run") {
+      const diff = a.run_id.localeCompare(b.run_id);
+      if (diff !== 0) return diff;
+    }
+    if (query.sort === "step") {
+      const diff = a.step_id.localeCompare(b.step_id);
+      if (diff !== 0) return diff;
+    }
+    return (b.created_at ?? "").localeCompare(a.created_at ?? "");
+  });
+  const page = paginateItems(sorted, query);
+
+  return {
+    artifacts: page.items,
+    pagination: page.pagination
   };
 }
 
@@ -572,6 +695,13 @@ app.get("/api/read-models/runs/:id", async (c) => {
   if (!payload) return c.json({ error: "run not found" }, 404);
   return c.json(payload);
 });
+app.get("/api/read-models/runs/:runId/steps/:stepId", async (c) => {
+  await ensureLoaded();
+  const payload = buildStepDetailReadModel(c.req.param("runId"), c.req.param("stepId"));
+  if (!payload) return c.json({ error: "step not found" }, 404);
+  return c.json(payload);
+});
+app.get("/api/read-models/artifacts", async (c) => { await ensureLoaded(); return c.json(buildArtifactsReadModel(c.req.query())); });
 app.get("/api/read-models/approvals", async (c) => { await ensureLoaded(); return c.json(buildApprovalsReadModel(c.req.query())); });
 app.get("/api/read-models/approval-history", async (c) => { await ensureLoaded(); return c.json(buildApprovalHistoryReadModel(c.req.query())); });
 app.get("/api/read-models/audit", async (c) => { await ensureLoaded(); return c.json(buildAuditReadModel(c.req.query())); });
