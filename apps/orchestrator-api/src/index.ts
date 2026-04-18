@@ -210,6 +210,67 @@ function buildMissionsReadModel() {
   };
 }
 
+function toApprovalOperatorView(approval: Approval) {
+  return {
+    approval_id: approval.approval_id,
+    mission_id: approval.mission_id,
+    run_id: approval.run_id,
+    step_id: approval.step_id,
+    actor: approval.resolved_by ?? "system",
+    reason: approval.reason,
+    requested_at: approval.requested_at,
+    resolved_at: approval.resolved_at,
+    outcome: approval.status,
+    decision_scope: approval.decision_scope
+  };
+}
+
+function buildApprovalsReadModel() {
+  const operatorApprovals = state.approvals.map(toApprovalOperatorView);
+  return {
+    pending_approvals: operatorApprovals.filter((approval) => approval.outcome === "pending"),
+    history: operatorApprovals.filter((approval) => approval.outcome !== "pending").sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? ""))
+  };
+}
+
+function buildApprovalHistoryReadModel() {
+  return {
+    approvals: state.approvals
+      .filter((approval) => approval.status !== "pending")
+      .map(toApprovalOperatorView)
+      .sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? ""))
+  };
+}
+
+function buildAuditReadModel() {
+  const titleMap: Record<string, { kind: string; title: string }> = {
+    "approval.requested": { kind: "approval", title: "Approval requested" },
+    "approval.resolved": { kind: "approval", title: "Approval resolved" },
+    "step.started": { kind: "step", title: "Step started" },
+    "step.completed": { kind: "step", title: "Step completed" },
+    "step.failed": { kind: "step", title: "Step failed" },
+    "step.blocked": { kind: "step", title: "Step blocked" },
+    "run.started": { kind: "run", title: "Run started" },
+    "mission.created": { kind: "mission", title: "Mission created" },
+    "deployment.completed": { kind: "deployment", title: "Deployment completed" },
+    "rollback.triggered": { kind: "deployment", title: "Rollback triggered" }
+  };
+
+  return {
+    timeline: state.events.map((event: any) => {
+      const meta = titleMap[event.type] ?? { kind: "event", title: String(event.type ?? "Event") };
+      return {
+        kind: meta.kind,
+        title: meta.title,
+        occurred_at: event.ts ?? event.timestamp ?? "",
+        mission_id: event.mission_id,
+        run_id: event.run_id,
+        step_id: event.step_id
+      };
+    }).sort((a, b) => b.occurred_at.localeCompare(a.occurred_at))
+  };
+}
+
 async function recordEval(run: WorkflowRun, approvals: typeof state.approvals): Promise<void> {
   try {
     const scored = scoreRun({ run, approvals });
@@ -337,6 +398,9 @@ app.get("/api/events", async (c) => { await ensureLoaded(); return c.json({ even
 app.get("/api/audit", async (c) => { await ensureLoaded(); return c.json({ audit: state.audit }); });
 app.get("/api/read-models/overview", async (c) => { await ensureLoaded(); return c.json(buildOverviewReadModel()); });
 app.get("/api/read-models/missions", async (c) => { await ensureLoaded(); return c.json(buildMissionsReadModel()); });
+app.get("/api/read-models/approvals", async (c) => { await ensureLoaded(); return c.json(buildApprovalsReadModel()); });
+app.get("/api/read-models/approval-history", async (c) => { await ensureLoaded(); return c.json(buildApprovalHistoryReadModel()); });
+app.get("/api/read-models/audit", async (c) => { await ensureLoaded(); return c.json(buildAuditReadModel()); });
 
 app.post("/api/missions", async (c) => {
   const authError = requireOperator(c);
@@ -539,7 +603,7 @@ app.post("/api/approvals/:id/respond", async (c) => {
   const approval = state.approvals.find((item) => item.approval_id === c.req.param("id"));
   if (!approval) return c.json({ error: "approval not found" }, 404);
   if (approval.status !== "pending") return c.json({ error: "approval already resolved" }, 409);
-  const body = await c.req.json<{ decision: "approved" | "rejected" }>();
+  const body = await c.req.json<{ decision: "approved" | "rejected"; actor?: string }>();
   const run = state.runs.find((item) => item.run_id === approval.run_id);
   const mission = state.missions.find((item) => item.mission_id === approval.mission_id);
   if (!run || !mission) return c.json({ error: "run/mission missing" }, 404);
@@ -548,10 +612,12 @@ app.post("/api/approvals/:id/respond", async (c) => {
 
   approval.status = body.decision;
   approval.resolved_at = new Date().toISOString();
+  approval.resolved_by = body.actor?.trim() || "operator";
   const approvalResult = {
     approval_id: approval.approval_id,
     decision: body.decision,
     resolved_at: approval.resolved_at,
+    resolved_by: approval.resolved_by,
     reason: approval.reason,
     step_id: approval.step_id
   };

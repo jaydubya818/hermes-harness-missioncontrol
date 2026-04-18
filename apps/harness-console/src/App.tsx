@@ -82,6 +82,7 @@ function Overview() {
 
 function Missions() {
   const { data } = useSWR(`${ORCH}/api/read-models/missions`, fetcher, { refreshInterval: 3000 });
+  const { data: approvalsView } = useSWR(`${ORCH}/api/read-models/approvals`, fetcher, { refreshInterval: 3000 });
   const [title, setTitle] = useState("Fix duplicate webhook jobs");
   const [repoPath, setRepoPath] = useState("/Users/jaywest/projects/Hermes-harness-with-missioncontrol");
   const [message, setMessage] = useState<string | null>(null);
@@ -107,6 +108,9 @@ function Missions() {
       });
       mutate(`${ORCH}/api/missions`);
       mutate(`${ORCH}/api/read-models/missions`);
+      mutate(`${ORCH}/api/read-models/approvals`);
+      mutate(`${ORCH}/api/read-models/approval-history`);
+      mutate(`${ORCH}/api/read-models/audit`);
       mutate(`${ORCH}/api/read-models/overview`);
     }, "Mission created.");
   }
@@ -118,6 +122,9 @@ function Missions() {
       mutate(`${ORCH}/api/runs`);
       mutate(`${ORCH}/api/events`);
       mutate(`${ORCH}/api/read-models/missions`);
+      mutate(`${ORCH}/api/read-models/approvals`);
+      mutate(`${ORCH}/api/read-models/approval-history`);
+      mutate(`${ORCH}/api/read-models/audit`);
       mutate(`${ORCH}/api/read-models/overview`);
     }, "Mission started.");
   }
@@ -130,6 +137,9 @@ function Missions() {
       mutate(`${ORCH}/api/approvals`);
       mutate(`${ORCH}/api/events`);
       mutate(`${ORCH}/api/read-models/missions`);
+      mutate(`${ORCH}/api/read-models/approvals`);
+      mutate(`${ORCH}/api/read-models/approval-history`);
+      mutate(`${ORCH}/api/read-models/audit`);
       mutate(`${ORCH}/api/read-models/overview`);
       mutate(`${EVAL}/api/evals`);
       mutate(`${MEM}/api/memory/agents/agent_demo/summary`);
@@ -144,6 +154,9 @@ function Missions() {
       mutate(`${ORCH}/api/approvals`);
       mutate(`${ORCH}/api/events`);
       mutate(`${ORCH}/api/read-models/missions`);
+      mutate(`${ORCH}/api/read-models/approvals`);
+      mutate(`${ORCH}/api/read-models/approval-history`);
+      mutate(`${ORCH}/api/read-models/audit`);
       mutate(`${ORCH}/api/read-models/overview`);
       mutate(`${EVAL}/api/evals`);
       mutate(`${MEM}/api/memory/agents/agent_demo/summary`);
@@ -162,6 +175,9 @@ function Missions() {
       mutate(`${ORCH}/api/missions`);
       mutate(`${ORCH}/api/events`);
       mutate(`${ORCH}/api/read-models/missions`);
+      mutate(`${ORCH}/api/read-models/approvals`);
+      mutate(`${ORCH}/api/read-models/approval-history`);
+      mutate(`${ORCH}/api/read-models/audit`);
       mutate(`${ORCH}/api/read-models/overview`);
       mutate(`${EVAL}/api/evals`);
     }, `Approval ${decision}.`);
@@ -193,12 +209,12 @@ function Missions() {
           ))}
         </Panel>
         <Panel title="Approvals Queue">
-          {(data?.approval_queue ?? []).length === 0 ? <div>No approvals.</div> : (data?.approval_queue ?? []).map((approval: any) => (
+          {(approvalsView?.pending_approvals ?? []).length === 0 ? <div>No approvals.</div> : (approvalsView?.pending_approvals ?? []).map((approval: any) => (
             <div key={approval.approval_id} style={{ padding: 12, borderBottom: "1px solid #1e293b" }}>
-              <StatusRow label={`${approval.step_id}`} value={approval.status} />
+              <StatusRow label={`${approval.step_id}`} value={approval.outcome} />
               <div style={{ color: "#94a3b8", fontSize: 13, margin: "8px 0" }}>{approval.reason}</div>
-              <div style={{ color: "#64748b", fontSize: 12, marginBottom: 8 }}>Requested: {approval.requested_at}</div>
-              {approval.status === "pending" && <div style={{ display: "flex", gap: 8 }}><Button onClick={() => respondApproval(approval.approval_id, "approved")}>Approve</Button><Button onClick={() => respondApproval(approval.approval_id, "rejected")} style={{ background: "#3f0d19" }}>Reject</Button></div>}
+              <div style={{ color: "#64748b", fontSize: 12, marginBottom: 8 }}>Actor: {approval.actor} · Requested: {approval.requested_at}</div>
+              <div style={{ display: "flex", gap: 8 }}><Button onClick={() => respondApproval(approval.approval_id, "approved")}>Approve</Button><Button onClick={() => respondApproval(approval.approval_id, "rejected")} style={{ background: "#3f0d19" }}>Reject</Button></div>
             </div>
           ))}
         </Panel>
@@ -387,14 +403,30 @@ function Code() {
 }
 
 function Audit() {
-  const { data: events } = useSWR(`${ORCH}/api/events`, fetcher, { refreshInterval: 3000 });
-  const { data: audit } = useSWR(`${ORCH}/api/audit`, fetcher, { refreshInterval: 3000 });
+  const { data: auditView } = useSWR(`${ORCH}/api/read-models/audit`, fetcher, { refreshInterval: 3000 });
+  const { data: approvalHistory } = useSWR(`${ORCH}/api/read-models/approval-history`, fetcher, { refreshInterval: 3000 });
   const { data: evals } = useSWR(`${EVAL}/api/evals`, fetcher, { refreshInterval: 4000 });
-  const { data: approvals } = useSWR(`${ORCH}/api/approvals`, fetcher, { refreshInterval: 3000 });
   return (
     <div style={{ padding: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-      <Panel title="Event Stream">{(events?.events ?? []).length === 0 ? <div>No events yet.</div> : <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(events.events, null, 2)}</pre>}</Panel>
-      <Panel title="Audit + Eval">{audit?.audit && <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(audit.audit, null, 2)}</pre>}{evals?.summary && <pre style={{ whiteSpace: "pre-wrap", marginTop: 12 }}>{JSON.stringify(evals.summary, null, 2)}</pre>}{approvals?.approvals && <pre style={{ whiteSpace: "pre-wrap", marginTop: 12 }}>{JSON.stringify(approvals.approvals, null, 2)}</pre>}</Panel>
+      <Panel title="Run Timeline">
+        {(auditView?.timeline ?? []).length === 0 ? <div>No timeline yet.</div> : (auditView?.timeline ?? []).map((item: any, index: number) => (
+          <div key={`${item.occurred_at}-${index}`} style={{ padding: 12, borderBottom: "1px solid #1e293b" }}>
+            <StatusRow label={item.title} value={item.kind} />
+            <div style={{ color: "#64748b", fontSize: 12, marginTop: 6 }}>{item.occurred_at}</div>
+            <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 4 }}>{[item.mission_id, item.run_id, item.step_id].filter(Boolean).join(" · ")}</div>
+          </div>
+        ))}
+      </Panel>
+      <Panel title="Approval History + Eval">
+        {(approvalHistory?.approvals ?? []).length === 0 ? <div>No approval history yet.</div> : (approvalHistory?.approvals ?? []).map((approval: any) => (
+          <div key={approval.approval_id} style={{ padding: 12, borderBottom: "1px solid #1e293b" }}>
+            <StatusRow label={`${approval.step_id}`} value={approval.outcome} />
+            <div style={{ color: "#94a3b8", fontSize: 13, marginTop: 6 }}>{approval.reason}</div>
+            <div style={{ color: "#64748b", fontSize: 12, marginTop: 4 }}>Actor: {approval.actor} · Resolved: {approval.resolved_at}</div>
+          </div>
+        ))}
+        {evals?.summary && <pre style={{ whiteSpace: "pre-wrap", marginTop: 12 }}>{JSON.stringify(evals.summary, null, 2)}</pre>}
+      </Panel>
     </div>
   );
 }
