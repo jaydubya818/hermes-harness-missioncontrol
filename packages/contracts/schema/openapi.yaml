@@ -29,14 +29,21 @@ components:
     Mission:
       type: object
       additionalProperties: false
-      required: [mission_id, title, workflow, status, created_at, updated_at]
+      required: [mission_id, title, workflow, project_id, status, created_at, updated_at]
       properties:
         mission_id: { type: string }
         title: { type: string }
+        objective: { type: string }
         workflow: { type: string }
+        project_id: { type: string }
+        policy_ref: { type: string }
+        profile_ref: { type: string }
         repo_path: { type: string }
+        workspace_root: { type: string }
         status:
           $ref: '#/components/schemas/MissionState'
+        active_run_id: { type: string }
+        summary: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     Run:

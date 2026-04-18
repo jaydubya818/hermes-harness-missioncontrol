@@ -32,6 +32,41 @@ describe("orchestrator-api", () => {
     process.env.VITEST = "1";
   });
 
+  it("creates a contract-shaped mission payload", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const app = await loadApp();
+    const response = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Contracts", project_id: "proj_demo", workflow_id: "bugfix", repo_path: "/repo" })
+    });
+
+    const mission = await response.json() as {
+      mission_id: string;
+      title: string;
+      objective?: string;
+      workflow: string;
+      project_id: string;
+      repo_path?: string;
+      active_run_id?: string;
+      status: string;
+      created_at: string;
+      updated_at: string;
+    };
+
+    expect(response.status).toBe(201);
+    expect(mission).toMatchObject({
+      title: "Contracts",
+      objective: "Contracts",
+      workflow: "bugfix",
+      project_id: "proj_demo",
+      repo_path: "/repo",
+      status: "pending"
+    });
+    expect(mission.active_run_id).toBeUndefined();
+  });
+
   it("returns a TaskExecutionResult-shaped execution_result payload", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes("/api/execute-step")) {
@@ -161,7 +196,7 @@ describe("orchestrator-api", () => {
     const run = await startRun.json() as { run_id: string };
 
     const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
-    const payload = await execute.json() as { run: { status: string; steps: Array<{ id: string; notes?: string }> } };
+    const payload = await execute.json() as { run: { status: string; steps: Array<{ step_id: string; notes?: string; state?: string }> } };
 
     expect(execute.status).toBe(400);
     expect(payload.run.status).toBe("failed");
@@ -181,11 +216,14 @@ describe("orchestrator-api", () => {
       missions: [{
         mission_id: "mis_demo",
         title: "Approval flow",
+        objective: "Approval flow",
         project_id: "proj_demo",
-        workflow_id: "bugfix",
+        workflow: "bugfix",
         status: "running",
-        run_id: "run_demo",
-        approval_id: "approval_demo"
+        active_run_id: "run_demo",
+        summary: "Mission started",
+        created_at: "2026-04-11T00:00:00.000Z",
+        updated_at: "2026-04-11T00:00:00.000Z"
       }],
       runs: [{
         run_id: "run_demo",

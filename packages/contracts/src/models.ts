@@ -10,9 +10,16 @@ import type {
 export interface Mission {
   mission_id: string;
   title: string;
+  objective?: string;
   workflow: string;
+  project_id: string;
+  policy_ref?: string;
+  profile_ref?: string;
   repo_path?: string;
+  workspace_root?: string;
   status: MissionState;
+  active_run_id?: string;
+  summary?: string;
   created_at: string;
   updated_at: string;
 }

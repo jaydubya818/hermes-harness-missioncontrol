@@ -70,9 +70,15 @@ describe("contracts package exports", () => {
     const mission: Mission = {
       mission_id: "mis_123",
       title: "Implement contracts package",
+      objective: "Adopt mission contract",
       workflow: "implementation",
+      project_id: "proj_demo",
+      profile_ref: "profile://hermes/default",
       repo_path: "/repo",
+      workspace_root: "/repo/.worktrees/run_123",
       status: "running",
+      active_run_id: "run_123",
+      summary: "Mission in progress",
       created_at: "2026-04-18T18:00:00Z",
       updated_at: "2026-04-18T18:00:00Z",
     };

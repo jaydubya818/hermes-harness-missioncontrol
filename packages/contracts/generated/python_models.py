@@ -60,9 +60,16 @@ class Mission(BaseModel):
     model_config = ConfigDict(extra='forbid')
     mission_id: str
     title: str
+    objective: str | None = None
     workflow: str
+    project_id: str
+    policy_ref: str | None = None
+    profile_ref: str | None = None
     repo_path: str | None = None
+    workspace_root: str | None = None
     status: MissionState
+    active_run_id: str | None = None
+    summary: str | None = None
     created_at: str
     updated_at: str
 
