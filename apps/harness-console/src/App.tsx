@@ -65,26 +65,23 @@ function TopBar({ active, onChange }: { active: Tab; onChange: (tab: Tab) => voi
 
 function Overview() {
   const { data: memory } = useSWR(`${MEM}/api/memory/agents/agent_demo/summary`, fetcher, { refreshInterval: 15000 });
-  const { data: missions } = useSWR(`${ORCH}/api/missions`, fetcher, { refreshInterval: 5000 });
-  const { data: approvals } = useSWR(`${ORCH}/api/approvals`, fetcher, { refreshInterval: 5000 });
+  const { data: overview } = useSWR(`${ORCH}/api/read-models/overview`, fetcher, { refreshInterval: 5000 });
   const { data: evals } = useSWR(`${EVAL}/api/evals`, fetcher, { refreshInterval: 7000 });
   const trend = useMemo(() => ((evals?.records ?? []) as Array<{ cost_usd: number }>).slice(-7).map((item) => item.cost_usd) || [0], [evals]);
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 16, padding: 16 }}>
-      <Panel title="Active Missions"><StatusRow label="Open missions" value={missions?.missions?.length ?? 0} /><StatusRow label="Pending approvals" value={approvals?.approvals?.filter((item: any) => item.status === "pending").length ?? 0} /><StatusRow label="Recent failures" value={missions?.missions?.filter((item: any) => item.status === "failed").length ?? 0} /></Panel>
+      <Panel title="Active Missions"><StatusRow label="Open missions" value={overview?.metrics?.open_missions ?? 0} /><StatusRow label="Pending approvals" value={overview?.metrics?.pending_approvals ?? 0} /><StatusRow label="Recent failures" value={overview?.metrics?.failed_missions ?? 0} /></Panel>
       <Panel title="Memory Health"><CapacityBar value={memory?.learned_count ?? 0} max={20} /><div style={{ height: 12 }} /><StatusRow label="Pending rewrites" value={memory?.pending_rewrites ?? 0} /></Panel>
       <Panel title="Cost Today"><CostCard label="Estimated run cost" amount={`$${(evals?.summary?.total_cost_usd ?? 0).toFixed?.(2) ?? '0.00'}`} /></Panel>
       <Panel title="Run Throughput"><Sparkline values={trend.length ? trend : [0]} /><StatusRow label="Total runs" value={evals?.summary?.total_runs ?? 0} /></Panel>
-      <Panel title="Approval Load"><StatusRow label="Awaiting decision" value={approvals?.approvals?.filter((item: any) => item.status === "pending").length ?? 0} /><StatusRow label="Approved" value={approvals?.approvals?.filter((item: any) => item.status === "approved").length ?? 0} /></Panel>
+      <Panel title="Approval Load"><StatusRow label="Awaiting decision" value={overview?.metrics?.pending_approvals ?? 0} /><StatusRow label="Approved" value={evals?.summary?.approval_count ?? 0} /></Panel>
       <Panel title="Eval Snapshot"><StatusRow label="Success rate" value={`${Math.round((evals?.summary?.success_rate ?? 0) * 100)}%`} /><StatusRow label="Avg cost" value={`$${(evals?.summary?.average_cost_usd ?? 0).toFixed?.(2) ?? '0.00'}`} /></Panel>
     </div>
   );
 }
 
 function Missions() {
-  const { data } = useSWR(`${ORCH}/api/missions`, fetcher, { refreshInterval: 3000 });
-  const { data: runs } = useSWR(`${ORCH}/api/runs`, fetcher, { refreshInterval: 3000 });
-  const { data: approvals } = useSWR(`${ORCH}/api/approvals`, fetcher, { refreshInterval: 3000 });
+  const { data } = useSWR(`${ORCH}/api/read-models/missions`, fetcher, { refreshInterval: 3000 });
   const [title, setTitle] = useState("Fix duplicate webhook jobs");
   const [repoPath, setRepoPath] = useState("/Users/jaywest/projects/Hermes-harness-with-missioncontrol");
   const [message, setMessage] = useState<string | null>(null);
@@ -109,6 +106,8 @@ function Missions() {
         body: JSON.stringify({ title, project_id: "proj_demo", workflow_id: "bugfix", repo_path: repoPath })
       });
       mutate(`${ORCH}/api/missions`);
+      mutate(`${ORCH}/api/read-models/missions`);
+      mutate(`${ORCH}/api/read-models/overview`);
     }, "Mission created.");
   }
 
@@ -118,6 +117,8 @@ function Missions() {
       mutate(`${ORCH}/api/missions`);
       mutate(`${ORCH}/api/runs`);
       mutate(`${ORCH}/api/events`);
+      mutate(`${ORCH}/api/read-models/missions`);
+      mutate(`${ORCH}/api/read-models/overview`);
     }, "Mission started.");
   }
 
@@ -128,6 +129,8 @@ function Missions() {
       mutate(`${ORCH}/api/runs`);
       mutate(`${ORCH}/api/approvals`);
       mutate(`${ORCH}/api/events`);
+      mutate(`${ORCH}/api/read-models/missions`);
+      mutate(`${ORCH}/api/read-models/overview`);
       mutate(`${EVAL}/api/evals`);
       mutate(`${MEM}/api/memory/agents/agent_demo/summary`);
     }, `Step ${stepId} completed.`);
@@ -140,6 +143,8 @@ function Missions() {
       mutate(`${ORCH}/api/runs`);
       mutate(`${ORCH}/api/approvals`);
       mutate(`${ORCH}/api/events`);
+      mutate(`${ORCH}/api/read-models/missions`);
+      mutate(`${ORCH}/api/read-models/overview`);
       mutate(`${EVAL}/api/evals`);
       mutate(`${MEM}/api/memory/agents/agent_demo/summary`);
     }, "Current step executed.");
@@ -156,6 +161,8 @@ function Missions() {
       mutate(`${ORCH}/api/runs`);
       mutate(`${ORCH}/api/missions`);
       mutate(`${ORCH}/api/events`);
+      mutate(`${ORCH}/api/read-models/missions`);
+      mutate(`${ORCH}/api/read-models/overview`);
       mutate(`${EVAL}/api/evals`);
     }, `Approval ${decision}.`);
   }
@@ -173,10 +180,11 @@ function Missions() {
       </Panel>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <Panel title="Mission Queue">
-          {(data?.missions ?? []).length === 0 ? <div>No missions yet.</div> : (data.missions as any[]).map((mission) => (
+          {(data?.mission_queue ?? []).length === 0 ? <div>No missions yet.</div> : (data?.mission_queue ?? []).map((mission: any) => (
             <div key={mission.mission_id} style={{ padding: 12, borderBottom: "1px solid #1e293b" }}>
               <StatusRow label={mission.title} value={mission.status} />
               <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6 }}>{mission.repo_path ?? "no repo path"}</div>
+              <div style={{ color: "#64748b", fontSize: 12, marginTop: 6 }}>{mission.summary ?? ""}</div>
               <div style={{ height: 8 }} />
               <div style={{ display: "flex", gap: 8 }}>
                 <Button onClick={() => startMission(mission.mission_id)}>Start</Button>
@@ -185,26 +193,29 @@ function Missions() {
           ))}
         </Panel>
         <Panel title="Approvals Queue">
-          {(approvals?.approvals ?? []).length === 0 ? <div>No approvals.</div> : (approvals.approvals as any[]).map((approval) => (
+          {(data?.approval_queue ?? []).length === 0 ? <div>No approvals.</div> : (data?.approval_queue ?? []).map((approval: any) => (
             <div key={approval.approval_id} style={{ padding: 12, borderBottom: "1px solid #1e293b" }}>
               <StatusRow label={`${approval.step_id}`} value={approval.status} />
               <div style={{ color: "#94a3b8", fontSize: 13, margin: "8px 0" }}>{approval.reason}</div>
+              <div style={{ color: "#64748b", fontSize: 12, marginBottom: 8 }}>Requested: {approval.requested_at}</div>
               {approval.status === "pending" && <div style={{ display: "flex", gap: 8 }}><Button onClick={() => respondApproval(approval.approval_id, "approved")}>Approve</Button><Button onClick={() => respondApproval(approval.approval_id, "rejected")} style={{ background: "#3f0d19" }}>Reject</Button></div>}
             </div>
           ))}
         </Panel>
       </div>
       <Panel title="Workflow Runs">
-        {(runs?.runs ?? []).length === 0 ? <div>No runs yet.</div> : (runs.runs as any[]).map((run) => (
+        {(data?.run_cards ?? []).length === 0 ? <div>No runs yet.</div> : (data?.run_cards ?? []).map((run: any) => (
           <div key={run.run_id} style={{ padding: 12, borderBottom: "1px solid #1e293b" }}>
             <StatusRow label={`${run.run_id} · ${run.workflow_id}`} value={run.status} />
+            <div style={{ color: "#64748b", fontSize: 12, marginTop: 6 }}>{run.summary ?? ""}</div>
             <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
               {run.steps.map((step: any) => (
-                <div key={step.id} style={{ padding: 10, border: "1px solid #1e293b", borderRadius: 8 }}>
-                  <StatusRow label={`${step.id} (${step.kind})`} value={step.status} />
-                  <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6 }}>Risk: {step.risk} · Artifacts: {step.artifacts.length}</div>
-                  {step.artifacts.length > 0 && <div style={{ color: "#7dd3fc", fontSize: 12, marginTop: 6 }}>Latest artifact: {step.artifacts[step.artifacts.length - 1].uri}</div>}
-                  {step.status === "running" && <div style={{ marginTop: 8, display: "flex", gap: 8 }}><Button onClick={() => executeCurrent(run.run_id)}>Execute current step</Button><Button onClick={() => completeStep(run.run_id, step.id)}>Mark step complete</Button></div>}
+                <div key={step.step_id} style={{ padding: 10, border: "1px solid #1e293b", borderRadius: 8 }}>
+                  <StatusRow label={`${step.step_id} (${step.kind})`} value={step.state} />
+                  <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6 }}>Risk: {step.risk} · Artifacts: {step.artifacts_count}</div>
+                  {step.blocked_reason && <div style={{ color: "#fbbf24", fontSize: 12, marginTop: 6 }}>{step.blocked_reason}</div>}
+                  {step.latest_artifact_uri && <div style={{ color: "#7dd3fc", fontSize: 12, marginTop: 6 }}>Latest artifact: {step.latest_artifact_uri}</div>}
+                  {step.state === "running" && <div style={{ marginTop: 8, display: "flex", gap: 8 }}><Button onClick={() => executeCurrent(run.run_id)}>Execute current step</Button><Button onClick={() => completeStep(run.run_id, step.step_id)}>Mark step complete</Button></div>}
                 </div>
               ))}
             </div>
@@ -337,7 +348,7 @@ function Memory() {
 }
 
 function Code() {
-  const { data: runs } = useSWR(`${ORCH}/api/runs`, fetcher, { refreshInterval: 4000 });
+  const { data } = useSWR(`${ORCH}/api/read-models/missions`, fetcher, { refreshInterval: 4000 });
   const [artifactContent, setArtifactContent] = useState("diff --git a/file.ts b/file.ts\n+ bounded autonomy patch");
 
   async function addArtifact(runId: string, stepId: string) {
@@ -347,6 +358,7 @@ function Code() {
       body: JSON.stringify({ step_id: stepId, type: "diff", content: artifactContent })
     });
     mutate(`${ORCH}/api/runs`);
+    mutate(`${ORCH}/api/read-models/missions`);
   }
 
   return (
@@ -355,16 +367,16 @@ function Code() {
         <textarea value={artifactContent} onChange={(event) => setArtifactContent(event.target.value)} style={{ width: "100%", minHeight: 140, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
       </Panel>
       <Panel title="Run Artifacts">
-        {(runs?.runs ?? []).length === 0 ? <div>No runs yet.</div> : (runs.runs as any[]).map((run) => (
+        {(data?.run_cards ?? []).length === 0 ? <div>No runs yet.</div> : (data?.run_cards ?? []).map((run: any) => (
           <div key={run.run_id} style={{ marginBottom: 16 }}>
             <div style={{ fontWeight: 700, marginBottom: 8 }}>{run.run_id}</div>
             {run.steps.map((step: any) => (
-              <div key={step.id} style={{ border: "1px solid #1e293b", borderRadius: 8, padding: 12, marginBottom: 8 }}>
-                <StatusRow label={`${step.id}`} value={`${step.artifacts.length} artifacts`} />
+              <div key={step.step_id} style={{ border: "1px solid #1e293b", borderRadius: 8, padding: 12, marginBottom: 8 }}>
+                <StatusRow label={`${step.step_id}`} value={`${step.artifacts_count} artifacts`} />
                 <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                  <Button onClick={() => addArtifact(run.run_id, step.id)}>Add diff artifact</Button>
+                  <Button onClick={() => addArtifact(run.run_id, step.step_id)}>Add diff artifact</Button>
                 </div>
-                {step.artifacts.length > 0 && <pre style={{ whiteSpace: "pre-wrap", marginTop: 8 }}>{JSON.stringify(step.artifacts, null, 2)}</pre>}
+                {step.latest_artifact_uri && <pre style={{ whiteSpace: "pre-wrap", marginTop: 8 }}>{step.latest_artifact_uri}</pre>}
               </div>
             ))}
           </div>

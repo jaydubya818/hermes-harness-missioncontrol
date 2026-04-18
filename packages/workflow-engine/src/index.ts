@@ -134,7 +134,12 @@ function transitionCurrentStep(
   if (options.execution_id) current.execution_id = options.execution_id;
   if (options.approval_id !== undefined) current.approval_id = options.approval_id;
   if (options.notes !== undefined) current.notes = options.notes;
-  if (options.blocked_reason !== undefined) current.blocked_reason = options.blocked_reason;
+
+  if (state === "awaiting_approval" || state === "blocked") {
+    current.blocked_reason = options.blocked_reason;
+  } else {
+    current.blocked_reason = undefined;
+  }
 
   if (state === "running") {
     current.started_at ??= now;
@@ -166,8 +171,8 @@ export function startCurrentStep(run: WorkflowRun, execution_id?: string): Workf
   return transitionCurrentStep(run, "running", { execution_id });
 }
 
-export function markCurrentStepAwaitingApproval(run: WorkflowRun, approval_id: string, notes?: string): WorkflowRun {
-  return transitionCurrentStep(run, "awaiting_approval", { approval_id, notes });
+export function markCurrentStepAwaitingApproval(run: WorkflowRun, approval_id: string, notes?: string, blocked_reason?: string): WorkflowRun {
+  return transitionCurrentStep(run, "awaiting_approval", { approval_id, notes, blocked_reason });
 }
 
 export function markCurrentStepCompleted(run: WorkflowRun, notes?: string): WorkflowRun {

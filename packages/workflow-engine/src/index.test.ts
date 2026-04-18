@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createWorkflowRun, startCurrentStep, advanceRun, markCurrentStepAwaitingApproval } from "./index.js";
+import { createWorkflowRun, startCurrentStep, advanceRun, markCurrentStepAwaitingApproval, markCurrentStepCompleted } from "./index.js";
 
 describe("workflow-engine", () => {
   it("creates contract-shaped steps and advances a workflow", () => {
@@ -19,15 +19,34 @@ describe("workflow-engine", () => {
     const run = createWorkflowRun("run_demo", "mis_demo", "bugfix");
     startCurrentStep(run, "exec_demo");
 
-    markCurrentStepAwaitingApproval(run, "approval_demo", "needs approval");
+    markCurrentStepAwaitingApproval(run, "approval_demo", "worker summary", "needs approval");
 
     expect(run.status).toBe("awaiting_approval");
+    expect(run.approval_id).toBe("approval_demo");
     expect(run.steps[0]).toMatchObject({
       step_id: "plan",
       state: "awaiting_approval",
       approval_id: "approval_demo",
-      notes: "needs approval",
+      notes: "worker summary",
+      blocked_reason: "needs approval",
       execution_id: "exec_demo"
+    });
+  });
+
+  it("clears run-level approval visibility once approval-gated step completes", () => {
+    const run = createWorkflowRun("run_demo", "mis_demo", "bugfix");
+    startCurrentStep(run, "exec_demo");
+    markCurrentStepAwaitingApproval(run, "approval_demo", "worker summary", "needs approval");
+
+    markCurrentStepCompleted(run, "worker summary approved");
+
+    expect(run.approval_id).toBeUndefined();
+    expect(run.status).toBe("running");
+    expect(run.steps[0]).toMatchObject({
+      state: "completed",
+      approval_id: "approval_demo",
+      notes: "worker summary approved",
+      blocked_reason: undefined
     });
   });
 });

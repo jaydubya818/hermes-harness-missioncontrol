@@ -7,7 +7,7 @@ import { evaluateStepPolicy } from "@hermes-harness-with-missioncontrol/policy-e
 import { loadJsonFile, saveJsonFile } from "@hermes-harness-with-missioncontrol/state-store";
 import { makeId, type HarnessEvent } from "@hermes-harness-with-missioncontrol/shared-types";
 import { scoreRun } from "@hermes-harness-with-missioncontrol/eval-core";
-import { FinalOutcome, StepKind, type ArtifactRef, type TaskExecutionResult } from "@hermes-harness-with-missioncontrol/contracts";
+import { FinalOutcome, StepKind, type ApprovalRequest, type ApprovalResult, type ArtifactRef, type TaskExecutionResult } from "@hermes-harness-with-missioncontrol/contracts";
 
 const app = new Hono();
 const stateFile = process.env.ORCHESTRATOR_STATE_FILE ?? resolve(process.cwd(), "../../data/orchestrator-state.json");
@@ -33,14 +33,9 @@ type Mission = {
   updated_at: string;
 };
 
-type Approval = {
-  approval_id: `approval_${string}`;
-  mission_id: string;
-  run_id: string;
-  step_id: string;
+type Approval = ApprovalRequest & Partial<ApprovalResult> & {
   status: "pending" | "approved" | "rejected";
-  reason: string;
-  created_at: string;
+  created_at?: string;
 };
 
 type OrchestratorState = {
@@ -106,6 +101,14 @@ function toTaskExecutionResult(run: WorkflowRun, stepId: string, execution: Work
 const state: OrchestratorState = { missions: [], runs: [], approvals: [], events: [], audit: [] };
 let initialized = false;
 
+function normalizeApproval(approval: Approval): Approval {
+  return {
+    ...approval,
+    decision_scope: approval.decision_scope ?? "step",
+    requested_at: approval.requested_at ?? approval.created_at ?? new Date().toISOString()
+  };
+}
+
 function authHeaders() {
   return {
     "content-type": "application/json",
@@ -125,7 +128,7 @@ async function ensureLoaded() {
   const loaded = await loadJsonFile<OrchestratorState>(stateFile, state);
   state.missions.splice(0, state.missions.length, ...(loaded.missions ?? []));
   state.runs.splice(0, state.runs.length, ...(loaded.runs ?? []));
-  state.approvals.splice(0, state.approvals.length, ...(loaded.approvals ?? []));
+  state.approvals.splice(0, state.approvals.length, ...((loaded.approvals ?? []).map((approval) => normalizeApproval(approval as Approval))));
   state.events.splice(0, state.events.length, ...(loaded.events ?? []));
   state.audit.splice(0, state.audit.length, ...(loaded.audit ?? []));
   initialized = true;
@@ -148,6 +151,63 @@ function getMissionForRun(run: WorkflowRun) {
 
 function getStepArtifact(run: WorkflowRun, stepId: string, type: string): WorkflowArtifact | undefined {
   return run.steps.find((step) => step.step_id === stepId)?.artifacts.find((artifact) => (artifact.type ?? artifact.kind) === type);
+}
+
+function buildOverviewReadModel() {
+  return {
+    metrics: {
+      open_missions: state.missions.filter((mission) => !["completed", "cancelled"].includes(mission.status)).length,
+      pending_approvals: state.approvals.filter((approval) => approval.status === "pending").length,
+      failed_missions: state.missions.filter((mission) => mission.status === "failed").length
+    }
+  };
+}
+
+function buildMissionsReadModel() {
+  return {
+    mission_queue: state.missions.map((mission) => ({
+      mission_id: mission.mission_id,
+      title: mission.title,
+      objective: mission.objective,
+      status: mission.status,
+      repo_path: mission.repo_path,
+      active_run_id: mission.active_run_id,
+      summary: mission.summary,
+      updated_at: mission.updated_at
+    })),
+    approval_queue: state.approvals.map((approval) => ({
+      approval_id: approval.approval_id,
+      mission_id: approval.mission_id,
+      run_id: approval.run_id,
+      step_id: approval.step_id,
+      status: approval.status,
+      reason: approval.reason,
+      decision_scope: approval.decision_scope,
+      requested_at: approval.requested_at,
+      resolved_at: approval.resolved_at
+    })),
+    run_cards: state.runs.map((run) => ({
+      run_id: run.run_id,
+      mission_id: run.mission_id,
+      workflow_id: run.workflow_id,
+      status: run.status,
+      current_step_id: run.current_step_id,
+      approval_id: run.approval_id,
+      summary: run.summary,
+      steps: run.steps.map((step) => ({
+        step_id: step.step_id,
+        title: step.title,
+        kind: step.kind,
+        state: step.state,
+        risk: step.risk,
+        approval_id: step.approval_id,
+        blocked_reason: step.blocked_reason,
+        notes: step.notes,
+        artifacts_count: step.artifacts.length,
+        latest_artifact_uri: step.artifacts[step.artifacts.length - 1]?.uri
+      }))
+    }))
+  };
 }
 
 async function recordEval(run: WorkflowRun, approvals: typeof state.approvals): Promise<void> {
@@ -275,6 +335,8 @@ app.get("/api/runs", async (c) => { await ensureLoaded(); return c.json({ runs: 
 app.get("/api/approvals", async (c) => { await ensureLoaded(); return c.json({ approvals: state.approvals }); });
 app.get("/api/events", async (c) => { await ensureLoaded(); return c.json({ events: state.events }); });
 app.get("/api/audit", async (c) => { await ensureLoaded(); return c.json({ audit: state.audit }); });
+app.get("/api/read-models/overview", async (c) => { await ensureLoaded(); return c.json(buildOverviewReadModel()); });
+app.get("/api/read-models/missions", async (c) => { await ensureLoaded(); return c.json(buildMissionsReadModel()); });
 
 app.post("/api/missions", async (c) => {
   const authError = requireOperator(c);
@@ -368,15 +430,17 @@ app.post("/api/runs/:id/execute-current", async (c) => {
   }
 
   if (policy.requires_approval) {
-    const approval: Approval = { approval_id: makeId("approval") as `approval_${string}`, mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id, status: "pending", reason: `${policy.reason} (confidence ${execution.confidence})`, created_at: new Date().toISOString() };
+    const requestedAt = new Date().toISOString();
+    const approval = normalizeApproval({ approval_id: makeId("approval") as `approval_${string}`, mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id, status: "pending", reason: `${policy.reason} (confidence ${execution.confidence})`, decision_scope: "step", requested_at: requestedAt });
     state.approvals.unshift(approval);
-    markCurrentStepAwaitingApproval(run, approval.approval_id, approval.reason);
+    markCurrentStepAwaitingApproval(run, approval.approval_id, execution.summary, approval.reason);
     if (mission) {
       mission.status = "awaiting_approval";
       mission.summary = approval.reason;
       mission.updated_at = new Date().toISOString();
     }
-    recordEvent({ type: "step.completed", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id as `step_${string}`, payload: { policy, execution, execution_result: executionResult, awaiting_approval: true } as any });
+    recordEvent({ type: "approval.requested", ts: requestedAt, mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id as `step_${string}`, payload: approval as any });
+    recordEvent({ type: "step.blocked", ts: requestedAt, mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id as `step_${string}`, payload: { approval_id: approval.approval_id, reason: approval.reason } as any });
     await persist();
     return c.json({ run, approval, policy, execution, execution_result: executionResult });
   }
@@ -432,16 +496,18 @@ app.post("/api/runs/:id/steps/:stepId/complete", async (c) => {
     return c.json({ run, policy }, 400);
   }
   if (policy.requires_approval) {
-    const approval: Approval = { approval_id: makeId("approval") as `approval_${string}`, mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id, status: "pending", reason: policy.reason, created_at: new Date().toISOString() };
+    const requestedAt = new Date().toISOString();
+    const approval = normalizeApproval({ approval_id: makeId("approval") as `approval_${string}`, mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id, status: "pending", reason: policy.reason, decision_scope: "step", requested_at: requestedAt });
     state.approvals.unshift(approval);
-    markCurrentStepAwaitingApproval(run, approval.approval_id, policy.reason);
+    markCurrentStepAwaitingApproval(run, approval.approval_id, "step completed", policy.reason);
     const mission = getMissionForRun(run);
     if (mission) {
       mission.status = "awaiting_approval";
       mission.summary = approval.reason;
       mission.updated_at = new Date().toISOString();
     }
-    recordEvent({ type: "step.completed", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id as `step_${string}`, payload: { policy, awaiting_approval: true } as any });
+    recordEvent({ type: "approval.requested", ts: requestedAt, mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id as `step_${string}`, payload: approval as any });
+    recordEvent({ type: "step.blocked", ts: requestedAt, mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id as `step_${string}`, payload: { approval_id: approval.approval_id, reason: approval.reason } as any });
     await persist();
     return c.json({ run, approval, policy });
   }
@@ -478,9 +544,18 @@ app.post("/api/approvals/:id/respond", async (c) => {
   const mission = state.missions.find((item) => item.mission_id === approval.mission_id);
   if (!run || !mission) return c.json({ error: "run/mission missing" }, 404);
   const current = getCurrentStep(run);
-  if (run.status !== "awaiting_approval" || !current || current.step_id !== approval.step_id) return c.json({ error: "approval is stale" }, 409);
+  if (run.status !== "awaiting_approval" || !current || current.step_id !== approval.step_id || current.approval_id !== approval.approval_id) return c.json({ error: "approval is stale" }, 409);
 
   approval.status = body.decision;
+  approval.resolved_at = new Date().toISOString();
+  const approvalResult = {
+    approval_id: approval.approval_id,
+    decision: body.decision,
+    resolved_at: approval.resolved_at,
+    reason: approval.reason,
+    step_id: approval.step_id
+  };
+  recordEvent({ type: "approval.resolved", ts: approvalResult.resolved_at, mission_id: mission.mission_id, run_id: run.run_id, step_id: approval.step_id as `step_${string}`, payload: approvalResult as any });
 
   if (body.decision === "rejected") {
     markCurrentStepFailed(run, `Approval rejected for ${approval.step_id}`);
@@ -491,22 +566,22 @@ app.post("/api/approvals/:id/respond", async (c) => {
       recordEvent({ type: "rollback.triggered", ts: new Date().toISOString(), mission_id: mission.mission_id, run_id: run.run_id, step_id: approval.step_id as `step_${string}`, payload: { deploy: getStepArtifact(run, approval.step_id, "deploy-note") } as any });
     }
     await writebackStep(run, approval.step_id, "failure", `Approval rejected for ${approval.step_id}`);
-    recordEvent({ type: "approval.rejected", ts: new Date().toISOString(), mission_id: mission.mission_id, run_id: run.run_id, step_id: approval.step_id as `step_${string}`, payload: approval as any });
+    recordEvent({ type: "step.failed", ts: new Date().toISOString(), mission_id: mission.mission_id, run_id: run.run_id, step_id: approval.step_id as `step_${string}`, payload: { approval_id: approval.approval_id, reason: approval.reason } as any });
     await recordEval(run, state.approvals.filter((item) => item.run_id === run.run_id));
     await cleanupExecutionWorkspace(run, mission, null);
     await persist();
     return c.json({ approval, run });
   }
 
-  recordEvent({ type: "approval.granted", ts: new Date().toISOString(), mission_id: mission.mission_id, run_id: run.run_id, step_id: approval.step_id as `step_${string}`, payload: approval as any });
   if (approval.step_id === "deploy") {
     recordEvent({ type: "deployment.completed", ts: new Date().toISOString(), mission_id: mission.mission_id, run_id: run.run_id, step_id: approval.step_id as `step_${string}`, payload: { deploy: getStepArtifact(run, approval.step_id, "deploy-note") } as any });
   }
-  markCurrentStepCompleted(run, "approved");
+  markCurrentStepCompleted(run, current.notes ?? `Approval granted for ${approval.step_id}`);
   await writebackStep(run, approval.step_id, "success", `Approval granted for ${approval.step_id}`);
   mission.status = run.status;
-  mission.summary = `Approval granted for ${approval.step_id}`;
+  mission.summary = current.notes ?? `Approval granted for ${approval.step_id}`;
   mission.updated_at = new Date().toISOString();
+  recordEvent({ type: "step.completed", ts: new Date().toISOString(), mission_id: mission.mission_id, run_id: run.run_id, step_id: approval.step_id as `step_${string}`, payload: { approval_id: approval.approval_id, decision: body.decision } as any });
   const next = getCurrentStep(run);
   const shouldStartNext = !!next && !["completed", "failed", "awaiting_approval", "cancelled"].includes(run.status);
   if (shouldStartNext && next) {
