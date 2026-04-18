@@ -22,15 +22,15 @@ type Mission = {
   project_id: `proj_${string}`;
   workflow_id: string;
   repo_path?: string;
-  status: "pending" | "running" | "completed" | "failed" | "awaiting_approval" | "cancelled";
-  run_id?: `run_${string}`;
+  status: "pending" | "running" | "awaiting_approval" | "paused" | "completed" | "failed" | "cancelled";
+  run_id?: string;
   approval_id?: `approval_${string}`;
 };
 
 type Approval = {
   approval_id: `approval_${string}`;
-  mission_id: `mis_${string}`;
-  run_id: `run_${string}`;
+  mission_id: string;
+  run_id: string;
   step_id: string;
   status: "pending" | "approved" | "rejected";
   reason: string;

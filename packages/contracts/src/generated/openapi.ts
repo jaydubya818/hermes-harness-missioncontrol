@@ -10,7 +10,7 @@ export interface components {
         /** @enum {string} */
         MissionState: "pending" | "running" | "awaiting_approval" | "failed" | "completed" | "cancelled";
         /** @enum {string} */
-        RunState: "pending" | "running" | "paused" | "failed" | "completed" | "cancelled";
+        RunState: "pending" | "running" | "awaiting_approval" | "paused" | "failed" | "completed" | "cancelled";
         /** @enum {string} */
         StepKind: "plan" | "implement" | "test" | "review" | "deploy";
         /** @enum {string} */
@@ -37,6 +37,12 @@ export interface components {
             mission_id: string;
             status: components["schemas"]["RunState"];
             current_step_id?: string;
+            /** Format: date-time */
+            started_at?: string;
+            /** Format: date-time */
+            completed_at?: string;
+            approval_id?: string;
+            summary?: string;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */

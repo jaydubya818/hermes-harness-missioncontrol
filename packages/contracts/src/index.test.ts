@@ -92,8 +92,10 @@ describe("contracts package exports", () => {
     const run: Run = {
       run_id: "run_123",
       mission_id: mission.mission_id,
-      status: StepState.Running,
+      status: "running",
       current_step_id: step.step_id,
+      started_at: "2026-04-18T18:00:00Z",
+      summary: "Run in progress",
       created_at: "2026-04-18T18:00:00Z",
       updated_at: "2026-04-18T18:00:00Z",
     };

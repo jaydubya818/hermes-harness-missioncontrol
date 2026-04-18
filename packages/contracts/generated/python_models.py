@@ -16,6 +16,7 @@ class MissionState(str, Enum):
 class RunState(str, Enum):
     PENDING = 'pending'
     RUNNING = 'running'
+    AWAITING_APPROVAL = 'awaiting_approval'
     PAUSED = 'paused'
     FAILED = 'failed'
     COMPLETED = 'completed'
@@ -71,6 +72,10 @@ class Run(BaseModel):
     mission_id: str
     status: RunState
     current_step_id: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    approval_id: str | None = None
+    summary: str | None = None
     created_at: str
     updated_at: str
 

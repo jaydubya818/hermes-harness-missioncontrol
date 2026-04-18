@@ -20,8 +20,12 @@ export interface Mission {
 export interface Run {
   run_id: string;
   mission_id: string;
-  status: RunState | StepState;
+  status: RunState;
   current_step_id?: string;
+  started_at?: string;
+  completed_at?: string;
+  approval_id?: string;
+  summary?: string;
   created_at: string;
   updated_at: string;
 }

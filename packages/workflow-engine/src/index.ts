@@ -2,6 +2,7 @@ import {
   ApprovalMode,
   StepState,
   type ArtifactRef,
+  type Run,
   type Step,
   type StepKind,
 } from "@hermes-harness-with-missioncontrol/contracts";
@@ -26,15 +27,10 @@ export interface WorkflowRunStep extends Step {
   artifacts: WorkflowArtifact[];
 }
 
-export interface WorkflowRun {
-  run_id: `run_${string}`;
-  mission_id: `mis_${string}`;
+export interface WorkflowRun extends Run {
   workflow_id: string;
-  status: "pending" | "running" | "completed" | "failed" | "awaiting_approval" | "cancelled";
   current_step_index: number;
   steps: WorkflowRunStep[];
-  created_at: string;
-  updated_at: string;
 }
 
 type StepTransition =
@@ -80,16 +76,40 @@ function buildStep(template: WorkflowStepTemplate): WorkflowRunStep {
 export function createWorkflowRun(run_id: `run_${string}`, mission_id: `mis_${string}`, workflow_id: string): WorkflowRun {
   const now = new Date().toISOString();
   const template = WORKFLOW_LIBRARY[workflow_id] ?? WORKFLOW_LIBRARY.bugfix;
-  return {
+  const run: WorkflowRun = {
     run_id,
     mission_id,
     workflow_id,
     status: "pending",
     current_step_index: 0,
+    current_step_id: template[0]?.id,
     steps: template.map(buildStep),
     created_at: now,
     updated_at: now
   };
+  return syncRunState(run);
+}
+
+function syncRunState(run: WorkflowRun): WorkflowRun {
+  const current = getCurrentStep(run);
+  run.current_step_id = current?.step_id;
+
+  const firstStarted = run.steps.find((step) => !!step.started_at)?.started_at;
+  if (firstStarted) run.started_at ??= firstStarted;
+
+  if (run.status === "completed" || run.status === "failed" || run.status === "cancelled") {
+    const terminalStep = [...run.steps].reverse().find((step) => !!step.completed_at);
+    run.completed_at = terminalStep?.completed_at ?? run.completed_at ?? new Date().toISOString();
+  } else {
+    run.completed_at = undefined;
+  }
+
+  const currentApproval = run.steps.find((step) => step.state === "awaiting_approval")?.approval_id;
+  run.approval_id = currentApproval;
+
+  const terminalStep = [...run.steps].reverse().find((step) => !!step.notes);
+  run.summary = terminalStep?.notes ?? run.summary;
+  return run;
 }
 
 export function getCurrentStep(run: WorkflowRun): WorkflowRunStep | undefined {
@@ -139,7 +159,7 @@ function transitionCurrentStep(
   }
 
   run.updated_at = now;
-  return run;
+  return syncRunState(run);
 }
 
 export function startCurrentStep(run: WorkflowRun, execution_id?: string): WorkflowRun {

@@ -10,7 +10,7 @@ components:
       enum: [pending, running, awaiting_approval, failed, completed, cancelled]
     RunState:
       type: string
-      enum: [pending, running, paused, failed, completed, cancelled]
+      enum: [pending, running, awaiting_approval, paused, failed, completed, cancelled]
     StepKind:
       type: string
       enum: [plan, implement, test, review, deploy]
@@ -49,6 +49,10 @@ components:
         status:
           $ref: '#/components/schemas/RunState'
         current_step_id: { type: string }
+        started_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+        approval_id: { type: string }
+        summary: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     Step:

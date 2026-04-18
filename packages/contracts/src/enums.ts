@@ -25,6 +25,7 @@ export type StepState = (typeof StepState)[keyof typeof StepState];
 export const RunState = {
   Pending: "pending",
   Running: "running",
+  AwaitingApproval: "awaiting_approval",
   Paused: "paused",
   Failed: "failed",
   Completed: "completed",
