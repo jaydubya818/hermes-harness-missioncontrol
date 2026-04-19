@@ -54,6 +54,77 @@ function withQuery(url: string, params: Record<string, string | undefined>) {
   return suffix ? `${url}?${suffix}` : url;
 }
 
+const LIVE_EVENT_TYPES = [
+  "mission.created",
+  "mission.updated",
+  "mission.paused",
+  "mission.running",
+  "mission.cancelled",
+  "mission.completed",
+  "run.started",
+  "run.running",
+  "run.paused",
+  "run.completed",
+  "run.failed",
+  "run.cancelled",
+  "step.started",
+  "step.progress",
+  "step.blocked",
+  "step.paused",
+  "step.resumed",
+  "step.completed",
+  "step.failed",
+  "step.cancelled",
+  "step.retried",
+  "tool.started",
+  "tool.completed",
+  "tool.failed",
+  "artifact.created",
+  "approval.requested",
+  "approval.resolved",
+  "eval.started",
+  "eval.completed",
+  "eval.failed",
+  "policy.violation",
+  "execution.timeout",
+  "execution.budget_exceeded"
+] as const;
+
+function useLiveEventStream(url: string) {
+  const [status, setStatus] = useState<"connecting" | "open" | "error">("connecting");
+  const [events, setEvents] = useState<any[]>([]);
+
+  useEffect(() => {
+    setStatus("connecting");
+    setEvents([]);
+    const source = new EventSource(url);
+    const handleEvent = (event: MessageEvent) => {
+      setStatus("open");
+      try {
+        const payload = JSON.parse(event.data);
+        setEvents((current) => [payload, ...current].slice(0, 20));
+        mutate(`${ORCH}/api/events`);
+        mutate(`${ORCH}/api/read-models/audit`);
+        mutate(`${ORCH}/api/read-models/overview`);
+        mutate(`${EVAL}/api/evals`);
+      } catch {
+        // ignore malformed stream frames
+      }
+    };
+
+    source.onopen = () => setStatus("open");
+    source.onerror = () => setStatus("error");
+    LIVE_EVENT_TYPES.forEach((type) => source.addEventListener(type, handleEvent as EventListener));
+
+    return () => {
+      LIVE_EVENT_TYPES.forEach((type) => source.removeEventListener(type, handleEvent as EventListener));
+      source.close();
+    };
+  }, [url]);
+
+  return { status, events };
+}
+
 function Button(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return <button {...props} style={{ borderRadius: 10, border: "1px solid #334155", background: "#0f172a", color: "#e2e8f0", padding: "10px 14px", cursor: "pointer", ...(props.style ?? {}) }} />;
 }
@@ -552,6 +623,15 @@ function Audit() {
   const { data: auditView } = useSWR(auditUrl, fetcher, { refreshInterval: 3000 });
   const { data: approvalHistory } = useSWR(approvalHistoryUrl, fetcher, { refreshInterval: 3000 });
   const { data: evals } = useSWR(`${EVAL}/api/evals`, fetcher, { refreshInterval: 4000 });
+  const liveUrl = withQuery(`${ORCH}/api/events/stream`, {
+    mission_id: missionFilter || undefined,
+    run_id: runFilter || undefined,
+    step_id: stepFilter || undefined,
+    event_type: eventTypeFilter || undefined,
+    actor: actorFilter || undefined,
+    last: "10"
+  });
+  const { status: liveStatus, events: liveEvents } = useLiveEventStream(liveUrl);
   return (
     <div style={{ padding: 16, display: "grid", gap: 16 }}>
       <Panel title="Filters">
@@ -615,6 +695,15 @@ function Audit() {
           {evals?.summary && <pre style={{ whiteSpace: "pre-wrap", marginTop: 12 }}>{JSON.stringify(evals.summary, null, 2)}</pre>}
         </Panel>
       </div>
+      <Panel title={`Live Event Stream (${liveStatus})`}>
+        {liveEvents.length === 0 ? <div>No live events yet.</div> : liveEvents.map((event: any, index: number) => (
+          <div key={`${event.event_id ?? event.ts ?? index}`} style={{ padding: 12, borderBottom: "1px solid #1e293b" }}>
+            <StatusRow label={event.type} value={event.source ?? "missioncontrol"} />
+            <div style={{ color: "#64748b", fontSize: 12, marginTop: 6 }}>{event.ts ?? event.timestamp}</div>
+            <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 4 }}>{[event.mission_id, event.run_id, event.step_id].filter(Boolean).join(" · ")}</div>
+          </div>
+        ))}
+      </Panel>
     </div>
   );
 }

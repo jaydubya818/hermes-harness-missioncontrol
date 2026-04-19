@@ -2,11 +2,12 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { resolve } from "node:path";
+import { readdir } from "node:fs/promises";
 import { attachArtifact, createWorkflowRun, getCurrentStep, startCurrentStep, advanceRun, markCurrentStepAwaitingApproval, markCurrentStepCompleted, markCurrentStepFailed, pauseCurrentStep, resumeCurrentStep, retryCurrentStep, cancelCurrentStep, syncRunState, type WorkflowArtifact, type WorkflowRun } from "@hermes-harness-with-missioncontrol/workflow-engine";
 import { evaluateStepPolicy } from "@hermes-harness-with-missioncontrol/policy-engine";
 import { loadJsonFile, saveJsonFile } from "@hermes-harness-with-missioncontrol/state-store";
 import { makeId, type HarnessEvent } from "@hermes-harness-with-missioncontrol/shared-types";
-import { scoreRun } from "@hermes-harness-with-missioncontrol/eval-core";
+import { scoreRun, type EvalRecord } from "@hermes-harness-with-missioncontrol/eval-core";
 import { FinalOutcome, StepKind, type ApprovalRequest, type ApprovalResult, type ArtifactRef, type ExecutionEnvelope, type StepExecutionRequest, type TaskExecutionResult } from "@hermes-harness-with-missioncontrol/contracts";
 
 const app = new Hono();
@@ -16,6 +17,7 @@ const evalApi = process.env.EVAL_API_URL ?? "http://localhost:4303";
 const workerApi = process.env.WORKER_API_URL ?? "http://localhost:4304";
 const workerRunsRoot = resolve(process.env.WORKER_RUNTIME_ROOT ?? resolve(process.cwd(), "../../data/worker-runs"));
 const workerWorktreesRoot = resolve(process.env.WORKTREE_ROOT ?? resolve(process.cwd(), "../../data/worktrees"));
+const orphanSweepIntervalMs = Number(process.env.ORPHAN_SWEEP_INTERVAL_MS ?? "0");
 const allowedRepoRoot = resolve(process.env.ALLOWED_REPO_ROOT ?? "/Users/jaywest/projects");
 const operatorToken = process.env.HARNESS_OPERATOR_TOKEN;
 
@@ -141,10 +143,13 @@ const CANONICAL_EVENT_TYPES = new Set<HarnessEvent["type"]>([
   "artifact.created",
   "approval.requested",
   "approval.resolved",
+  "eval.started",
+  "eval.completed",
+  "eval.failed",
   "policy.violation",
   "execution.timeout",
   "execution.budget_exceeded",
-]);
+] as const);
 
 const LEGACY_EVENT_TYPE_MAP: Record<string, HarnessEvent["type"]> = {
   "approval.granted": "approval.resolved",
@@ -377,13 +382,72 @@ async function ensureLoaded() {
     }
   }
 
-  // TODO: recovery sweeper belongs in a periodic cleanup job. It should prune orphaned
-  // worktrees/runs for executions that never returned after dispatch.
   initialized = true;
 }
 
 async function persist() {
   await saveJsonFile(stateFile, state);
+}
+
+type EventStreamFilters = {
+  mission_id?: string;
+  run_id?: string;
+  step_id?: string;
+  event_type?: string;
+  actor?: string;
+};
+
+type EventSubscriber = {
+  id: string;
+  matches: (event: HarnessEvent) => boolean;
+  enqueue: (event: HarnessEvent) => void;
+  close: () => void;
+};
+
+const eventSubscribers = new Map<string, EventSubscriber>();
+
+function normalizeSseFilters(query: Record<string, string | undefined>): EventStreamFilters {
+  return {
+    mission_id: query.mission_id,
+    run_id: query.run_id,
+    step_id: query.step_id,
+    event_type: query.event_type,
+    actor: query.actor,
+  };
+}
+
+function eventMatchesFilters(event: HarnessEvent, filters: EventStreamFilters) {
+  if (filters.mission_id && event.mission_id !== filters.mission_id) return false;
+  if (filters.run_id && event.run_id !== filters.run_id) return false;
+  if (filters.step_id && event.step_id !== filters.step_id) return false;
+  if (filters.actor && event.actor !== filters.actor) return false;
+  if (filters.event_type && event.type !== filters.event_type) return false;
+  return true;
+}
+
+function parseLastEventCount(value?: string) {
+  const parsed = Number.parseInt(value ?? "20", 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return 20;
+  return Math.min(parsed, 100);
+}
+
+function formatSseEvent(event: HarnessEvent) {
+  const lines = [
+    event.event_id ? `id: ${event.event_id}` : null,
+    `event: ${event.type}`,
+    `data: ${JSON.stringify(event)}`,
+    "",
+    "",
+  ].filter((line): line is string => line !== null);
+  return lines.join("\n");
+}
+
+function getReplayEvents(filters: EventStreamFilters, last: number) {
+  if (last === 0) return [];
+  return state.events
+    .filter((event) => eventMatchesFilters(event, filters))
+    .slice(0, last)
+    .reverse();
 }
 
 function recordEvent(event: HarnessEvent | Record<string, unknown>) {
@@ -397,6 +461,15 @@ function recordEvent(event: HarnessEvent | Record<string, unknown>) {
   state.audit.unshift({ ...normalized, audit_id: makeId("audit") });
   if (state.events.length > 500) state.events.length = 500;
   if (state.audit.length > 1000) state.audit.length = 1000;
+  Array.from(eventSubscribers.values()).forEach((subscriber) => {
+    if (!subscriber.matches(normalized as HarnessEvent)) return;
+    try {
+      subscriber.enqueue(normalized as HarnessEvent);
+    } catch {
+      subscriber.close();
+      eventSubscribers.delete(subscriber.id);
+    }
+  });
   return true;
 }
 
@@ -832,27 +905,70 @@ function buildArtifactsReadModel(query: Record<string, string | undefined> = {})
 }
 
 async function recordEval(run: WorkflowRun, approvals: typeof state.approvals): Promise<void> {
+  const scored = scoreRun({ run, approvals });
+  const evalDraft: EvalRecord = {
+    mission_id: run.mission_id,
+    run_id: run.run_id,
+    outcome: scored.outcome,
+    cost_usd: scored.cost_usd,
+    approval_count: scored.approval_count,
+    artifact_count: scored.artifact_count,
+    duration_ms: scored.duration_ms,
+    confidence: scored.confidence,
+    efficiency_score: scored.efficiency_score,
+    risk_score: scored.risk_score,
+    created_at: new Date().toISOString(),
+  };
+
+  recordEvent({
+    type: "eval.started",
+    ts: evalDraft.created_at,
+    mission_id: run.mission_id,
+    run_id: run.run_id,
+    payload: {
+      outcome: evalDraft.outcome,
+      approval_count: evalDraft.approval_count,
+      artifact_count: evalDraft.artifact_count,
+    } as any
+  });
+
   try {
-    const scored = scoreRun({ run, approvals });
-    await fetch(`${evalApi}/api/evals`, {
+    const response = await fetch(`${evalApi}/api/evals`, {
       method: "POST",
       headers: authHeaders(),
-      body: JSON.stringify({
-        mission_id:       run.mission_id,
-        run_id:           run.run_id,
-        outcome:          scored.outcome,
-        cost_usd:         scored.cost_usd,
-        approval_count:   scored.approval_count,
-        artifact_count:   scored.artifact_count,
-        duration_ms:      scored.duration_ms,
-        confidence:       scored.confidence,
-        efficiency_score: scored.efficiency_score,
-        risk_score:       scored.risk_score,
-        created_at:       new Date().toISOString(),
-      }),
+      body: JSON.stringify(evalDraft),
+    });
+    if (!response.ok) throw new Error(`eval-api returned status ${response.status}`);
+    const payload = await response.json() as { record?: EvalRecord };
+    const record = payload.record ?? evalDraft;
+    recordEvent({
+      type: "eval.completed",
+      ts: new Date().toISOString(),
+      mission_id: run.mission_id,
+      run_id: run.run_id,
+      payload: {
+        eval_id: record.eval_id,
+        outcome: record.outcome,
+        cost_usd: record.cost_usd,
+        confidence: record.confidence,
+        efficiency_score: record.efficiency_score,
+        risk_score: record.risk_score,
+        duration_ms: record.duration_ms,
+      } as any
     });
   } catch (err) {
-    console.error("[orchestrator] recordEval failed (eval-api unavailable):", err instanceof Error ? err.message : err);
+    const message = err instanceof Error ? err.message : String(err);
+    recordEvent({
+      type: "eval.failed",
+      ts: new Date().toISOString(),
+      mission_id: run.mission_id,
+      run_id: run.run_id,
+      payload: {
+        error: message,
+        outcome: evalDraft.outcome,
+      } as any
+    });
+    console.error("[orchestrator] recordEval failed (eval-api unavailable):", message);
   }
 }
 
@@ -901,15 +1017,70 @@ async function publishDiscovery(run: WorkflowRun, stepId: string, title: string,
   }
 }
 
-async function cleanupExecutionWorkspace(run: WorkflowRun, mission?: Mission, execution?: WorkerExecution | null) {
-  const sourceRepo = execution?.sourceRepo ?? execution?.source_repo ?? mission?.repo_path;
-  const branchName = execution?.branchName ?? execution?.branch_name ?? `hermes/${run.run_id}`;
+async function listRunDirectoryIds(root: string) {
   try {
-    await fetch(`${workerApi}/api/cleanup-run`, {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify({ run_id: run.run_id, source_repo: sourceRepo, branch_name: branchName })
-    });
+    const entries = await readdir(root, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isDirectory() && /^run_[a-zA-Z0-9_-]+$/.test(entry.name))
+      .map((entry) => entry.name)
+      .sort();
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return [];
+    throw err;
+  }
+}
+
+function isTerminalRun(run: WorkflowRun) {
+  return ["completed", "failed", "cancelled"].includes(run.status);
+}
+
+async function requestWorkerCleanup(runId: `run_${string}` | string, mission?: Mission, execution?: WorkerExecution | null) {
+  const sourceRepo = execution?.sourceRepo ?? execution?.source_repo ?? mission?.repo_path;
+  const branchName = execution?.branchName ?? execution?.branch_name ?? `hermes/${runId}`;
+  const response = await fetch(`${workerApi}/api/cleanup-run`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ run_id: runId, source_repo: sourceRepo, branch_name: branchName })
+  });
+  if (!response.ok) throw new Error(`worker cleanup failed with status ${response.status}`);
+  return { run_id: runId, source_repo: sourceRepo, branch_name: branchName };
+}
+
+async function sweepOrphanedExecutionWorkspaces() {
+  const protectedRunIds = new Set(state.runs.filter((run) => !isTerminalRun(run)).map((run) => run.run_id));
+  const runsById = new Map(state.runs.map((run) => [run.run_id, run]));
+  const candidateRunIds = Array.from(new Set([
+    ...(await listRunDirectoryIds(workerWorktreesRoot)),
+    ...(await listRunDirectoryIds(workerRunsRoot)),
+  ])).sort() as Array<`run_${string}`>;
+
+  const removed_run_ids: string[] = [];
+  const skipped_run_ids: string[] = [];
+
+  for (const runId of candidateRunIds) {
+    if (protectedRunIds.has(runId)) {
+      skipped_run_ids.push(runId);
+      continue;
+    }
+
+    const run = runsById.get(runId);
+    const mission = run ? getMissionForRun(run) : undefined;
+    await requestWorkerCleanup(runId, mission);
+    removed_run_ids.push(runId);
+  }
+
+  return {
+    scanned_run_ids: candidateRunIds,
+    removed_run_ids,
+    skipped_run_ids,
+    removed_count: removed_run_ids.length,
+    skipped_count: skipped_run_ids.length,
+  };
+}
+
+async function cleanupExecutionWorkspace(run: WorkflowRun, mission?: Mission, execution?: WorkerExecution | null) {
+  try {
+    await requestWorkerCleanup(run.run_id, mission, execution ?? null);
   } catch (err) {
     console.error("[orchestrator] cleanupExecutionWorkspace failed (worker-api unavailable):", err instanceof Error ? err.message : err);
   }
@@ -968,6 +1139,53 @@ app.get("/api/missions", async (c) => { await ensureLoaded(); return c.json({ mi
 app.get("/api/runs", async (c) => { await ensureLoaded(); return c.json({ runs: state.runs }); });
 app.get("/api/approvals", async (c) => { await ensureLoaded(); return c.json({ approvals: state.approvals }); });
 app.get("/api/events", async (c) => { await ensureLoaded(); return c.json({ events: state.events }); });
+app.get("/api/events/stream", async (c) => {
+  await ensureLoaded();
+  const filters = normalizeSseFilters(c.req.query());
+  const replay = getReplayEvents(filters, parseLastEventCount(c.req.query("last")));
+  const subscriberId = makeId("sub");
+  const encoder = new TextEncoder();
+  let closed = false;
+  let controllerRef: ReadableStreamDefaultController<Uint8Array> | null = null;
+
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    eventSubscribers.delete(subscriberId);
+    try {
+      controllerRef?.close();
+    } catch {}
+  };
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controllerRef = controller;
+      replay.forEach((event) => controller.enqueue(encoder.encode(formatSseEvent(event))));
+      eventSubscribers.set(subscriberId, {
+        id: subscriberId,
+        matches: (event) => eventMatchesFilters(event, filters),
+        enqueue: (event) => {
+          if (closed) return;
+          controller.enqueue(encoder.encode(formatSseEvent(event)));
+        },
+        close,
+      });
+      c.req.raw.signal?.addEventListener("abort", close, { once: true });
+    },
+    cancel() {
+      close();
+    }
+  });
+
+  return new Response(stream, {
+    headers: {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      connection: "keep-alive",
+      "x-accel-buffering": "no",
+    }
+  });
+});
 app.get("/api/audit", async (c) => { await ensureLoaded(); return c.json({ audit: state.audit }); });
 app.get("/api/read-models/overview", async (c) => { await ensureLoaded(); return c.json(buildOverviewReadModel()); });
 app.get("/api/read-models/missions", async (c) => { await ensureLoaded(); return c.json(buildMissionsReadModel()); });
@@ -993,6 +1211,13 @@ app.get("/api/read-models/artifacts", async (c) => { await ensureLoaded(); retur
 app.get("/api/read-models/approvals", async (c) => { await ensureLoaded(); return c.json(buildApprovalsReadModel(c.req.query())); });
 app.get("/api/read-models/approval-history", async (c) => { await ensureLoaded(); return c.json(buildApprovalHistoryReadModel(c.req.query())); });
 app.get("/api/read-models/audit", async (c) => { await ensureLoaded(); return c.json(buildAuditReadModel(c.req.query())); });
+
+app.post("/api/maintenance/sweep-orphans", async (c) => {
+  const authError = requireOperator(c);
+  if (authError) return authError;
+  await ensureLoaded();
+  return c.json(await sweepOrphanedExecutionWorkspaces());
+});
 
 app.post("/api/missions", async (c) => {
   const authError = requireOperator(c);
@@ -1354,6 +1579,18 @@ app.post("/api/approvals/:id/respond", async (c) => {
 if (!process.env.VITEST) {
   serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 4302) });
   console.log("orchestrator-api listening on http://localhost:4302");
+  if (Number.isFinite(orphanSweepIntervalMs) && orphanSweepIntervalMs > 0) {
+    const timer = setInterval(() => {
+      void ensureLoaded()
+        .then(() => sweepOrphanedExecutionWorkspaces())
+        .then((result) => {
+          if (result.removed_count > 0) console.log(`[orchestrator] orphan sweep removed ${result.removed_count} run workspace(s)`);
+        })
+        .catch((err) => console.error("[orchestrator] orphan sweep failed:", err instanceof Error ? err.message : err));
+    }, orphanSweepIntervalMs);
+    timer.unref?.();
+    console.log(`[orchestrator] orphan sweep enabled every ${orphanSweepIntervalMs}ms`);
+  }
 }
 
 export { app };

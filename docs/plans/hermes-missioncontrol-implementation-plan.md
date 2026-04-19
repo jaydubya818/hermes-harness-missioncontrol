@@ -37,6 +37,9 @@ Status: major slices shipped through the 2026-04-18 hardening pass
 - canonical event taxonomy lock
 - replay/idempotency protections
 - artifact/approval hardening
+- periodic orphaned worktree cleanup sweeper
+- richer eval event taxonomy
+- optional SSE event delivery surface
 - docs/spec sync
 
 ## Current implementation shape
@@ -62,9 +65,7 @@ Owns:
 
 ## Remaining intentional follow-ups
 These are not blockers for the current architecture pass:
-- periodic orphaned worktree cleanup sweeper
-- richer future eval event taxonomy if eval becomes a first-class streamed domain
-- optional future SSE/WebSocket delivery surface if live streaming leaves request-response mode
+- optional future WebSocket delivery surface if SSE is not sufficient for live operator workflows
 
 ## Verification baseline
 Fresh verification for this pass should include:

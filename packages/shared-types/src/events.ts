@@ -28,6 +28,9 @@ export type HarnessEventName =
   | "artifact.created"
   | "approval.requested"
   | "approval.resolved"
+  | "eval.started"
+  | "eval.completed"
+  | "eval.failed"
   | "policy.violation"
   | "execution.timeout"
   | "execution.budget_exceeded";

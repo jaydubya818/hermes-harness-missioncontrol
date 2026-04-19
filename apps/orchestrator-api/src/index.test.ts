@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -29,6 +29,9 @@ describe("orchestrator-api", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     delete process.env.ORCHESTRATOR_STATE_FILE;
+    delete process.env.WORKTREE_ROOT;
+    delete process.env.WORKER_RUNTIME_ROOT;
+    delete process.env.ORPHAN_SWEEP_INTERVAL_MS;
     process.env.VITEST = "1";
   });
 
@@ -1189,5 +1192,220 @@ describe("orchestrator-api", () => {
     const eventsResponse = await app.request("/api/events");
     const eventsPayload = await eventsResponse.json() as { events: Array<{ type: string; payload?: { artifact_id?: string } }> };
     expect(eventsPayload.events.filter((event) => event.type === "artifact.created" && event.payload?.artifact_id === "art_repeat")).toHaveLength(1);
+  });
+
+  it("records eval.started and eval.completed when eval persistence succeeds", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes("/api/execute-step")) {
+        return jsonResponse({
+          body: {
+            success: false,
+            summary: "tests failed",
+            confidence: 0.2,
+            artifacts: []
+          }
+        });
+      }
+      if (url.includes("/api/evals")) {
+        const body = JSON.parse(String(init?.body ?? "{}"));
+        return jsonResponse({ status: 201, body: { ok: true, record: { eval_id: "eval_123", ...body } } });
+      }
+      if (url.includes("/api/cleanup-run")) return jsonResponse({ body: { ok: true } });
+      return jsonResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await loadApp();
+    const createMission = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Eval success", project_id: "proj_demo", workflow_id: "bugfix" })
+    });
+    const mission = await createMission.json() as { mission_id: string };
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const run = await startRun.json() as { run_id: string };
+
+    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    expect(execute.status).toBe(400);
+
+    const eventsResponse = await app.request("/api/events");
+    const eventsPayload = await eventsResponse.json() as { events: Array<{ type: string; payload?: { eval_id?: string } }> };
+    expect(eventsPayload.events.some((event) => event.type === "eval.started")).toBe(true);
+    expect(eventsPayload.events.some((event) => event.type === "eval.completed" && event.payload?.eval_id === "eval_123")).toBe(true);
+  });
+
+  it("records eval.failed when eval persistence fails", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/api/execute-step")) {
+        return jsonResponse({
+          body: {
+            success: false,
+            summary: "tests failed",
+            confidence: 0.2,
+            artifacts: []
+          }
+        });
+      }
+      if (url.includes("/api/evals")) throw new Error("eval-api offline");
+      if (url.includes("/api/cleanup-run")) return jsonResponse({ body: { ok: true } });
+      return jsonResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await loadApp();
+    const createMission = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Eval failure", project_id: "proj_demo", workflow_id: "bugfix" })
+    });
+    const mission = await createMission.json() as { mission_id: string };
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const run = await startRun.json() as { run_id: string };
+
+    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    expect(execute.status).toBe(400);
+
+    const eventsResponse = await app.request("/api/events");
+    const eventsPayload = await eventsResponse.json() as { events: Array<{ type: string; payload?: { error?: string } }> };
+    expect(eventsPayload.events.some((event) => event.type === "eval.started")).toBe(true);
+    expect(eventsPayload.events.some((event) => event.type === "eval.failed" && event.payload?.error === "eval-api offline")).toBe(true);
+  });
+
+  it("sweeps orphaned execution workspaces for unknown and terminal runs", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ body: { ok: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-sweep-orphans-"));
+    const stateFile = join(stateDir, "state.json");
+    const worktreesRoot = join(stateDir, "worktrees");
+    const runsRoot = join(stateDir, "worker-runs");
+    process.env.WORKTREE_ROOT = worktreesRoot;
+    process.env.WORKER_RUNTIME_ROOT = runsRoot;
+
+    mkdirSync(join(worktreesRoot, "run_done"), { recursive: true });
+    mkdirSync(join(worktreesRoot, "run_live"), { recursive: true });
+    mkdirSync(join(worktreesRoot, "run_orphan"), { recursive: true });
+    mkdirSync(join(runsRoot, "run_done", "plan"), { recursive: true });
+    mkdirSync(join(runsRoot, "run_live", "plan"), { recursive: true });
+    mkdirSync(join(runsRoot, "run_orphan", "plan"), { recursive: true });
+
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [
+        { mission_id: "mis_done", title: "Done", objective: "Done", project_id: "proj_demo", workflow: "bugfix", repo_path: "/repo/done", status: "completed", active_run_id: "run_done", summary: "done", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z" },
+        { mission_id: "mis_live", title: "Live", objective: "Live", project_id: "proj_demo", workflow: "bugfix", repo_path: "/repo/live", status: "running", active_run_id: "run_live", summary: "running", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z" }
+      ],
+      runs: [
+        { run_id: "run_done", mission_id: "mis_done", workflow_id: "bugfix", status: "completed", current_step_index: 0, current_step_id: "deploy", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z", steps: [{ step_id: "deploy", title: "Deploy", kind: "deploy", risk: "high", approval_mode: "on_policy_trigger", state: "completed", artifacts: [] }] },
+        { run_id: "run_live", mission_id: "mis_live", workflow_id: "bugfix", status: "running", current_step_index: 0, current_step_id: "plan", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z", steps: [{ step_id: "plan", title: "Plan", kind: "plan", risk: "low", approval_mode: "on_policy_trigger", state: "running", artifacts: [], execution_id: "exec_live" }] }
+      ],
+      approvals: [],
+      events: [],
+      audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const response = await app.request("/api/maintenance/sweep-orphans", { method: "POST" });
+    const payload = await response.json() as { removed_run_ids: string[]; skipped_run_ids: string[]; removed_count: number };
+
+    expect(response.status).toBe(200);
+    expect(payload.removed_count).toBe(2);
+    expect(payload.removed_run_ids).toEqual(["run_done", "run_orphan"]);
+    expect(payload.skipped_run_ids).toEqual(["run_live"]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining("/api/cleanup-run"),
+      expect.objectContaining({ body: JSON.stringify({ run_id: "run_done", source_repo: "/repo/done", branch_name: "hermes/run_done" }) })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining("/api/cleanup-run"),
+      expect.objectContaining({ body: JSON.stringify({ run_id: "run_orphan", source_repo: undefined, branch_name: "hermes/run_orphan" }) })
+    );
+  });
+
+  it("does not sweep active non-terminal run workspaces", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ body: { ok: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-sweep-protect-"));
+    const stateFile = join(stateDir, "state.json");
+    const worktreesRoot = join(stateDir, "worktrees");
+    const runsRoot = join(stateDir, "worker-runs");
+    process.env.WORKTREE_ROOT = worktreesRoot;
+    process.env.WORKER_RUNTIME_ROOT = runsRoot;
+
+    mkdirSync(join(worktreesRoot, "run_live"), { recursive: true });
+    mkdirSync(join(runsRoot, "run_live", "plan"), { recursive: true });
+
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [{ mission_id: "mis_live", title: "Live", objective: "Live", project_id: "proj_demo", workflow: "bugfix", repo_path: "/repo/live", status: "running", active_run_id: "run_live", summary: "running", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z" }],
+      runs: [{ run_id: "run_live", mission_id: "mis_live", workflow_id: "bugfix", status: "running", current_step_index: 0, current_step_id: "plan", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z", steps: [{ step_id: "plan", title: "Plan", kind: "plan", risk: "low", approval_mode: "on_policy_trigger", state: "running", artifacts: [], execution_id: "exec_live" }] }],
+      approvals: [],
+      events: [],
+      audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const response = await app.request("/api/maintenance/sweep-orphans", { method: "POST" });
+    const payload = await response.json() as { removed_run_ids: string[]; skipped_run_ids: string[]; removed_count: number };
+
+    expect(response.status).toBe(200);
+    expect(payload.removed_count).toBe(0);
+    expect(payload.removed_run_ids).toEqual([]);
+    expect(payload.skipped_run_ids).toEqual(["run_live"]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("streams recent events over SSE with filters", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-stream-backlog-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [],
+      runs: [],
+      approvals: [],
+      events: [
+        { event_id: "evt_old", type: "mission.created", ts: "2026-04-11T00:00:00.000Z", mission_id: "mis_old", payload: {} },
+        { event_id: "evt_keep", type: "mission.updated", ts: "2026-04-11T00:01:00.000Z", mission_id: "mis_demo", payload: { status: "running" } }
+      ],
+      audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const response = await app.request("/api/events/stream?mission_id=mis_demo&last=1");
+    const reader = response.body?.getReader();
+    const first = reader ? await reader.read() : { value: undefined, done: true };
+    await reader?.cancel();
+    const chunk = first.value ? new TextDecoder().decode(first.value) : "";
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    expect(chunk).toContain("event: mission.updated");
+    expect(chunk).toContain('"event_id":"evt_keep"');
+    expect(chunk).not.toContain("evt_old");
+  });
+
+  it("pushes newly recorded events to SSE subscribers", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const app = await loadApp();
+    const response = await app.request("/api/events/stream?last=0");
+    const reader = response.body?.getReader();
+
+    await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Live stream", project_id: "proj_demo", workflow_id: "bugfix" })
+    });
+
+    const first = reader ? await reader.read() : { value: undefined, done: true };
+    await reader?.cancel();
+    const chunk = first.value ? new TextDecoder().decode(first.value) : "";
+
+    expect(response.status).toBe(200);
+    expect(chunk).toContain("event: mission.created");
+    expect(chunk).toContain('"type":"mission.created"');
   });
 });

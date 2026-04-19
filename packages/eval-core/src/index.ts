@@ -2,6 +2,7 @@ export { scoreRun } from "./scorer.js";
 export type { ApprovalSummary, ScoreInputs, ScoredEval } from "./scorer.js";
 
 export interface EvalRecord {
+  eval_id?: string;
   mission_id: string;
   run_id: string;
   outcome: "success" | "failure" | "partial";

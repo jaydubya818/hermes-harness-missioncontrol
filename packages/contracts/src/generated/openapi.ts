@@ -164,7 +164,7 @@ export interface components {
             sequence: number;
             source: components["schemas"]["EventSource"];
             /** @enum {string} */
-            type: "mission.created" | "mission.updated" | "mission.paused" | "mission.running" | "mission.cancelled" | "mission.completed" | "run.started" | "run.running" | "run.paused" | "run.completed" | "run.failed" | "run.cancelled" | "step.started" | "step.progress" | "step.blocked" | "step.paused" | "step.resumed" | "step.completed" | "step.failed" | "step.cancelled" | "step.retried" | "tool.started" | "tool.completed" | "tool.failed" | "artifact.created" | "approval.requested" | "approval.resolved" | "policy.violation" | "execution.timeout" | "execution.budget_exceeded";
+            type: "mission.created" | "mission.updated" | "mission.paused" | "mission.running" | "mission.cancelled" | "mission.completed" | "run.started" | "run.running" | "run.paused" | "run.completed" | "run.failed" | "run.cancelled" | "step.started" | "step.progress" | "step.blocked" | "step.paused" | "step.resumed" | "step.completed" | "step.failed" | "step.cancelled" | "step.retried" | "tool.started" | "tool.completed" | "tool.failed" | "artifact.created" | "approval.requested" | "approval.resolved" | "eval.started" | "eval.completed" | "eval.failed" | "policy.violation" | "execution.timeout" | "execution.budget_exceeded";
             mission_id: string;
             run_id?: string;
             step_id?: string;

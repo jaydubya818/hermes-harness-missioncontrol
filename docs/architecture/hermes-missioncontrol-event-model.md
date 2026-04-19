@@ -86,6 +86,11 @@ Approval:
 - `approval.requested`
 - `approval.resolved`
 
+Eval:
+- `eval.started`
+- `eval.completed`
+- `eval.failed`
+
 Policy / execution guardrails:
 - `policy.violation`
 - `execution.timeout`
@@ -132,6 +137,11 @@ Artifact-scoped:
 - required: `mission_id`, `run_id`, `step_id`
 - optional: `execution_id`, `actor`
 - examples: `artifact.created`
+
+Eval-scoped:
+- required: `mission_id`, `run_id`
+- optional: `step_id`, `execution_id`, `actor`
+- examples: `eval.started`, `eval.completed`, `eval.failed`
 
 ## Payload rules
 
@@ -262,6 +272,29 @@ Optional:
 - `resolved_by`
 - `reason`
 - `step_id`
+
+### `eval.started`
+Required:
+- `outcome`
+- `approval_count`
+- `artifact_count`
+
+### `eval.completed`
+Required:
+- `outcome`
+- `cost_usd`
+
+Optional:
+- `eval_id`
+- `confidence`
+- `efficiency_score`
+- `risk_score`
+- `duration_ms`
+
+### `eval.failed`
+Required:
+- `error`
+- `outcome`
 
 ### `policy.violation`
 Required:

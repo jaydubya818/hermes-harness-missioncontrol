@@ -52,6 +52,7 @@ eval-api (4303)          ← eval records and run scoring
 | `WORKTREE_ROOT` | optional | Git worktree root |
 | `WORKSPACE_CACHE_FILE` | optional | Cache metadata for hydrated workspaces |
 | `ALLOWED_REPO_ROOT` | optional | Allowed repo root for worker-runtime |
+| `ORPHAN_SWEEP_INTERVAL_MS` | optional | Periodic orchestrator cleanup cadence for orphaned run worktrees/artifact roots |
 | `DEPLOY_ADAPTER` | optional | `auto \| noop-canary \| vercel \| render` |
 | `DEPLOY_BASE_URL` | optional | Base URL used in generated deploy plan metadata |
 
@@ -91,6 +92,12 @@ pnpm dev:console:auth
 - `POST /api/runs/:id/retry-step`
 - `POST /api/runs/:id/cancel-step`
 - `POST /api/runs/:id/cancel`
+
+## Maintenance Controls
+- `POST /api/maintenance/sweep-orphans` — prunes orphaned worktree / worker-run roots while preserving active non-terminal runs
+
+## Live Event Stream
+- `GET /api/events/stream` — SSE replay + live event feed for operator UI filters (`mission_id`, `run_id`, `step_id`, `event_type`, `actor`, `last`)
 
 ## Worker Step Kinds
 | Kind | What it does |

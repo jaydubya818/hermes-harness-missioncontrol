@@ -90,10 +90,12 @@ Protected transitions:
 Implemented now:
 - MissionControl calls worker cleanup after completion, rejection, and failure
 - worker cleanup removes worktree and branch when possible
+- orchestrator exposes `POST /api/maintenance/sweep-orphans` for manual orphan pruning
+- optional `ORPHAN_SWEEP_INTERVAL_MS` runs the same orphan sweep periodically outside request-path transitions
 
-Explicit follow-up job boundary:
-- orphaned worktree sweeper is intentionally separate from request-path logic
-- TODO is left in orchestrator load path for the periodic cleanup job
+Design boundary kept intentionally:
+- orphan cleanup stays outside normal mission/run mutation routes
+- active non-terminal runs are preserved during sweeping
 
 ## Design boundary reminder
 - MissionControl owns truth
