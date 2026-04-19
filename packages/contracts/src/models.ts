@@ -80,6 +80,41 @@ export interface ApprovalResult {
   resolved_by?: string;
 }
 
+export interface RepoScope {
+  root_path: string;
+  writable_paths: string[];
+}
+
+export interface ResourceBudget {
+  token_budget: number;
+  max_artifacts: number;
+  max_output_bytes: number;
+}
+
+export interface ExecutionEnvelope {
+  worktree_path: string;
+  workspace_root: string;
+  repo_scope: RepoScope;
+  allowed_tools: string[];
+  allowed_actions: string[];
+  approval_mode: ApprovalMode;
+  timeout_seconds: number;
+  resource_budget: ResourceBudget;
+  output_dir: string;
+  environment_classification: "sandbox" | "staging" | "production" | "local";
+}
+
+export interface StepExecutionRequest {
+  mission_id: string;
+  run_id: string;
+  step_id: string;
+  execution_id: string;
+  kind: StepKind;
+  repo_path?: string;
+  branch_name?: string;
+  envelope: ExecutionEnvelope;
+}
+
 export interface TaskExecutionResult {
   execution_id: string;
   mission_id: string;

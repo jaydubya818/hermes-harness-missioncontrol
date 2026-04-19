@@ -7,7 +7,7 @@ Autonomous software-development harness with operator console, orchestrator/cont
 ```
 harness-console (5173)   ← operator UI
 orchestrator-api (4302)  ← mission/run lifecycle, approval gates, event bus
-worker-runtime (4304)    ← isolated git worktree execution, test detection, deploy plans
+worker-runtime (4304)    ← isolated git worktree execution, governed envelope enforcement
 memory-api (4301)        ← agentic-kb vault read/write, task writeback, bus publishing
 eval-api (4303)          ← eval records and run scoring
 ```
@@ -17,7 +17,8 @@ eval-api (4303)          ← eval records and run scoring
 - `packages/policy-engine` — approval gate logic per step kind and risk level
 - `packages/memory-runtime` — atomic vault writeback, context loading, learning promotion
 - `packages/state-store` — JSON persistence helpers
-- `packages/shared-types` — branded IDs, event types, request/response contracts
+- `packages/shared-types` — branded IDs and canonical event types
+- `packages/contracts` — schema-first MissionControl ↔ Hermes boundary
 - `packages/eval-core` — eval record summarization
 - `packages/ui-kit` — shared React components
 
@@ -27,6 +28,8 @@ eval-api (4303)          ← eval records and run scoring
 - Eval plane: replay, scoring, regression, routing/policy optimization
 - Per-run git worktrees for isolation; pnpm monorepo-aware bootstrapping
 - Deploy adapter abstraction: `noop-canary | vercel | render | auto`
+- MissionControl-issued governed execution envelope for every worker step
+- Canonical event taxonomy with replay-safe ingestion by `event_id`
 
 ## Service Ports
 | Service | Port |
@@ -64,33 +67,36 @@ pnpm test
 pnpm build
 
 # 3. Start all services (separate terminals or use a process manager)
-HARNESS_OPERATOR_TOKEN=your-token pnpm --filter memory-api dev
-HARNESS_OPERATOR_TOKEN=your-token pnpm --filter orchestrator-api dev
-HARNESS_OPERATOR_TOKEN=your-token pnpm --filter eval-api dev
-HARNESS_OPERATOR_TOKEN=your-token pnpm --filter worker-runtime dev
-pnpm dev:console:auth   # starts console with VITE_OPERATOR_TOKEN=prod-secret
+HARNESS_OPERATOR_TOKEN=*** pnpm --filter memory-api dev
+HARNESS_OPERATOR_TOKEN=*** pnpm --filter orchestrator-api dev
+HARNESS_OPERATOR_TOKEN=*** pnpm --filter eval-api dev
+HARNESS_OPERATOR_TOKEN=*** pnpm --filter worker-runtime dev
+pnpm dev:console:auth
 ```
 
-## Console Auth
-1. Open the Settings tab in the console
-2. Paste your `HARNESS_OPERATOR_TOKEN`
-3. Save — subsequent mutating actions use bearer auth automatically
-
 ## Execution Flow
-1. Create a mission (`POST /api/missions`)
-2. Start the run (`POST /api/missions/:id/start`)
-3. Execute steps (`POST /api/runs/:id/execute-current`) — repeatable until complete
-4. Worker creates an isolated git worktree per run
-5. Each step: plan → implement → test → review → deploy
-6. High-risk steps pause for operator approval
-7. Approval or rejection recorded; eval written on run completion
-8. Worktree cleaned up after completion or rejection
+1. Create a mission: `POST /api/missions`
+2. Start the run: `POST /api/missions/:id/start`
+3. Execute current step: `POST /api/runs/:id/execute-current`
+4. MissionControl builds a governed execution envelope
+5. Worker validates and enforces envelope constraints
+6. Worker emits canonical execution events
+7. MissionControl records authoritative lifecycle state and operator read models
+8. High-risk or policy-triggered steps pause for approval
+9. Completion/failure/rejection triggers eval + cleanup
+
+## Lifecycle Controls
+- `POST /api/runs/:id/interrupt-step`
+- `POST /api/runs/:id/resume-step`
+- `POST /api/runs/:id/retry-step`
+- `POST /api/runs/:id/cancel-step`
+- `POST /api/runs/:id/cancel`
 
 ## Worker Step Kinds
 | Kind | What it does |
 |---|---|
 | `plan` | Reads git status, generates repo-aware implementation plan |
-| `implement` | Writes a structured patch artifact into the isolated worktree |
+| `implement` | Writes constrained `.hermes-harness` repo mutation inside allowed writable paths |
 | `test` | Detects test framework (pnpm/yarn/npm/pytest/cargo/go/make), runs it |
 | `review` | Diffs actual changed files, builds review artifact |
 | `deploy` | Selects provider (vercel/render/noop-canary), generates deploy plan |
@@ -101,33 +107,10 @@ pnpm dev:console:auth   # starts console with VITE_OPERATOR_TOKEN=prod-secret
 - `vercel` — generates vercel deploy command + rollback, requires approval
 - `render` — generates render deploy command + rollback, requires approval
 
-## MCP Integration (Hermes Agent)
-The Hermes agent (`~/.claude/agents/hermes.md`) is wired to two live knowledge sources:
-
-**Obsidian Vault** — via `obsidian` MCP (mcp-remote → localhost:22360)
-- Search and retrieve notes with `mcp__obsidian__obsidian_api`
-- Read specific notes with `mcp__obsidian__view`
-- List vault files with `mcp__obsidian__get_workspace_files`
-
-**Google Workspace** — Calendar credentials at `~/.google-calendar-mcp/credentials.json`
-- Activate with `npx @google-calendar-mcp/server` when needed
-
-**Known fix applied:** All Hermes profiles (alan/mira/turing) were updated from the broken `mcp-obsidian` npm package (invalid schema for `read_notes`) to `npx mcp-remote http://localhost:22360/sse`, matching the working Claude Desktop config.
-
-## Agent Config Files
-| File | Purpose |
-|---|---|
-| `~/.hermes/SOUL.md` | Hermes orchestrator operating contract |
-| `~/.hermes/AGENTS.md` | Shared mission context for all agents |
-| `~/.hermes/memories/USER.md` | Jay's profile and working preferences |
-| `~/.hermes/memories/MEMORY.md` | Long-term canonical memory |
-| `~/.hermes/profiles/*/SOUL.md` | Per-specialist identity (alan/mira/turing) |
-| `~/.claude/agents/hermes.md` | Claude agent definition with session start protocol |
-| `config/agents/agent_demo.yaml` | Harness agent capability spec (read/write/forbidden paths) |
-
 ## Architecture Docs
 - `docs/architecture/2026-04-18-hermes-missioncontrol-approved-target-architecture.md` ← approved target state
 - `docs/architecture/hermes-missioncontrol-event-model.md`
+- `docs/architecture/hermes-missioncontrol-recovery-and-idempotency.md`
 - `docs/architecture/2026-04-10-hermes-harness-with-missioncontrol-v1-system-architecture.md`
 - `docs/architecture/2026-04-10-hermes-harness-with-missioncontrol-repo-service-layout.md`
 - `docs/architecture/2026-04-10-hermes-harness-with-missioncontrol-integration-contract.md`

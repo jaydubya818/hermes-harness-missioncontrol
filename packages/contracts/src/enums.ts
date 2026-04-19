@@ -38,6 +38,7 @@ export const MissionState = {
   Pending: "pending",
   Running: "running",
   AwaitingApproval: "awaiting_approval",
+  Paused: "paused",
   Failed: "failed",
   Completed: "completed",
   Cancelled: "cancelled",

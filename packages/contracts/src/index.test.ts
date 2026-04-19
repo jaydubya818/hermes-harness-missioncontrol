@@ -11,6 +11,8 @@ import {
   type Mission,
   type Run,
   type Step,
+  type ExecutionEnvelope,
+  type StepExecutionRequest,
 } from "./index.js";
 
 describe("contracts package exports", () => {
@@ -51,6 +53,26 @@ describe("contracts package exports", () => {
       reason: "deploy requires approval",
       decision_scope: "step",
       requested_at: "2026-04-18T18:00:00Z",
+    };
+
+    const envelope: ExecutionEnvelope = {
+      worktree_path: "/repo/.worktrees/run_123",
+      workspace_root: "/repo",
+      repo_scope: {
+        root_path: "/repo",
+        writable_paths: [".hermes-harness", "apps/orchestrator-api/src"]
+      },
+      allowed_tools: ["filesystem", "git", "process"],
+      allowed_actions: ["plan", "read_repo", "write_repo"],
+      approval_mode: ApprovalMode.OnPolicyTrigger,
+      timeout_seconds: 1800,
+      resource_budget: {
+        token_budget: 120000,
+        max_artifacts: 10,
+        max_output_bytes: 1048576
+      },
+      output_dir: "/repo/.hermes-harness/runs/run_123/step_123",
+      environment_classification: "sandbox"
     };
 
     const event: EventEnvelope<{ result: TaskExecutionResult }> = {
@@ -106,8 +128,20 @@ describe("contracts package exports", () => {
       updated_at: "2026-04-18T18:00:00Z",
     };
 
+    const stepRequest: StepExecutionRequest = {
+      mission_id: mission.mission_id,
+      run_id: run.run_id,
+      step_id: step.step_id,
+      execution_id: result.execution_id,
+      kind: StepKind.Implement,
+      repo_path: mission.repo_path,
+      branch_name: "hermes/run_123",
+      envelope
+    };
+
     expect(event.payload.result.artifacts[0]).toEqual(artifact);
     expect(approval.reason).toContain("approval");
     expect(run.current_step_id).toBe(step.step_id);
+    expect(stepRequest.envelope.output_dir).toContain("step_123");
   });
 });

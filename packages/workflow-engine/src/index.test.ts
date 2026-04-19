@@ -92,7 +92,7 @@ describe("workflow-engine", () => {
     expect(run.approval_id).toBeUndefined();
     expect(run.steps[0]).toMatchObject({
       state: "running",
-      execution_id: "exec_demo",
+      execution_id: undefined,
       approval_id: undefined,
       blocked_reason: undefined,
       notes: "retry requested"

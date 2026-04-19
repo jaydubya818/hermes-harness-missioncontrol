@@ -1040,7 +1040,11 @@ describe("orchestrator-api", () => {
     expect(response.status).toBe(200);
     expect(payload.run.status).toBe("running");
     expect(payload.mission.status).toBe("running");
-    expect(payload.run.steps[0]).toMatchObject({ state: "running", notes: "operator retried current step", execution_id: "exec_demo" });
+    expect(payload.run.steps[0]).toMatchObject({ state: "running", notes: "operator retried current step" });
+
+    const eventsResponse = await app.request("/api/events");
+    const eventsPayload = await eventsResponse.json() as { events: Array<{ type: string }> };
+    expect(eventsPayload.events.some((event) => event.type === "step.retried")).toBe(true);
   });
 
   it("cancels run and resolves pending approval", async () => {
@@ -1128,5 +1132,62 @@ describe("orchestrator-api", () => {
       approval_id: "approval_demo",
       status: "pending"
     });
+  });
+
+  it("deduplicates replayed events when loading persisted state", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-event-dedupe-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [],
+      runs: [],
+      approvals: [],
+      events: [
+        { event_id: "evt_dup", type: "mission.created", ts: "2026-04-11T00:00:00.000Z", mission_id: "mis_demo", payload: {} },
+        { event_id: "evt_dup", type: "mission.created", ts: "2026-04-11T00:00:00.000Z", mission_id: "mis_demo", payload: {} }
+      ],
+      audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const response = await app.request("/api/events");
+    const payload = await response.json() as { events: Array<{ event_id?: string }> };
+
+    expect(response.status).toBe(200);
+    expect(payload.events).toHaveLength(1);
+    expect(payload.events[0]?.event_id).toBe("evt_dup");
+  });
+
+  it("treats artifact creation as idempotent when artifact_id repeats", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-artifact-idempotent-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [{ mission_id: "mis_demo", title: "Artifact flow", objective: "Artifact flow", project_id: "proj_demo", workflow: "bugfix", status: "running", active_run_id: "run_demo", summary: "Running", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z" }],
+      runs: [{ run_id: "run_demo", mission_id: "mis_demo", workflow_id: "bugfix", status: "running", current_step_index: 0, current_step_id: "plan", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z", steps: [{ step_id: "plan", title: "Plan fix", kind: "plan", risk: "low", approval_mode: "on_policy_trigger", state: "running", artifacts: [] }] }],
+      approvals: [],
+      events: [],
+      audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const first = await app.request("/api/runs/run_demo/artifacts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ step_id: "plan", type: "plan", artifact_id: "art_repeat", uri: "file:///tmp/plan.md" })
+    });
+    const second = await app.request("/api/runs/run_demo/artifacts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ step_id: "plan", type: "plan", artifact_id: "art_repeat", uri: "file:///tmp/plan.md" })
+    });
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(200);
+    const eventsResponse = await app.request("/api/events");
+    const eventsPayload = await eventsResponse.json() as { events: Array<{ type: string; payload?: { artifact_id?: string } }> };
+    expect(eventsPayload.events.filter((event) => event.type === "artifact.created" && event.payload?.artifact_id === "art_repeat")).toHaveLength(1);
   });
 });

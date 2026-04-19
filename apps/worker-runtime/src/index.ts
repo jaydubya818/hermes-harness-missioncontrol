@@ -6,7 +6,7 @@ import { resolve, join, relative, dirname } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { loadJsonFile, saveJsonFile } from "@hermes-harness-with-missioncontrol/state-store";
-import { EventSource, type EventEnvelope } from "@hermes-harness-with-missioncontrol/contracts";
+import { EventSource, type EventEnvelope, type ExecutionEnvelope, type StepExecutionRequest } from "@hermes-harness-with-missioncontrol/contracts";
 
 const execFileAsync = promisify(execFile);
 const app = new Hono();
@@ -18,17 +18,10 @@ const deployAdapterEnv = process.env.DEPLOY_ADAPTER ?? "auto";
 const deployBaseUrl = process.env.DEPLOY_BASE_URL ?? "https://staging.example.internal";
 const operatorToken = process.env.HARNESS_OPERATOR_TOKEN;
 
-type StepRequest = {
-  mission_id?: string;
-  execution_id?: string;
-  run_id: string;
-  step_id: string;
-  kind: string;
-  repo_path?: string;
-  branch_name?: string;
-};
+type StepRequest = StepExecutionRequest;
 
 type StepArtifact = {
+  artifact_id?: string;
   type: string;
   uri: string;
   content?: string;
@@ -49,6 +42,7 @@ type WorkspaceContext = {
   sourceRepo?: string;
   worktreePath?: string;
   branchName?: string;
+  envelope: ExecutionEnvelope;
   sandbox_cache?: {
     cache_key: string;
     commit: string;
@@ -88,22 +82,235 @@ type DeployPlan = {
   requires_approval: boolean;
 };
 
+class WorkerExecutionError extends Error {
+  statusCode: number;
+  eventType?: EventEnvelope["type"];
+  payload: Record<string, unknown>;
+  started: boolean;
+
+  constructor(
+    message: string,
+    options: {
+      statusCode?: number;
+      eventType?: EventEnvelope["type"];
+      payload?: Record<string, unknown>;
+      started?: boolean;
+    } = {}
+  ) {
+    super(message);
+    this.name = "WorkerExecutionError";
+    this.statusCode = options.statusCode ?? 400;
+    this.eventType = options.eventType;
+    this.payload = options.payload ?? {};
+    this.started = options.started ?? false;
+  }
+}
+
 function assertSafeSegment(value: string) {
   if (!/^[a-zA-Z0-9_-]+$/.test(value)) throw new Error("unsafe path segment");
 }
 
 function isWriteKind(kind: string) {
-  return ["implement", "review", "deploy", "test"].includes(kind);
+  return ["implement"].includes(kind);
+}
+
+function requiresGitRepo(kind: string) {
+  return ["plan", "implement", "review", "deploy"].includes(kind);
+}
+
+function actionForKind(kind: string) {
+  if (kind === "plan") return "plan";
+  if (kind === "implement") return "write_repo";
+  if (kind === "test") return "run_tests";
+  if (kind === "review") return "review_repo";
+  return "deploy";
+}
+
+function requiredToolsForKind(kind: string) {
+  if (kind === "test") return ["process", "filesystem"];
+  if (kind === "deploy") return ["process", "filesystem", "git"];
+  return ["filesystem", "git"];
+}
+
+function toolNameForKind(kind: string) {
+  if (kind === "plan") return "workspace.plan";
+  if (kind === "implement") return "workspace.implement";
+  if (kind === "test") return "workspace.test";
+  if (kind === "review") return "workspace.review";
+  return "workspace.deploy";
+}
+
+function normalizeArtifactId(req: StepRequest, artifact: StepArtifact, index: number) {
+  return artifact.artifact_id ?? `art_${req.execution_id}_${index + 1}`;
+}
+
+function estimateOutputBytes(result: StepResult) {
+  return Buffer.byteLength(JSON.stringify({
+    summary: result.summary,
+    artifacts: result.artifacts.map((artifact) => ({
+      artifact_id: artifact.artifact_id,
+      type: artifact.type,
+      uri: artifact.uri,
+      content: artifact.content,
+      metadata: artifact.metadata,
+    })),
+  }), "utf8");
+}
+
+function estimateTokenUsage(result: StepResult) {
+  const text = [
+    result.summary,
+    ...result.artifacts.map((artifact) => JSON.stringify({
+      type: artifact.type,
+      uri: artifact.uri,
+      content: artifact.content,
+      metadata: artifact.metadata,
+    })),
+  ].join("\n");
+  return Math.max(1, Math.ceil(Buffer.byteLength(text, "utf8") / 4));
+}
+
+function enforceBudget(req: StepRequest, result: StepResult) {
+  const maxArtifacts = req.envelope.resource_budget.max_artifacts;
+  if (result.artifacts.length > maxArtifacts) {
+    throw new WorkerExecutionError(`artifact budget exceeded: produced ${result.artifacts.length}, allowed ${maxArtifacts}`, {
+      statusCode: 400,
+      eventType: "execution.budget_exceeded",
+      payload: { budget: "max_artifacts", produced: result.artifacts.length, allowed: maxArtifacts },
+      started: true,
+    });
+  }
+
+  const outputBytes = estimateOutputBytes(result);
+  if (outputBytes > req.envelope.resource_budget.max_output_bytes) {
+    throw new WorkerExecutionError(`output budget exceeded: produced ${outputBytes} bytes, allowed ${req.envelope.resource_budget.max_output_bytes}`, {
+      statusCode: 400,
+      eventType: "execution.budget_exceeded",
+      payload: { budget: "max_output_bytes", produced: outputBytes, allowed: req.envelope.resource_budget.max_output_bytes },
+      started: true,
+    });
+  }
+
+  const estimatedTokens = estimateTokenUsage(result);
+  if (estimatedTokens > req.envelope.resource_budget.token_budget) {
+    throw new WorkerExecutionError(`token budget exceeded: estimated ${estimatedTokens}, allowed ${req.envelope.resource_budget.token_budget}`, {
+      statusCode: 400,
+      eventType: "execution.budget_exceeded",
+      payload: { budget: "token_budget", produced: estimatedTokens, allowed: req.envelope.resource_budget.token_budget },
+      started: true,
+    });
+  }
+}
+
+function assertAllowedRepoWrite(workspace: WorkspaceContext, targetPath: string) {
+  const relPath = safeRelativePath(relative(workspace.repoWorkspace, targetPath));
+  const allowed = workspace.envelope.repo_scope.writable_paths.some((allowedPath) => {
+    if (allowedPath === ".") return true;
+    const normalized = safeRelativePath(allowedPath);
+    return relPath === normalized || relPath.startsWith(`${normalized}/`);
+  });
+  if (!allowed) {
+    throw new WorkerExecutionError(`write path not allowed by execution envelope: ${relPath}`, {
+      statusCode: 400,
+      eventType: "policy.violation",
+      payload: {
+        violation_kind: "write_path_outside_repo_scope",
+        target_path: relPath,
+        writable_paths: workspace.envelope.repo_scope.writable_paths,
+      },
+      started: true,
+    });
+  }
+}
+
+function validateEnvelope(req: StepRequest) {
+  const envelope = req.envelope;
+  if (!req.mission_id || !req.run_id || !req.step_id || !req.execution_id) {
+    throw new WorkerExecutionError("invalid execution envelope: mission_id, run_id, step_id, and execution_id are required", {
+      statusCode: 400,
+      eventType: "policy.violation",
+      payload: { violation_kind: "missing_execution_identifiers" },
+    });
+  }
+  if (!envelope) throw new WorkerExecutionError("invalid execution envelope: envelope missing", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "missing_envelope" } });
+  if (!Array.isArray(envelope.allowed_tools) || envelope.allowed_tools.length === 0) throw new WorkerExecutionError("invalid execution envelope: allowed_tools required", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "missing_allowed_tools" } });
+  if (!Array.isArray(envelope.allowed_actions) || envelope.allowed_actions.length === 0) throw new WorkerExecutionError("invalid execution envelope: allowed_actions required", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "missing_allowed_actions" } });
+  if (!envelope.allowed_actions.includes(actionForKind(req.kind))) throw new WorkerExecutionError("invalid execution envelope: action not allowed", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "action_not_allowed", attempted_action: actionForKind(req.kind), allowed_actions: envelope.allowed_actions } });
+  for (const tool of requiredToolsForKind(req.kind)) {
+    if (!envelope.allowed_tools.includes(tool)) {
+      throw new WorkerExecutionError(`invalid execution envelope: missing required tool ${tool}`, {
+        statusCode: 400,
+        eventType: "policy.violation",
+        payload: { violation_kind: "tool_not_allowed", required_tool: tool, allowed_tools: envelope.allowed_tools },
+      });
+    }
+  }
+  if (!Number.isInteger(envelope.timeout_seconds) || envelope.timeout_seconds <= 0) throw new WorkerExecutionError("invalid execution envelope: timeout_seconds must be positive integer", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "invalid_timeout" } });
+  if (!envelope.resource_budget || envelope.resource_budget.max_artifacts <= 0 || envelope.resource_budget.max_output_bytes <= 0 || envelope.resource_budget.token_budget <= 0) {
+    throw new WorkerExecutionError("invalid execution envelope: resource_budget invalid", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "invalid_resource_budget" } });
+  }
+  if (!envelope.environment_classification) throw new WorkerExecutionError("invalid execution envelope: environment_classification required", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "missing_environment_classification" } });
+  const outputDir = resolve(envelope.output_dir);
+  try {
+    relativeWithin(runsRoot, outputDir);
+  } catch {
+    throw new WorkerExecutionError("invalid execution envelope: output_dir outside worker run root", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "output_dir_outside_root", output_dir: outputDir } });
+  }
+  const worktreePath = resolve(envelope.worktree_path);
+  try {
+    relativeWithin(worktreesRoot, worktreePath);
+  } catch {
+    throw new WorkerExecutionError("invalid execution envelope: worktree_path outside worktree root", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "worktree_path_outside_root", worktree_path: worktreePath } });
+  }
+  const workspaceRoot = resolve(envelope.workspace_root);
+  try {
+    relativeWithin(allowedRepoRoot, workspaceRoot);
+  } catch {
+    throw new WorkerExecutionError("invalid execution envelope: workspace_root outside allowed repo root", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "workspace_root_outside_root", workspace_root: workspaceRoot } });
+  }
+  const repoRoot = resolve(envelope.repo_scope.root_path);
+  try {
+    relativeWithin(allowedRepoRoot, repoRoot);
+  } catch {
+    throw new WorkerExecutionError("invalid execution envelope: repo_scope.root_path outside allowed repo root", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "repo_scope_outside_root", repo_scope_root: repoRoot } });
+  }
+  for (const writablePath of envelope.repo_scope.writable_paths) {
+    if (!writablePath || writablePath.startsWith("/")) throw new WorkerExecutionError("invalid execution envelope: writable_paths must be relative", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "absolute_writable_path", writable_path: writablePath } });
+    try {
+      relativeWithin(repoRoot, resolve(repoRoot, writablePath));
+    } catch {
+      throw new WorkerExecutionError("invalid execution envelope: writable path escapes repo scope", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "writable_path_outside_repo_scope", writable_path: writablePath } });
+    }
+  }
+  if (req.repo_path) {
+    const repoPath = resolve(req.repo_path);
+    try {
+      relativeWithin(repoRoot, repoPath);
+    } catch {
+      throw new WorkerExecutionError("invalid execution envelope: repo_path outside repo_scope", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "repo_path_outside_repo_scope", repo_path: repoPath, repo_scope_root: repoRoot } });
+    }
+  }
+  return {
+    ...envelope,
+    output_dir: outputDir,
+    worktree_path: worktreePath,
+    workspace_root: workspaceRoot,
+    repo_scope: {
+      ...envelope.repo_scope,
+      root_path: repoRoot
+    }
+  } satisfies ExecutionEnvelope;
 }
 
 function buildStepEvents(req: StepRequest, result: StepResult): EventEnvelope[] {
-  const missionId = req.mission_id ?? "mis_unknown";
-  const executionId = req.execution_id ?? `exec_${req.run_id}_${req.step_id}`;
+  const executionId = req.execution_id;
+  const timestamp = new Date().toISOString();
+  const toolName = toolNameForKind(req.kind);
   const base = {
     schema_version: "v1" as const,
-    timestamp: new Date().toISOString(),
+    timestamp,
     source: EventSource.Hermes,
-    mission_id: missionId,
+    mission_id: req.mission_id,
     run_id: req.run_id,
     step_id: req.step_id,
     execution_id: executionId,
@@ -115,18 +322,58 @@ function buildStepEvents(req: StepRequest, result: StepResult): EventEnvelope[] 
       event_id: `${executionId}_1`,
       sequence: 1,
       type: "step.started",
-      payload: { step_kind: req.kind },
+      payload: {
+        step_kind: req.kind,
+        approval_mode: req.envelope.approval_mode,
+        envelope: {
+          workspace_root: req.envelope.workspace_root,
+          worktree_path: req.envelope.worktree_path,
+          output_dir: req.envelope.output_dir,
+          allowed_tools: req.envelope.allowed_tools,
+          allowed_actions: req.envelope.allowed_actions,
+          timeout_seconds: req.envelope.timeout_seconds,
+          resource_budget: req.envelope.resource_budget,
+          environment_classification: req.envelope.environment_classification,
+        },
+      },
+    },
+    {
+      ...base,
+      event_id: `${executionId}_2`,
+      sequence: 2,
+      type: "tool.started",
+      payload: { tool_name: toolName, step_kind: req.kind },
+    },
+    {
+      ...base,
+      event_id: `${executionId}_3`,
+      sequence: 3,
+      type: "step.progress",
+      payload: { message: result.summary, phase: req.kind },
     },
   ];
 
-  let sequence = 2;
-  for (const artifact of result.artifacts) {
+  let sequence = 4;
+  for (let index = 0; index < result.artifacts.length; index += 1) {
+    const artifact = result.artifacts[index]!;
+    const createdAt = new Date().toISOString();
+    const artifactId = normalizeArtifactId(req, artifact, index);
+    artifact.artifact_id = artifactId;
     events.push({
       ...base,
+      timestamp: createdAt,
       event_id: `${executionId}_${sequence}`,
       sequence,
       type: "artifact.created",
-      payload: { kind: artifact.type, uri: artifact.uri },
+      payload: {
+        artifact_id: artifactId,
+        kind: artifact.type,
+        label: artifact.type,
+        uri: artifact.uri,
+        created_at: createdAt,
+        created_by: "worker-runtime",
+        metadata: artifact.metadata,
+      },
     });
     sequence += 1;
   }
@@ -135,8 +382,64 @@ function buildStepEvents(req: StepRequest, result: StepResult): EventEnvelope[] 
     ...base,
     event_id: `${executionId}_${sequence}`,
     sequence,
+    type: result.success ? "tool.completed" : "tool.failed",
+    payload: { tool_name: toolName, step_kind: req.kind, summary: result.summary },
+  });
+  sequence += 1;
+
+  events.push({
+    ...base,
+    event_id: `${executionId}_${sequence}`,
+    sequence,
     type: result.success ? "step.completed" : "step.failed",
-    payload: { summary: result.summary, confidence: result.confidence },
+    payload: { summary: result.summary, confidence: result.confidence, final_outcome: result.success ? "success" : "failed" },
+  });
+
+  return events;
+}
+
+function buildFailureEvents(req: StepRequest, error: WorkerExecutionError): EventEnvelope[] {
+  const timestamp = new Date().toISOString();
+  const base = {
+    schema_version: "v1" as const,
+    timestamp,
+    source: EventSource.Hermes,
+    mission_id: req.mission_id,
+    run_id: req.run_id,
+    step_id: req.step_id,
+    execution_id: req.execution_id,
+  };
+  const events: EventEnvelope[] = [];
+  let sequence = 1;
+
+  if (error.started) {
+    events.push({
+      ...base,
+      event_id: `${req.execution_id}_${sequence}`,
+      sequence,
+      type: "tool.failed",
+      payload: { tool_name: toolNameForKind(req.kind), step_kind: req.kind, summary: error.message },
+    });
+    sequence += 1;
+  }
+
+  if (error.eventType) {
+    events.push({
+      ...base,
+      event_id: `${req.execution_id}_${sequence}`,
+      sequence,
+      type: error.eventType,
+      payload: { reason: error.message, ...error.payload },
+    });
+    sequence += 1;
+  }
+
+  events.push({
+    ...base,
+    event_id: `${req.execution_id}_${sequence}`,
+    sequence,
+    type: "step.failed",
+    payload: { summary: error.message, error_type: error.eventType ?? "worker.execution_error" },
   });
 
   return events;
@@ -298,32 +601,44 @@ async function bootstrapWorkspaceDependencies(repoWorkspace: string, sourceRepo:
   };
 }
 
-async function ensureWorkspace(req: StepRequest): Promise<WorkspaceContext> {
+async function ensureWorkspace(req: StepRequest, envelope: ExecutionEnvelope): Promise<WorkspaceContext> {
   assertSafeSegment(req.run_id);
   assertSafeSegment(req.step_id);
-  const workdir = join(runsRoot, req.run_id, req.step_id);
+  const workdir = resolve(envelope.output_dir);
   await mkdir(workdir, { recursive: true });
 
-  if (!req.repo_path) return { workdir, repoWorkspace: workdir };
+  if (!req.repo_path) return { workdir, repoWorkspace: workdir, envelope };
 
   const absRepo = assertSafeRepoPath(req.repo_path);
   const isGitRepo = await assertGitRepo(absRepo);
   if (!isGitRepo) {
-    if (isWriteKind(req.kind)) throw new Error("repo_path must be a git repo for write-capable steps");
-    return { workdir, repoWorkspace: absRepo, sourceRepo: absRepo };
+    if (requiresGitRepo(req.kind)) {
+      throw new WorkerExecutionError("repo_path must be a git repo for this step kind", {
+        statusCode: 400,
+        eventType: "policy.violation",
+        payload: { violation_kind: "git_repo_required", step_kind: req.kind, repo_path: absRepo },
+      });
+    }
+    return { workdir, repoWorkspace: absRepo, sourceRepo: absRepo, envelope };
   }
 
   const branchName = req.branch_name ?? `hermes/${req.run_id}`;
-  const worktreePath = join(worktreesRoot, req.run_id);
-  await mkdir(worktreesRoot, { recursive: true });
+  const worktreePath = resolve(envelope.worktree_path);
+  await mkdir(dirname(worktreePath), { recursive: true });
 
   if (!(await exists(worktreePath))) {
     const add = await runCmd("git", ["-C", absRepo, "worktree", "add", "-B", branchName, worktreePath, "HEAD"], absRepo);
-    if (add.exitCode !== 0) throw new Error(`failed to create worktree: ${add.stderr || add.stdout}`);
+    if (add.exitCode !== 0) {
+      throw new WorkerExecutionError(`failed to create worktree: ${add.stderr || add.stdout}`, {
+        statusCode: 400,
+        eventType: "policy.violation",
+        payload: { violation_kind: "worktree_creation_failed", repo_path: absRepo, worktree_path: worktreePath },
+      });
+    }
   }
 
   const sandbox_cache = await bootstrapWorkspaceDependencies(worktreePath, absRepo);
-  return { workdir, repoWorkspace: worktreePath, sourceRepo: absRepo, worktreePath, branchName, sandbox_cache };
+  return { workdir, repoWorkspace: worktreePath, sourceRepo: absRepo, worktreePath, branchName, envelope, sandbox_cache };
 }
 
 async function detectTestCommand(repoWorkspace: string): Promise<TestCommand | null> {
@@ -385,6 +700,7 @@ async function createPlan(workspace: WorkspaceContext) {
 async function createImplementation(workspace: WorkspaceContext, req: StepRequest) {
   const relPath = join(".hermes-harness", "runs", req.run_id, "implementation.json");
   const filePath = join(workspace.repoWorkspace, relPath);
+  assertAllowedRepoWrite(workspace, filePath);
   await mkdir(dirname(filePath), { recursive: true });
   const content = JSON.stringify({
     run_id: req.run_id,
@@ -407,6 +723,7 @@ async function createImplementation(workspace: WorkspaceContext, req: StepReques
     confidence: 0.9,
     success: true,
     artifacts: [{
+      artifact_id: `art_${req.execution_id}_1`,
       type: "diff",
       uri: `file://${patchPath}`,
       content: patchContent,
@@ -557,27 +874,46 @@ app.get("/health", (c) => c.json({ ok: true, service: "worker-runtime", allowed_
 app.post("/api/execute-step", async (c) => {
   const authError = requireOperator(c);
   if (authError) return authError;
+  const body = await c.req.json<StepRequest>();
   try {
-    const body = await c.req.json<StepRequest>();
-    const workspace = await ensureWorkspace(body);
+    const envelope = validateEnvelope(body);
+    const workspace = await ensureWorkspace(body, envelope);
     let result: StepResult;
-    if (body.kind === "plan") result = await createPlan(workspace);
-    else if (body.kind === "implement") result = await createImplementation(workspace, body);
-    else if (body.kind === "test") result = await runTests(workspace);
-    else if (body.kind === "review") result = await review(workspace);
-    else result = await deploy(workspace);
+    const execute = async () => {
+      if (body.kind === "plan") return createPlan(workspace);
+      if (body.kind === "implement") return createImplementation(workspace, body);
+      if (body.kind === "test") return runTests(workspace);
+      if (body.kind === "review") return review(workspace);
+      return deploy(workspace);
+    };
+    result = await Promise.race([
+      execute(),
+      new Promise<StepResult>((_, reject) => setTimeout(() => reject(new WorkerExecutionError(`step execution timed out after ${envelope.timeout_seconds}s`, {
+        statusCode: 408,
+        eventType: "execution.timeout",
+        payload: { timeout_seconds: envelope.timeout_seconds },
+        started: true,
+      })), envelope.timeout_seconds * 1000))
+    ]);
+    enforceBudget(body, result);
     const step_events = buildStepEvents(body, result);
     return c.json({ run_id: body.run_id, mission_id: body.mission_id, execution_id: body.execution_id, step_id: body.step_id, ...workspace, ...result, step_events });
   } catch (error) {
+    const workerError = error instanceof WorkerExecutionError
+      ? error
+      : new WorkerExecutionError(String(error instanceof Error ? error.message : error), { started: true, eventType: "tool.failed" });
     return c.json({
-      run_id: "unknown",
-      step_id: "unknown",
+      run_id: body.run_id,
+      mission_id: body.mission_id,
+      execution_id: body.execution_id,
+      step_id: body.step_id,
       success: false,
       confidence: 0,
-      summary: String(error instanceof Error ? error.message : error),
+      summary: workerError.message,
       artifacts: [],
-      step_events: []
-    }, 400);
+      error_code: workerError.eventType,
+      step_events: buildFailureEvents(body, workerError)
+    }, workerError.statusCode as 400 | 408);
   }
 });
 

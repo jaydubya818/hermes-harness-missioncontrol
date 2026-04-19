@@ -8,7 +8,7 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /** @enum {string} */
-        MissionState: "pending" | "running" | "awaiting_approval" | "failed" | "completed" | "cancelled";
+        MissionState: "pending" | "running" | "awaiting_approval" | "paused" | "failed" | "completed" | "cancelled";
         /** @enum {string} */
         RunState: "pending" | "running" | "awaiting_approval" | "paused" | "failed" | "completed" | "cancelled";
         /** @enum {string} */
@@ -104,6 +104,38 @@ export interface components {
             resolved_at: string;
             resolved_by?: string;
         };
+        RepoScope: {
+            root_path: string;
+            writable_paths: string[];
+        };
+        ResourceBudget: {
+            token_budget: number;
+            max_artifacts: number;
+            max_output_bytes: number;
+        };
+        ExecutionEnvelope: {
+            worktree_path: string;
+            workspace_root: string;
+            repo_scope: components["schemas"]["RepoScope"];
+            allowed_tools: string[];
+            allowed_actions: string[];
+            approval_mode: components["schemas"]["ApprovalMode"];
+            timeout_seconds: number;
+            resource_budget: components["schemas"]["ResourceBudget"];
+            output_dir: string;
+            /** @enum {string} */
+            environment_classification: "sandbox" | "staging" | "production" | "local";
+        };
+        StepExecutionRequest: {
+            mission_id: string;
+            run_id: string;
+            step_id: string;
+            execution_id: string;
+            kind: components["schemas"]["StepKind"];
+            repo_path?: string;
+            branch_name?: string;
+            envelope: components["schemas"]["ExecutionEnvelope"];
+        };
         TaskExecutionResult: {
             execution_id: string;
             mission_id: string;
@@ -132,11 +164,12 @@ export interface components {
             sequence: number;
             source: components["schemas"]["EventSource"];
             /** @enum {string} */
-            type: "mission.created" | "run.started" | "step.started" | "step.progress" | "tool.started" | "tool.completed" | "artifact.created" | "approval.requested" | "approval.resolved" | "step.blocked" | "step.failed" | "step.completed" | "run.completed" | "run.cancelled";
+            type: "mission.created" | "mission.updated" | "mission.paused" | "mission.running" | "mission.cancelled" | "mission.completed" | "run.started" | "run.running" | "run.paused" | "run.completed" | "run.failed" | "run.cancelled" | "step.started" | "step.progress" | "step.blocked" | "step.paused" | "step.resumed" | "step.completed" | "step.failed" | "step.cancelled" | "step.retried" | "tool.started" | "tool.completed" | "tool.failed" | "artifact.created" | "approval.requested" | "approval.resolved" | "policy.violation" | "execution.timeout" | "execution.budget_exceeded";
             mission_id: string;
-            run_id: string;
+            run_id?: string;
             step_id?: string;
             execution_id?: string;
+            actor?: string;
             payload: {
                 [key: string]: unknown;
             };

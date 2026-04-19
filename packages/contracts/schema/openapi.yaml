@@ -7,7 +7,7 @@ components:
   schemas:
     MissionState:
       type: string
-      enum: [pending, running, awaiting_approval, failed, completed, cancelled]
+      enum: [pending, running, awaiting_approval, paused, failed, completed, cancelled]
     RunState:
       type: string
       enum: [pending, running, awaiting_approval, paused, failed, completed, cancelled]
@@ -127,6 +127,62 @@ components:
           enum: [approved, rejected]
         resolved_at: { type: string, format: date-time }
         resolved_by: { type: string }
+    RepoScope:
+      type: object
+      additionalProperties: false
+      required: [root_path, writable_paths]
+      properties:
+        root_path: { type: string }
+        writable_paths:
+          type: array
+          items: { type: string }
+    ResourceBudget:
+      type: object
+      additionalProperties: false
+      required: [token_budget, max_artifacts, max_output_bytes]
+      properties:
+        token_budget: { type: integer }
+        max_artifacts: { type: integer }
+        max_output_bytes: { type: integer }
+    ExecutionEnvelope:
+      type: object
+      additionalProperties: false
+      required: [worktree_path, workspace_root, repo_scope, allowed_tools, allowed_actions, approval_mode, timeout_seconds, resource_budget, output_dir, environment_classification]
+      properties:
+        worktree_path: { type: string }
+        workspace_root: { type: string }
+        repo_scope:
+          $ref: '#/components/schemas/RepoScope'
+        allowed_tools:
+          type: array
+          items: { type: string }
+        allowed_actions:
+          type: array
+          items: { type: string }
+        approval_mode:
+          $ref: '#/components/schemas/ApprovalMode'
+        timeout_seconds: { type: integer }
+        resource_budget:
+          $ref: '#/components/schemas/ResourceBudget'
+        output_dir: { type: string }
+        environment_classification:
+          type: string
+          enum: [sandbox, staging, production, local]
+    StepExecutionRequest:
+      type: object
+      additionalProperties: false
+      required: [mission_id, run_id, step_id, execution_id, kind, envelope]
+      properties:
+        mission_id: { type: string }
+        run_id: { type: string }
+        step_id: { type: string }
+        execution_id: { type: string }
+        kind:
+          $ref: '#/components/schemas/StepKind'
+        repo_path: { type: string }
+        branch_name: { type: string }
+        envelope:
+          $ref: '#/components/schemas/ExecutionEnvelope'
     TaskExecutionResult:
       type: object
       additionalProperties: false
@@ -167,7 +223,7 @@ components:
     EventEnvelope:
       type: object
       additionalProperties: false
-      required: [schema_version, event_id, timestamp, sequence, source, type, mission_id, run_id, payload]
+      required: [schema_version, event_id, timestamp, sequence, source, type, mission_id, payload]
       properties:
         schema_version:
           type: string
@@ -181,23 +237,40 @@ components:
           type: string
           enum:
             - mission.created
+            - mission.updated
+            - mission.paused
+            - mission.running
+            - mission.cancelled
+            - mission.completed
             - run.started
+            - run.running
+            - run.paused
+            - run.completed
+            - run.failed
+            - run.cancelled
             - step.started
             - step.progress
+            - step.blocked
+            - step.paused
+            - step.resumed
+            - step.completed
+            - step.failed
+            - step.cancelled
+            - step.retried
             - tool.started
             - tool.completed
+            - tool.failed
             - artifact.created
             - approval.requested
             - approval.resolved
-            - step.blocked
-            - step.failed
-            - step.completed
-            - run.completed
-            - run.cancelled
+            - policy.violation
+            - execution.timeout
+            - execution.budget_exceeded
         mission_id: { type: string }
         run_id: { type: string }
         step_id: { type: string }
         execution_id: { type: string }
+        actor: { type: string }
         payload:
           type: object
           additionalProperties: true

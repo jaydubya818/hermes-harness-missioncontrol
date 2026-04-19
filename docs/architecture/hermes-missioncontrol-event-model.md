@@ -1,372 +1,314 @@
 # Hermes ↔ MissionControl Event Model
 
-Status: draft event taxonomy aligned with approved target architecture
+Status: canonical taxonomy locked in code and schema
 
-## Purpose
+## Principles
+- MissionControl is system-of-record for mission/run/step truth.
+- Events are history, audit input, and replay input.
+- Audit read models derive only from canonical events.
+- Consumers must dedupe by `event_id`.
+- `schema_version = v1` for every current event.
 
-Define first-class events for:
-- live operator UI
-- audit trail
-- replay/debugging
-- eval correlation
-- future multi-agent execution
-
-MissionControl remains system-of-record for run state.
-Hermes emits execution events inside a governed step.
-
-## Event Principles
-
-- append-only
-- ordered per execution stream
-- immutable after emission
-- schema-versioned
-- machine-readable first, UI-friendly second
-- streamable over SSE first
-
-## Event Envelope
-
-All events share this envelope:
+## Canonical envelope
+All events use:
 
 ```json
 {
   "schema_version": "v1",
   "event_id": "evt_123",
   "timestamp": "2026-04-18T18:00:00Z",
-  "sequence": 15,
-  "source": "hermes",
-  "type": "tool.started",
+  "sequence": 7,
+  "source": "missioncontrol",
+  "type": "step.started",
   "mission_id": "mis_123",
   "run_id": "run_123",
-  "step_id": "step_123",
+  "step_id": "plan",
   "execution_id": "exec_123",
+  "actor": "operator",
   "payload": {}
 }
 ```
 
-## Envelope Fields
+Required envelope fields:
+- `schema_version`
+- `event_id`
+- `timestamp`
+- `sequence`
+- `source`
+- `type`
+- `mission_id`
+- `payload`
 
-- `schema_version`: contract version
-- `event_id`: unique opaque identifier
-- `timestamp`: UTC RFC3339 timestamp
-- `sequence`: monotonic per execution stream
-- `source`: `missioncontrol` or `hermes`
-- `type`: event type string
-- `mission_id`: mission scope
-- `run_id`: run scope
-- `step_id`: step scope when applicable
-- `execution_id`: execution scope when applicable
-- `payload`: event-specific body
+Optional envelope fields by event class:
+- `run_id`
+- `step_id`
+- `execution_id`
+- `actor`
 
-## Source Rules
+## Locked canonical event set
 
-### Hermes emits
-- step execution progress
-- tool lifecycle
-- partial outputs
-- generated artifacts metadata
-- final execution result event
-
-### MissionControl emits
-- mission/run lifecycle events
-- approval lifecycle events
-- policy blocks
-- artifact persistence events
-- eval linkage events
-- cleanup/completion state transitions
-
-## Canonical Event Types
-
-### Mission lifecycle
+Mission:
 - `mission.created`
 - `mission.updated`
+- `mission.paused`
+- `mission.running`
 - `mission.cancelled`
+- `mission.completed`
 
-### Run lifecycle
+Run:
 - `run.started`
+- `run.running`
 - `run.paused`
-- `run.resumed`
 - `run.completed`
-- `run.cancelled`
 - `run.failed`
+- `run.cancelled`
 
-### Step lifecycle
+Step:
 - `step.started`
 - `step.progress`
-- `step.blocked`
-- `step.awaiting_approval`
-- `step.interrupted`
+- `step.paused`
 - `step.resumed`
+- `step.blocked`
 - `step.completed`
 - `step.failed`
 - `step.cancelled`
+- `step.retried`
 
-### Tool lifecycle
+Tool:
 - `tool.started`
-- `tool.progress`
 - `tool.completed`
 - `tool.failed`
 
-### Artifact lifecycle
+Artifact:
 - `artifact.created`
-- `artifact.persisted`
-- `artifact.failed`
 
-### Approval lifecycle
+Approval:
 - `approval.requested`
 - `approval.resolved`
 
-### Eval lifecycle
-- `eval.requested`
-- `eval.completed`
-- `eval.failed`
+Policy / execution guardrails:
+- `policy.violation`
+- `execution.timeout`
+- `execution.budget_exceeded`
 
-### Cleanup lifecycle
-- `cleanup.started`
-- `cleanup.completed`
-- `cleanup.failed`
+## Legacy names removed or normalized
+Persisted legacy events are normalized on load:
+- `approval.granted` -> `approval.resolved`
+- `approval.rejected` -> `approval.resolved`
+- `mission.started` -> `mission.running`
+- `run.resumed` -> `run.running`
+- `step.awaiting_approval` -> `step.blocked`
 
-## Event Payload Shapes
+No new code should emit legacy names.
+
+## Required identifiers by event type
+
+Mission-only:
+- required: `mission_id`
+- optional: `run_id`, `step_id`, `execution_id`, `actor`
+- examples: `mission.created`, `mission.updated`, `mission.running`, `mission.paused`, `mission.cancelled`, `mission.completed`
+
+Run-scoped:
+- required: `mission_id`, `run_id`
+- optional: `step_id`, `execution_id`, `actor`
+- examples: `run.started`, `run.running`, `run.paused`, `run.completed`, `run.failed`, `run.cancelled`
+
+Step-scoped:
+- required: `mission_id`, `run_id`, `step_id`
+- optional: `execution_id`, `actor`
+- examples: `step.started`, `step.progress`, `step.blocked`, `step.paused`, `step.resumed`, `step.completed`, `step.failed`, `step.cancelled`, `step.retried`
+
+Execution-scoped guardrails:
+- required: `mission_id`, `run_id`, `step_id`, `execution_id`
+- optional: `actor`
+- examples: `tool.started`, `tool.completed`, `tool.failed`, `policy.violation`, `execution.timeout`, `execution.budget_exceeded`
+
+Approval-scoped:
+- required: `mission_id`, `run_id`, `step_id`
+- optional: `execution_id`, `actor`
+- examples: `approval.requested`, `approval.resolved`
+
+Artifact-scoped:
+- required: `mission_id`, `run_id`, `step_id`
+- optional: `execution_id`, `actor`
+- examples: `artifact.created`
+
+## Payload rules
 
 ### `mission.created`
-Source: MissionControl
+Required payload fields:
+- `mission_id`
+- `title`
+- `workflow`
+- `project_id`
+- `status`
 
-```json
-{
-  "mission_title": "Implement governed async step execution",
-  "workflow": "implementation",
-  "repo_path": "/repo"
-}
-```
+Optional:
+- `objective`
+- `repo_path`
+- `workspace_root`
+- `policy_ref`
+- `profile_ref`
+- `summary`
+
+### `mission.updated`
+Required:
+- `status`
+- `summary`
+
+### `mission.running | mission.paused | mission.cancelled | mission.completed`
+Required:
+- `status`
+- `summary`
 
 ### `run.started`
-Source: MissionControl
+Required:
+- `run_id`
+- `mission_id`
+- `workflow_id`
+- `status`
 
-```json
-{
-  "run_state": "running",
-  "trigger": "operator_start"
-}
-```
+### `run.running | run.paused | run.completed | run.failed | run.cancelled`
+Required:
+- `status`
+- `current_step_id?` is expected when available
 
 ### `step.started`
-Source: MissionControl
+Required:
+- `step_kind`
 
-```json
-{
-  "step_kind": "implement",
-  "approval_mode": "on_policy_trigger",
-  "worktree_path": "/repo/.worktrees/run_123"
-}
-```
+Optional:
+- `approval_mode`
+- `state`
+- `envelope`
+
+When MissionControl emits dispatch-start for worker execution, `payload.envelope` includes:
+- `workspace_root`
+- `worktree_path`
+- `output_dir`
+- `repo_scope`
+- `allowed_tools`
+- `allowed_actions`
+- `timeout_seconds`
+- `resource_budget`
+- `approval_mode`
+- `environment_classification`
 
 ### `step.progress`
-Source: Hermes
-
-```json
-{
-  "message": "Implementing step contract handlers",
-  "percent": 40,
-  "phase": "implementation"
-}
-```
-
-### `tool.started`
-Source: Hermes
-
-```json
-{
-  "tool_name": "terminal",
-  "tool_call_id": "tool_123",
-  "summary": "Run targeted tests"
-}
-```
-
-### `tool.completed`
-Source: Hermes
-
-```json
-{
-  "tool_name": "terminal",
-  "tool_call_id": "tool_123",
-  "status": "success",
-  "output_ref": "log://run_123/test.log"
-}
-```
-
-### `artifact.created`
-Source: Hermes or MissionControl
-
-```json
-{
-  "artifact_id": "art_123",
-  "kind": "patch",
-  "label": "Implementation diff",
-  "uri": "artifact://run_123/patch.diff"
-}
-```
-
-### `artifact.persisted`
-Source: MissionControl
-
-```json
-{
-  "artifact_id": "art_123",
-  "storage_uri": "s3://artifacts/run_123/patch.diff"
-}
-```
-
-### `approval.requested`
-Source: MissionControl
-
-```json
-{
-  "approval_id": "approval_123",
-  "reason": "deploy step requires approval",
-  "decision_scope": "step"
-}
-```
-
-### `approval.resolved`
-Source: MissionControl
-
-```json
-{
-  "approval_id": "approval_123",
-  "decision": "approved",
-  "resolved_by": "operator"
-}
-```
+Required:
+- `message`
+- `phase`
 
 ### `step.blocked`
-Source: MissionControl
+Required:
+- `reason`
 
-```json
-{
-  "reason": "policy_blocked",
-  "details": "Requested action outside allowed envelope"
-}
-```
+Optional:
+- `approval_id`
+
+### `step.paused | step.resumed | step.cancelled`
+Required:
+- control or reason context in payload
 
 ### `step.completed`
-Source: MissionControl
-
-```json
-{
-  "final_outcome": "success",
-  "summary": "Step completed and committed to system-of-record",
-  "artifact_count": 2
-}
-```
+Required:
+- step completion summary or execution result context
 
 ### `step.failed`
-Source: MissionControl
+Required:
+- failure summary
 
-```json
-{
-  "final_outcome": "failed",
-  "reason": "STEP_TIMEOUT",
-  "retryable": true
-}
-```
+### `step.retried`
+Required:
+- none
 
-### `run.completed`
-Source: MissionControl
+Optional:
+- `previous_execution_id`
 
-```json
-{
-  "final_state": "completed",
-  "steps_completed": 5,
-  "steps_failed": 0
-}
-```
+### `tool.started | tool.completed | tool.failed`
+Required:
+- `tool_name`
+- `step_kind`
 
-### `eval.completed`
-Source: MissionControl or Eval service facade
+Optional:
+- `summary`
 
-```json
-{
-  "score": 0.93,
-  "pass": true,
-  "warnings": []
-}
-```
+### `artifact.created`
+Required:
+- `artifact_id`
+- `kind`
+- `label`
+- `uri`
 
-## Stream Semantics
+Optional:
+- `metadata`
+- `created_at`
+- `created_by`
 
-### Transport
-Initial recommendation:
-- SSE for live step/run event streams
+### `approval.requested`
+Required:
+- `approval_id`
+- `reason`
+- `decision_scope`
+- `requested_at`
 
-Suggested endpoints:
-- `GET /contracts/v1/steps/{execution_id}/events`
-- `GET /contracts/v1/runs/{run_id}/events`
+### `approval.resolved`
+Required:
+- `approval_id`
+- `decision`
+- `resolved_at`
 
-### Ordering
-- ordering guaranteed only within a single execution stream
-- `sequence` must be monotonic per stream
-- consumers should not assume global ordering across all runs
+Optional:
+- `resolved_by`
+- `reason`
+- `step_id`
 
-### Delivery
-- at-least-once acceptable initially
-- consumers must de-duplicate by `event_id`
-- replay endpoint should exist later for debugging and audit hydration
+### `policy.violation`
+Required:
+- `reason`
+- `violation_kind`
 
-## UI Guidance
+Optional:
+- envelope or repo path details
+- attempted action/tool
 
-Operator UI should treat:
+### `execution.timeout`
+Required:
+- `reason`
+- `timeout_seconds`
+
+### `execution.budget_exceeded`
+Required:
+- `reason`
+- `budget`
+- `produced`
+- `allowed`
+
+## Source ownership
+
+Hermes emits:
+- `step.started`
 - `step.progress`
 - `tool.started`
 - `tool.completed`
-- `approval.requested`
+- `tool.failed`
+- `artifact.created`
 - `step.completed`
 - `step.failed`
+- `policy.violation` when worker rejects envelope or path/tool policy
+- `execution.timeout`
+- `execution.budget_exceeded`
 
-as highest-signal events for real-time display.
+MissionControl emits:
+- mission lifecycle events
+- run lifecycle events
+- approval lifecycle events
+- step pause/resume/retry/cancel events
+- policy violations from policy-engine / dispatch validation
+- artifact.created for MissionControl-side artifact persistence
 
-Low-noise events should be grouped in audit views rather than top-level dashboards.
-
-## Audit Guidance
-
-MissionControl audit ledger should store:
-- raw event envelope
-- ingestion timestamp
-- source
-- correlated mission/run/step/execution IDs
-
-Audit log should not rewrite historical events.
-If state changes, emit a new event.
-
-## Replay Guidance
-
-Replay/debugging should be based on:
-- ordered event stream
-- stored artifact refs
-- final execution result payload
-- approval events
-- eval results
-
-This enables:
-- timeline reconstruction
-- operator debugging
-- regression analysis
-- future policy simulation
-
-## Future Extensions
-
-Reserved future event families:
-- `agent.spawned`
-- `agent.completed`
-- `agent.failed`
-- `memory.writeback.completed`
-- `memory.writeback.failed`
-- `policy.simulated`
-- `policy.overridden`
-
-Do not add these to v1 until operational need exists.
-
-## Rules to Preserve
-
-- Hermes may emit step outcome information
-- MissionControl alone commits authoritative step/run lifecycle state
-- artifact persistence truth lives in MissionControl
-- event schemas live in contracts package, not hidden in either repo internals
+## Replay semantics
+- load path normalizes legacy names into canonical names
+- load path rebuilds audit timeline from canonical events
+- duplicate `event_id` is ignored
+- UI should read `/api/read-models/audit`, not stitch raw internal event variants

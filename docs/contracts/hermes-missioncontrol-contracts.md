@@ -1,436 +1,232 @@
 # Hermes ↔ MissionControl Contracts
 
-Status: draft spec derived from approved target architecture
+Status: implemented and current as of 2026-04-18 hardening pass
 
-## Purpose
+## Core rule
+- MissionControl governs authoritative mission/run/step/approval/artifact/audit state.
+- Hermes executes inside a MissionControl-issued envelope.
+- Contracts, not imports, connect the repos.
 
-Define the stable, schema-first boundary between:
-- Hermes: intelligent execution runtime
-- MissionControl: supervisory control plane and system-of-record
+## Source of truth
+- OpenAPI: `packages/contracts/schema/openapi.yaml`
+- Generated TypeScript: `packages/contracts/src/generated/openapi.ts`
+- Generated Python: `packages/contracts/generated/python_models.py`
 
-MissionControl governs execution state.
-Hermes performs intelligent work inside a governed envelope.
-Contracts, not imports, connect them.
+## Implemented contract models
 
-## Contract Principles
+### Mission
+Fields:
+- `mission_id`
+- `title`
+- `objective?`
+- `workflow`
+- `project_id`
+- `policy_ref?`
+- `profile_ref?`
+- `repo_path?`
+- `workspace_root?`
+- `status = pending | running | awaiting_approval | paused | failed | completed | cancelled`
+- `active_run_id?`
+- `summary?`
+- `created_at`
+- `updated_at`
 
-- schema-first: OpenAPI + JSON Schema
-- async by default for step execution
-- streaming events are first-class
-- MissionControl owns authoritative run/step lifecycle state
-- Hermes owns reasoning, context assembly, memory behavior, and tool-driven execution
-- no cross-repo internal imports
-- no shared business logic in the contracts package
+### Run
+Fields:
+- `run_id`
+- `mission_id`
+- `status = pending | running | awaiting_approval | paused | failed | completed | cancelled`
+- `current_step_id?`
+- `started_at?`
+- `completed_at?`
+- `approval_id?`  # derived convenience only
+- `summary?`
+- `created_at`
+- `updated_at`
 
-## Ownership Boundary
+### Step
+Fields:
+- `step_id`
+- `kind = plan | implement | test | review | deploy`
+- `title`
+- `state = pending | ready | running | blocked | awaiting_approval | paused | failed | completed | cancelled`
+- `approval_mode = never | on_policy_trigger | always`
+- `risk? = low | medium | high`
+- `execution_id?`
+- `approval_id?`  # primary approval linkage truth
+- `started_at?`
+- `completed_at?`
+- `blocked_reason?`
+- `notes?`
+- `artifacts: ArtifactRef[]`
 
-### Hermes owns
-- execution context bundle assembly
-- planning and reasoning inside a step
-- tool invocation inside allowed envelope
-- structured step outputs
-- Hermes-side memory writeback behavior
+### ArtifactRef
+Fields:
+- `artifact_id`
+- `kind`
+- `uri`
+- `label`
+- `content_type?`
+- `created_at?`
+- `metadata?`
 
-### MissionControl owns
-- mission, run, and step state
-- approvals
-- artifact persistence
-- audit trail
-- eval linkage
-- cancellation, retry, and cleanup decisions
-
-## Shared Package
-
-Recommended package:
-- `packages/contracts`
-
-Contains only:
-- request/response schemas
-- event envelopes
-- enums and status models
-- error models
-- artifact metadata models
-
-Suggested generated outputs:
-- TypeScript models for MissionControl
-- Python models for Hermes
-
-## Common Types
-
-## IDs
-- `MissionId`
-- `RunId`
-- `StepId`
-- `ApprovalId`
-- `ArtifactId`
-- `ContextBundleId`
-- `StepExecutionId`
-
-Format recommendation:
-- `mis_<opaque>`
-- `run_<opaque>`
-- `step_<opaque>`
-- `approval_<opaque>`
-- `art_<opaque>`
-- `ctx_<opaque>`
-- `exec_<opaque>`
-
-## Enums
-
-### StepKind
-- `plan`
-- `implement`
-- `test`
-- `review`
-- `deploy`
-
-### StepState
-MissionControl-owned authoritative lifecycle state:
-- `pending`
-- `ready`
-- `running`
-- `awaiting_approval`
-- `paused`
-- `failed`
-- `completed`
-- `cancelled`
-
-### ApprovalMode
-- `never`
-- `on_policy_trigger`
-- `always`
-
-### ToolPermission
-- `allow`
-- `deny`
-- `allow_with_approval`
-
-### FinalOutcome
-Hermes-reported execution outcome:
-- `success`
-- `partial`
-- `blocked`
-- `failed`
-- `cancelled`
-
-## Execution Envelope
-
-MissionControl passes Hermes an execution envelope on step start:
+### ApprovalRequest
+Fields:
+- `approval_id`
 - `mission_id`
 - `run_id`
 - `step_id`
-- `step_kind`
-- `repo_path`
+- `reason`
+- `decision_scope = step | run`
+- `requested_at`
+
+### ApprovalResult
+Fields:
+- `approval_id`
+- `decision = approved | rejected`
+- `resolved_at`
+- `resolved_by?`
+
+## Governed execution envelope
+
+MissionControl builds and validates the envelope before worker dispatch.
+Worker validates again before execution.
+No permissive fallback is allowed.
+
+### RepoScope
+- `root_path`
+- `writable_paths[]`
+
+### ResourceBudget
+- `token_budget`
+- `max_artifacts`
+- `max_output_bytes`
+
+### ExecutionEnvelope
+Required fields:
 - `worktree_path`
-- `objective`
-- `constraints[]`
-- `operator_notes[]`
+- `workspace_root`
+- `repo_scope`
 - `allowed_tools[]`
 - `allowed_actions[]`
 - `approval_mode`
 - `timeout_seconds`
-- `token_budget`
 - `resource_budget`
 - `output_dir`
-- `environment_classification`
-- `relevant_files[]`
+- `environment_classification = sandbox | staging | production | local`
 
-Hermes must operate only inside this envelope.
+### StepExecutionRequest
+Required fields:
+- `mission_id`
+- `run_id`
+- `step_id`
+- `execution_id`
+- `kind`
+- `envelope`
 
-## Core Contracts
+Optional fields:
+- `repo_path`
+- `branch_name`
 
-### 1. Load Context
+## Envelope enforcement rules
 
-Direction:
-- MissionControl → Hermes
+Worker-runtime enforces:
+- required execution identifiers
+- required `allowed_tools`
+- required `allowed_actions`
+- step-kind → action mapping
+- step-kind → required tools mapping
+- positive `timeout_seconds`
+- positive budget values
+- path boundaries for:
+  - `workspace_root`
+  - `worktree_path`
+  - `output_dir`
+  - `repo_scope.root_path`
+  - `repo_scope.writable_paths`
+  - `repo_path`
+- git repo requirement for git-dependent step kinds
+- repo writes only inside `repo_scope.writable_paths`
+- output budget enforcement:
+  - token estimate
+  - artifact count
+  - output bytes
 
-Purpose:
-- request an execution context bundle for a governed step
+MissionControl envelope defaults:
+- worktree root: `WORKTREE_ROOT/<run_id>`
+- step output dir: `WORKER_RUNTIME_ROOT/<run_id>/<step_id>`
+- no repo-wide write permission by default
+- current implement step writes constrained to `.hermes-harness`
+- missing repo path falls back to an isolated MissionControl sandbox under `ALLOWED_REPO_ROOT/.missioncontrol-sandboxes/<run_id>` instead of widening to the whole repo root
 
-Operation:
-- `POST /contracts/v1/context/load`
+## Worker API shape in practice
 
-Request shape:
-```json
-{
-  "mission_id": "mis_123",
-  "run_id": "run_123",
-  "step_id": "step_123",
-  "step_kind": "implement",
-  "repo_path": "/repo",
-  "worktree_path": "/repo/.worktrees/run_123",
-  "objective": "Implement governed async step execution",
-  "constraints": ["Do not modify deploy flow"],
-  "operator_notes": ["Prefer minimal surface changes first"],
-  "relevant_files": ["apps/orchestrator-api/src/index.ts"],
-  "approval_mode": "on_policy_trigger",
-  "timeout_seconds": 1800
-}
-```
+### `POST /api/execute-step`
+Request body:
+- `StepExecutionRequest`
 
-Response shape:
-```json
-{
-  "context_bundle_id": "ctx_123",
-  "summary": "Execution context bundle for async step execution",
-  "agent_profile": {
-    "profile_name": "hermes",
-    "persona_ref": "profile://hermes/default"
-  },
-  "documents": [
-    {
-      "type": "architecture",
-      "path": "docs/architecture/2026-04-18-hermes-missioncontrol-approved-target-architecture.md",
-      "title": "Approved Target Architecture"
-    }
-  ],
-  "risks": ["Lifecycle authority must remain in MissionControl"],
-  "gotchas": ["Do not let Hermes commit authoritative step state"],
-  "suggested_next_actions": ["implement start_step", "implement event stream"]
-}
-```
+Success response:
+- execution result fields
+- workspace metadata
+- canonical `step_events[]`
 
-Notes:
-- Hermes decides context contents
-- MissionControl consumes the bundle, but does not assemble it itself
+Failure response:
+- `run_id`
+- `mission_id`
+- `execution_id`
+- `step_id`
+- `success = false`
+- `summary`
+- `error_code?`
+- `step_events[]`
 
-### 2. Start Step
+Worker failure responses still emit canonical events such as:
+- `policy.violation`
+- `execution.timeout`
+- `execution.budget_exceeded`
+- `step.failed`
 
-Direction:
-- MissionControl → Hermes
+## MissionControl API surfaces changed in this pass
 
-Purpose:
-- start async governed execution for a step
+Execution/lifecycle:
+- `POST /api/missions/:id/start`
+- `POST /api/runs/:id/execute-current`
+- `POST /api/runs/:id/interrupt-step`
+- `POST /api/runs/:id/resume-step`
+- `POST /api/runs/:id/retry-step`
+- `POST /api/runs/:id/cancel-step`
+- `POST /api/runs/:id/cancel`
+- `POST /api/runs/:id/artifacts`
+- `POST /api/runs/:id/steps/:stepId/complete`
+- `POST /api/approvals/:id/respond`
 
-Operation:
-- `POST /contracts/v1/steps/start`
+Read models remain operator-facing truth:
+- `/api/read-models/overview`
+- `/api/read-models/missions`
+- `/api/read-models/missions/:id`
+- `/api/read-models/runs/:id`
+- `/api/read-models/runs/:runId/steps/:stepId`
+- `/api/read-models/artifacts`
+- `/api/read-models/approvals`
+- `/api/read-models/approval-history`
+- `/api/read-models/audit`
 
-Request shape:
-```json
-{
-  "execution_id": "exec_123",
-  "mission_id": "mis_123",
-  "run_id": "run_123",
-  "step_id": "step_123",
-  "step_kind": "implement",
-  "context_bundle_id": "ctx_123",
-  "envelope": {
-    "repo_path": "/repo",
-    "worktree_path": "/repo/.worktrees/run_123",
-    "allowed_tools": ["file", "terminal"],
-    "allowed_actions": ["read", "write", "test"],
-    "approval_mode": "on_policy_trigger",
-    "timeout_seconds": 1800,
-    "output_dir": "/artifacts/run_123"
-  }
-}
-```
+## Approval rules
+- `Step.approval_id` is primary truth
+- `Run.approval_id` is derived convenience only
+- approval resolution is idempotent-safe via pending-state checks
+- cancel-run / cancel-step auto-resolve active pending approval as rejected by `operator`
 
-Accepted response:
-```json
-{
-  "execution_id": "exec_123",
-  "accepted": true,
-  "status": "running",
-  "stream_url": "/contracts/v1/steps/exec_123/events"
-}
-```
+## Artifact rules
+- MissionControl remains artifact system-of-record
+- artifact linkage always includes mission/run/step context through run state
+- duplicate artifact attach is prevented by `artifact_id`
+- duplicate manual artifact POST with same `artifact_id` returns existing artifact instead of creating a second record
 
-Notes:
-- accepted != completed
-- MissionControl marks lifecycle state as running in its own system-of-record
-
-### 3. Stream Step Events
-
-Direction:
-- MissionControl subscribes to Hermes stream
-
-Purpose:
-- consume progress, tool, and status events during execution
-
-Transport options:
-- SSE first
-- WebSocket later if needed
-
-Operation:
-- `GET /contracts/v1/steps/{execution_id}/events`
-
-Event schema:
-```json
-{
-  "event_id": "evt_123",
-  "timestamp": "2026-04-18T18:00:00Z",
-  "execution_id": "exec_123",
-  "mission_id": "mis_123",
-  "run_id": "run_123",
-  "step_id": "step_123",
-  "type": "step.progress",
-  "sequence": 12,
-  "payload": {
-    "message": "Running targeted tests",
-    "percent": 65
-  }
-}
-```
-
-### 4. Interrupt Step
-
-Direction:
-- MissionControl → Hermes
-
-Purpose:
-- request pause/stop without losing auditability
-
-Operation:
-- `POST /contracts/v1/steps/{execution_id}/interrupt`
-
-Request:
-```json
-{
-  "reason": "approval_requested",
-  "requested_by": "missioncontrol"
-}
-```
-
-Response:
-```json
-{
-  "execution_id": "exec_123",
-  "accepted": true,
-  "status": "interrupting"
-}
-```
-
-### 5. Resume Step
-
-Direction:
-- MissionControl → Hermes
-
-Purpose:
-- continue governed execution after pause/approval
-
-Operation:
-- `POST /contracts/v1/steps/{execution_id}/resume`
-
-Request:
-```json
-{
-  "reason": "approval_granted"
-}
-```
-
-Response:
-```json
-{
-  "execution_id": "exec_123",
-  "accepted": true,
-  "status": "running"
-}
-```
-
-### 6. Final Step Result
-
-Direction:
-- Hermes → MissionControl
-
-Purpose:
-- return final execution result payload
-
-Delivery:
-- final event in stream and/or terminal result endpoint
-
-Recommended result schema:
-```json
-{
-  "execution_id": "exec_123",
-  "mission_id": "mis_123",
-  "run_id": "run_123",
-  "step_id": "step_123",
-  "final_outcome": "success",
-  "summary": "Implemented async step start and event stream contract",
-  "artifacts": [
-    {
-      "artifact_id": "art_123",
-      "kind": "patch",
-      "uri": "artifact://run_123/patch.diff"
-    }
-  ],
-  "changed_files": [
-    "apps/orchestrator-api/src/index.ts"
-  ],
-  "command_refs": [
-    {
-      "kind": "test",
-      "label": "pnpm test",
-      "ref": "log://run_123/test.log"
-    }
-  ],
-  "issues": [],
-  "approval_needed": false,
-  "recommended_next_step": "test"
-}
-```
-
-Critical rule:
-- Hermes returns final result payload
-- MissionControl alone commits authoritative step/run lifecycle state
-
-## Artifact Model
-
-Hermes returns artifact metadata only.
-MissionControl owns artifact persistence.
-
-Artifact metadata shape:
-```json
-{
-  "artifact_id": "art_123",
-  "kind": "patch",
-  "label": "Implementation diff",
-  "uri": "artifact://run_123/patch.diff",
-  "content_type": "text/x-diff",
-  "created_at": "2026-04-18T18:00:00Z"
-}
-```
-
-## Error Model
-
-Standard error shape:
-```json
-{
-  "error": {
-    "code": "STEP_TIMEOUT",
-    "message": "Execution exceeded timeout_seconds",
-    "retryable": true,
-    "details": {}
-  }
-}
-```
-
-Suggested codes:
-- `INVALID_ENVELOPE`
-- `UNAUTHORIZED_TOOL`
-- `STEP_TIMEOUT`
-- `INTERRUPTED`
-- `POLICY_BLOCKED`
-- `INTERNAL_EXECUTION_ERROR`
-- `CONTEXT_LOAD_FAILED`
-
-## Memory Writeback
-
-Default model:
-- not a first-class MissionControl-triggered contract
-- Hermes performs memory writeback inside Hermes-side step finalization behavior
-
-Expose later only if MissionControl needs to:
-- trigger writeback explicitly
-- observe writeback status separately
-- retry writeback independently
-- audit writeback as its own operational unit
-
-## Next Implementation Targets
-
-1. formalize OpenAPI spec under `packages/contracts`
-2. generate TS models for MissionControl
-3. generate Python models for Hermes
-4. wire `load_context`, `start_step`, and step event stream first
-5. add interrupt/resume semantics after basic start/stream/final-result flow is stable
+## Recovery and replay rules
+- processed event ids persist in orchestrator state
+- load path normalizes persisted events and rebuilds audit from canonical events
+- duplicate event ingestion is ignored by `event_id`
+- running steps reuse existing `execution_id` on redispatch after restart
+- retry clears prior `execution_id` so the next execution gets a fresh identity
+- orphaned cleanup sweeper is intentionally left as a separate periodic job, documented in architecture docs

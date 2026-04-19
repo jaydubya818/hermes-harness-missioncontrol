@@ -91,7 +91,7 @@ export function createWorkflowRun(run_id: `run_${string}`, mission_id: `mis_${st
   return syncRunState(run);
 }
 
-function syncRunState(run: WorkflowRun): WorkflowRun {
+export function syncRunState(run: WorkflowRun): WorkflowRun {
   const current = getCurrentStep(run);
   run.current_step_id = current?.step_id;
 
@@ -183,34 +183,46 @@ export function startCurrentStep(run: WorkflowRun, execution_id?: string): Workf
 }
 
 export function pauseCurrentStep(run: WorkflowRun, notes?: string): WorkflowRun {
+  if (getCurrentStep(run)?.state !== "running") return run;
   return transitionCurrentStep(run, "paused", { notes });
 }
 
 export function resumeCurrentStep(run: WorkflowRun, notes?: string): WorkflowRun {
+  if (getCurrentStep(run)?.state !== "paused") return run;
   return transitionCurrentStep(run, "running", { notes });
 }
 
 export function markCurrentStepAwaitingApproval(run: WorkflowRun, approval_id: string, notes?: string, blocked_reason?: string): WorkflowRun {
+  const current = getCurrentStep(run);
+  if (!current || ["completed", "failed", "cancelled"].includes(current.state)) return run;
   return transitionCurrentStep(run, "awaiting_approval", { approval_id, notes, blocked_reason });
 }
 
 export function retryCurrentStep(run: WorkflowRun, notes?: string): WorkflowRun {
   const current = getCurrentStep(run);
   if (!current) return run;
+  if (!["failed", "paused", "cancelled", "blocked", "awaiting_approval"].includes(current.state)) return run;
   current.started_at = undefined;
   current.completed_at = undefined;
+  current.execution_id = undefined;
   return transitionCurrentStep(run, "running", { notes, approval_id: null, blocked_reason: undefined });
 }
 
 export function markCurrentStepCompleted(run: WorkflowRun, notes?: string): WorkflowRun {
+  const current = getCurrentStep(run);
+  if (!current || ["completed", "failed", "cancelled"].includes(current.state)) return run;
   return transitionCurrentStep(run, "completed", { notes });
 }
 
 export function markCurrentStepFailed(run: WorkflowRun, notes?: string): WorkflowRun {
+  const current = getCurrentStep(run);
+  if (!current || ["completed", "failed", "cancelled"].includes(current.state)) return run;
   return transitionCurrentStep(run, "failed", { notes });
 }
 
 export function cancelCurrentStep(run: WorkflowRun, notes?: string): WorkflowRun {
+  const current = getCurrentStep(run);
+  if (!current || ["completed", "failed", "cancelled"].includes(current.state)) return run;
   return transitionCurrentStep(run, "cancelled", { notes, approval_id: null });
 }
 
@@ -231,11 +243,13 @@ export function advanceRun(run: WorkflowRun, status: Extract<StepTransition, "co
 export function attachArtifact(run: WorkflowRun, step_id: string, artifact: WorkflowArtifact): WorkflowRun {
   const step = run.steps.find((item) => item.step_id === step_id);
   if (step) {
-    step.artifacts.push({
+    const normalized = {
       ...artifact,
       kind: artifact.kind ?? artifact.type ?? "artifact",
       label: artifact.label ?? artifact.kind ?? artifact.type ?? "artifact"
-    });
+    };
+    const exists = step.artifacts.some((item) => item.artifact_id === normalized.artifact_id);
+    if (!exists) step.artifacts.push(normalized);
   }
   run.updated_at = new Date().toISOString();
   return run;

@@ -9,6 +9,7 @@ class MissionState(str, Enum):
     PENDING = 'pending'
     RUNNING = 'running'
     AWAITING_APPROVAL = 'awaiting_approval'
+    PAUSED = 'paused'
     FAILED = 'failed'
     COMPLETED = 'completed'
     CANCELLED = 'cancelled'
@@ -129,6 +130,41 @@ class ApprovalResult(BaseModel):
     resolved_at: str
     resolved_by: str | None = None
 
+class RepoScope(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    root_path: str
+    writable_paths: list[str]
+
+class ResourceBudget(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    token_budget: int
+    max_artifacts: int
+    max_output_bytes: int
+
+class ExecutionEnvelope(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    worktree_path: str
+    workspace_root: str
+    repo_scope: RepoScope
+    allowed_tools: list[str]
+    allowed_actions: list[str]
+    approval_mode: ApprovalMode
+    timeout_seconds: int
+    resource_budget: ResourceBudget
+    output_dir: str
+    environment_classification: str
+
+class StepExecutionRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    mission_id: str
+    run_id: str
+    step_id: str
+    execution_id: str
+    kind: StepKind
+    repo_path: str | None = None
+    branch_name: str | None = None
+    envelope: ExecutionEnvelope
+
 class TaskExecutionResult(BaseModel):
     model_config = ConfigDict(extra='forbid')
     execution_id: str
@@ -154,9 +190,10 @@ class EventEnvelope(BaseModel):
     source: EventSource
     type: str
     mission_id: str
-    run_id: str
+    run_id: str | None = None
     step_id: str | None = None
     execution_id: str | None = None
+    actor: str | None = None
     payload: dict[str, Any]
 
 class ContractError(BaseModel):
