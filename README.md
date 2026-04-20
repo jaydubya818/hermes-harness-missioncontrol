@@ -1,135 +1,282 @@
 # Hermes Harness with MissionControl
 
-Autonomous software-development harness with operator console, orchestrator/control plane, memory plane, and eval plane. Runs repo-aware, approval-gated execution loops with full artifact tracing.
+TypeScript control plane for governed Hermes execution.
 
-## Architecture
+This repo is not Hermes itself. Hermes stays in its own repo/runtime. This repo provides the MissionControl side:
+- mission/run/step lifecycle
+- policy and approval gates
+- governed execution envelopes
+- artifact and audit persistence
+- eval recording
+- operator read models and console
+- local reference worker/runtime for contract verification
 
+Core rule:
+- MissionControl governs
+- Hermes thinks
+- contracts, not imports, define the boundary
+
+## What this repo is
+
+MissionControl is the system of record for:
+- missions
+- runs
+- steps
+- approvals
+- artifacts
+- audit/events
+- operator-visible status
+
+Hermes or the worker executes inside a MissionControl-issued envelope with:
+- worktree path
+- allowed tools/actions
+- writable paths
+- timeout
+- output directory
+- resource budget
+- approval mode
+- environment classification
+
+## Current architecture
+
+```text
+harness-console (5173)   operator UI
+orchestrator-api (4302)  mission/run/step lifecycle, approvals, read models, event stream
+worker-runtime (4304)    governed execution, worktree isolation, deploy planning
+memory-api (4301)        Agentic-KB read/write, task writeback, promotion/discovery flows
+eval-api (4303)          eval records, summaries, run scoring surface
 ```
-harness-console (5173)   ← operator UI
-orchestrator-api (4302)  ← mission/run lifecycle, approval gates, event bus
-worker-runtime (4304)    ← isolated git worktree execution, governed envelope enforcement
-memory-api (4301)        ← agentic-kb vault read/write, task writeback, bus publishing
-eval-api (4303)          ← eval records and run scoring
-```
 
-### Packages
-- `packages/workflow-engine` — step lifecycle, run state machine
-- `packages/policy-engine` — approval gate logic per step kind and risk level
-- `packages/memory-runtime` — atomic vault writeback, context loading, learning promotion
-- `packages/state-store` — JSON persistence helpers
-- `packages/shared-types` — branded IDs and canonical event types
+Workspace packages:
 - `packages/contracts` — schema-first MissionControl ↔ Hermes boundary
-- `packages/eval-core` — eval record summarization
-- `packages/ui-kit` — shared React components
+- `packages/workflow-engine` — run/step lifecycle state machine
+- `packages/policy-engine` — approval/risk policy decisions
+- `packages/state-store` — JSON persistence helpers
+- `packages/shared-types` — IDs and canonical event names
+- `packages/memory-runtime` — context load + atomic writeback/promotion helpers
+- `packages/eval-core` — eval scoring + summaries
+- `packages/ui-kit` — shared console components
 
-### Design choices
-- MissionControl-derived operator console
-- Agentic-KB-derived memory runtime and knowledge substrate
-- Eval plane: replay, scoring, regression, routing/policy optimization
-- Per-run git worktrees for isolation; pnpm monorepo-aware bootstrapping
-- Deploy adapter abstraction: `noop-canary | vercel | render | auto`
-- MissionControl-issued governed execution envelope for every worker step
-- Canonical event taxonomy with replay-safe ingestion by `event_id`
+## Execution model
 
-## Service Ports
-| Service | Port |
-|---|---|
-| memory-api | 4301 |
-| orchestrator-api | 4302 |
-| eval-api | 4303 |
-| worker-runtime | 4304 |
-| harness-console | 5173 |
+Happy path:
+1. create mission
+2. start run
+3. current step enters governed execution
+4. MissionControl builds execution envelope
+5. worker validates envelope and executes inside isolated worktree/output dirs
+6. worker emits canonical execution events
+7. MissionControl records authoritative lifecycle state and read models
+8. approvals pause high-risk work when policy triggers
+9. completion/failure writes artifacts, evals, cleanup, audit state
 
-## Environment Variables
-| Variable | Required | Description |
-|---|---|---|
-| `HARNESS_OPERATOR_TOKEN` | recommended | Bearer token for all mutating API routes |
-| `VITE_OPERATOR_TOKEN` | optional | Console-side fallback token for local dev |
-| `HARNESS_VAULT_ROOT` | optional | memory-api vault root (default: `vault/agentic-kb`) |
-| `ORCHESTRATOR_STATE_FILE` | optional | Orchestrator persistence file |
-| `EVAL_STATE_FILE` | optional | Eval persistence file |
-| `WORKER_RUNTIME_ROOT` | optional | Worker artifact root |
-| `WORKTREE_ROOT` | optional | Git worktree root |
-| `WORKSPACE_CACHE_FILE` | optional | Cache metadata for hydrated workspaces |
-| `ALLOWED_REPO_ROOT` | optional | Allowed repo root for worker-runtime |
-| `ORPHAN_SWEEP_INTERVAL_MS` | optional | Periodic orchestrator cleanup cadence for orphaned run worktrees/artifact roots |
-| `DEPLOY_ADAPTER` | optional | `auto \| noop-canary \| vercel \| render` |
-| `DEPLOY_BASE_URL` | optional | Base URL used in generated deploy plan metadata |
+MissionControl remains truth even when worker events exist.
+Events are for streaming, replay, and audit — not the primary lifecycle authority.
 
-## Local Run
+## Implemented now
 
-```bash
-# 1. Install
-pnpm install --frozen-lockfile
+Architecture / contracts:
+- approved Hermes ↔ MissionControl split
+- schema-first contracts package
+- generated TypeScript + Python models
+- contract-shaped mission/run/step/event/result flow
+- governed execution envelope validation on both orchestrator and worker
 
-# 2. Verify
-pnpm typecheck
-pnpm test
-pnpm build
+Lifecycle / governance:
+- start + execute-current flow
+- interrupt / resume / retry / cancel-step
+- cancel-run
+- approval normalization and authoritative `Step.approval_id`
+- replay-safe event ingestion by `event_id`
+- duplicate artifact protection by `artifact_id`
+- orphan worktree cleanup endpoint + optional periodic sweeper
 
-# 3. Start all services (separate terminals or use a process manager)
-HARNESS_OPERATOR_TOKEN=*** pnpm --filter memory-api dev
-HARNESS_OPERATOR_TOKEN=*** pnpm --filter orchestrator-api dev
-HARNESS_OPERATOR_TOKEN=*** pnpm --filter eval-api dev
-HARNESS_OPERATOR_TOKEN=*** pnpm --filter worker-runtime dev
-pnpm dev:console:auth
-```
+Operator surfaces:
+- overview read model
+- missions queue
+- approvals queue + history
+- audit timeline
+- mission detail
+- run detail
+- step detail
+- artifact read model with filters/pagination
+- console drill-down and live SSE event feed
 
-## Execution Flow
-1. Create a mission: `POST /api/missions`
-2. Start the run: `POST /api/missions/:id/start`
-3. Execute current step: `POST /api/runs/:id/execute-current`
-4. MissionControl builds a governed execution envelope
-5. Worker validates and enforces envelope constraints
-6. Worker emits canonical execution events
-7. MissionControl records authoritative lifecycle state and operator read models
-8. High-risk or policy-triggered steps pause for approval
-9. Completion/failure/rejection triggers eval + cleanup
+Worker/runtime:
+- isolated git worktree execution
+- constrained write scope for implement step
+- test/review/deploy step handling
+- deploy adapter abstraction: `auto | noop-canary | vercel | render`
+- timeout + budget enforcement
 
-## Lifecycle Controls
+Eval / observability:
+- eval record persistence and summaries
+- eval lifecycle events: `eval.started`, `eval.completed`, `eval.failed`
+- canonical event taxonomy including SSE replay/live stream
+
+## Deferred
+
+Not blockers for current pass:
+- optional future WebSocket surface if SSE is not enough
+- stronger real-provider deploy execution beyond current plan/gating flow
+- deeper production hardening beyond current local/control-plane scope
+
+## Important runtime concepts
+
+Governed execution envelope
+- MissionControl computes the boundary first
+- worker validates again before doing anything
+- no permissive fallback
+
+Authoritative read models
+- UI should consume read models, not stitch raw event payloads
+- raw `/api/events` exists, but operator truth lives in `/api/read-models/*`
+
+Replay / idempotency
+- processed event IDs persisted in orchestrator state
+- duplicate event replay ignored
+- retry clears prior blockers and execution IDs safely
+
+Cleanup
+- terminal runs trigger worker cleanup
+- `POST /api/maintenance/sweep-orphans` prunes orphaned worktree/output roots
+- `ORPHAN_SWEEP_INTERVAL_MS` enables periodic sweep outside normal request flow
+
+## Key APIs
+
+Lifecycle:
+- `POST /api/missions`
+- `POST /api/missions/:id/start`
+- `POST /api/runs/:id/execute-current`
 - `POST /api/runs/:id/interrupt-step`
 - `POST /api/runs/:id/resume-step`
 - `POST /api/runs/:id/retry-step`
 - `POST /api/runs/:id/cancel-step`
 - `POST /api/runs/:id/cancel`
+- `POST /api/runs/:id/artifacts`
+- `POST /api/runs/:id/steps/:stepId/complete`
+- `POST /api/approvals/:id/respond`
+- `POST /api/maintenance/sweep-orphans`
 
-## Maintenance Controls
-- `POST /api/maintenance/sweep-orphans` — prunes orphaned worktree / worker-run roots while preserving active non-terminal runs
+Operator/read models:
+- `GET /api/read-models/overview`
+- `GET /api/read-models/missions`
+- `GET /api/read-models/missions/:id`
+- `GET /api/read-models/runs/:id`
+- `GET /api/read-models/runs/:runId/steps/:stepId`
+- `GET /api/read-models/artifacts`
+- `GET /api/read-models/approvals`
+- `GET /api/read-models/approval-history`
+- `GET /api/read-models/audit`
+- `GET /api/events/stream`
 
-## Live Event Stream
-- `GET /api/events/stream` — SSE replay + live event feed for operator UI filters (`mission_id`, `run_id`, `step_id`, `event_type`, `actor`, `last`)
+## Environment
 
-## Worker Step Kinds
-| Kind | What it does |
-|---|---|
-| `plan` | Reads git status, generates repo-aware implementation plan |
-| `implement` | Writes constrained `.hermes-harness` repo mutation inside allowed writable paths |
-| `test` | Detects test framework (pnpm/yarn/npm/pytest/cargo/go/make), runs it |
-| `review` | Diffs actual changed files, builds review artifact |
-| `deploy` | Selects provider (vercel/render/noop-canary), generates deploy plan |
+Most important env vars:
+- `HARNESS_OPERATOR_TOKEN` — bearer token for mutating APIs; also used by console auth fallback flow
+- `VITE_OPERATOR_TOKEN` — console-side default token for local dev
+- `HARNESS_VAULT_ROOT` — memory-api vault root; default `vault/agentic-kb`
+- `ORCHESTRATOR_STATE_FILE` — orchestrator persistence file
+- `EVAL_STATE_FILE` — eval persistence file
+- `WORKER_RUNTIME_ROOT` — worker artifact/output root
+- `WORKTREE_ROOT` — worktree root
+- `WORKSPACE_CACHE_FILE` — worker bootstrap cache metadata
+- `ALLOWED_REPO_ROOT` — root boundary for repo/worktree paths
+- `ORPHAN_SWEEP_INTERVAL_MS` — optional periodic orphan cleanup cadence
+- `DEPLOY_ADAPTER` — `auto | noop-canary | vercel | render`
+- `DEPLOY_BASE_URL` — base URL used in deploy-plan metadata
 
-## Deploy Adapters
-- `auto` — detects `vercel.json` → vercel, `render.yaml` → render, else noop-canary
-- `noop-canary` — generates plan artifact only, no real deploy
-- `vercel` — generates vercel deploy command + rollback, requires approval
-- `render` — generates render deploy command + rollback, requires approval
+## Setup
 
-## Architecture Docs
-- `docs/architecture/2026-04-18-hermes-missioncontrol-approved-target-architecture.md` ← approved target state
+Prereqs:
+- Node / pnpm matching workspace lockfile expectations
+- local writable `data/` area
+
+Install:
+```bash
+pnpm install --frozen-lockfile
+```
+
+Verify workspace:
+```bash
+pnpm typecheck
+pnpm test
+pnpm build
+```
+
+Reset local state if needed:
+```bash
+pnpm dev:reset-state
+```
+
+## Run locally
+
+Start each service in separate terminals:
+```bash
+HARNESS_OPERATOR_TOKEN=dev-secret pnpm dev:memory
+HARNESS_OPERATOR_TOKEN=dev-secret pnpm dev:orchestrator
+HARNESS_OPERATOR_TOKEN=dev-secret pnpm dev:eval
+HARNESS_OPERATOR_TOKEN=dev-secret pnpm dev:worker
+VITE_OPERATOR_TOKEN=dev-secret pnpm dev:console
+```
+
+Or use the auth helper for console only:
+```bash
+VITE_OPERATOR_TOKEN=dev-secret pnpm dev:console:auth
+```
+
+Service ports:
+- memory-api: `4301`
+- orchestrator-api: `4302`
+- eval-api: `4303`
+- worker-runtime: `4304`
+- harness-console: `5173`
+
+## Useful commands
+
+Workspace:
+```bash
+pnpm build
+pnpm test
+pnpm typecheck
+pnpm dev:reset-state
+```
+
+Per app/package:
+```bash
+pnpm --filter orchestrator-api test
+pnpm --filter orchestrator-api typecheck
+pnpm --filter worker-runtime test
+pnpm --filter worker-runtime typecheck
+pnpm --filter eval-api test
+pnpm --filter harness-console build
+pnpm --filter @hermes-harness-with-missioncontrol/contracts test
+```
+
+## Docs worth reading first
+
+Architecture:
+- `docs/architecture/2026-04-18-hermes-missioncontrol-approved-target-architecture.md`
 - `docs/architecture/hermes-missioncontrol-event-model.md`
 - `docs/architecture/hermes-missioncontrol-recovery-and-idempotency.md`
+
+Contracts:
+- `docs/contracts/hermes-missioncontrol-contracts.md`
+- `packages/contracts/schema/openapi.yaml`
+
+Plan/status:
+- `docs/plans/hermes-missioncontrol-implementation-plan.md`
+
+Earlier background/reference:
 - `docs/architecture/2026-04-10-hermes-harness-with-missioncontrol-v1-system-architecture.md`
 - `docs/architecture/2026-04-10-hermes-harness-with-missioncontrol-repo-service-layout.md`
 - `docs/architecture/2026-04-10-hermes-harness-with-missioncontrol-integration-contract.md`
-- `docs/architecture/2026-04-10-harness-console-surface-map.md`
 
-## Contracts Docs
-- `docs/contracts/hermes-missioncontrol-contracts.md`
+## Notes for engineers landing here
 
-## Plans
-- `docs/plans/hermes-missioncontrol-implementation-plan.md`
-
-## Notes
-- Worker-runtime performs safe repo-local mutation for validation via `.hermes-harness/runs/<run_id>/implementation.json`
-- Deploy adapters generate provider-aware plan metadata; real provider execution requires credentials
-- Runtime-generated memory logs under `vault/agentic-kb/wiki/agents/agent_demo/` are validation noise — reset before commit with `pnpm dev:reset-state`
+- Hermes code does not live here.
+- Treat this repo as control plane + reference worker/runtime + operator surfaces.
+- Prefer contract/schema changes over ad hoc payload drift.
+- Prefer read models over raw event stitching in UI.
+- Ignore runtime-generated vault/task logs when evaluating product code changes.
+- Current local validation writes safe repo-local implementation artifacts under `.hermes-harness/` during implement-step flows.
