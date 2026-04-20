@@ -1,8 +1,25 @@
-# Hermes Harness with MissionControl
+# Hermes Workspace V2
 
-TypeScript control plane for governed Hermes execution.
+Introducing http://Hermes-Workspace.com V2 🤯
 
-This repo is not Hermes itself. Hermes stays in its own repo/runtime. This repo provides the MissionControl side:
+Whats New 👇🏻
+- 🤯 No fork required
+- ⭐️ New Hermes dark + light themes
+- 🤖 Agent View Office
+- 🚀 Conductor for agent missions
+- 👥 Operations for sub agent orchestration
+
+One-liner install:
+```bash
+curl -fsSL https://hermes-workspace.com/install.sh | bash
+```
+
+Repo:
+- `https://github.com/outsourc-e/hermes-workspace`
+
+TypeScript MissionControl control plane for governed Hermes execution.
+
+This repo is not Hermes itself. Hermes stays in its own repo/runtime. This repo provides the MissionControl side behind the workspace experience:
 - mission/run/step lifecycle
 - policy and approval gates
 - governed execution envelopes
