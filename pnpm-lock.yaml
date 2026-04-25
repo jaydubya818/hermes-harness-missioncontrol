@@ -36,6 +36,9 @@ importers:
       tsx:
         specifier: ^4.20.5
         version: 4.21.0
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/node@24.12.2)(tsx@4.21.0)(yaml@2.8.3)
 
   apps/harness-console:
     dependencies:

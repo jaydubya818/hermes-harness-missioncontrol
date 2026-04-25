@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "pnpm --dir ../.. --filter @hermes-harness-with-missioncontrol/eval-core... build && pnpm --dir ../.. --filter @hermes-harness-with-missioncontrol/state-store... build && tsc -p tsconfig.json",
+    "typecheck": "pnpm --dir ../.. --filter @hermes-harness-with-missioncontrol/eval-core... build && pnpm --dir ../.. --filter @hermes-harness-with-missioncontrol/state-store... build && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "dev": "tsx watch src/index.ts"
   },

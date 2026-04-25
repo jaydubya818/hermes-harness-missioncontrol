@@ -221,6 +221,8 @@ pnpm test
 pnpm build
 ```
 
+`pnpm typecheck` bootstraps workspace package build outputs first so dependent apps/packages can resolve workspace types from a clean checkout.
+
 Reset local state if needed:
 ```bash
 pnpm dev:reset-state
@@ -258,6 +260,8 @@ pnpm test
 pnpm typecheck
 pnpm dev:reset-state
 ```
+
+There is no dedicated repo-wide ESLint command yet; use `pnpm typecheck` + `pnpm test` as the current validation baseline.
 
 Per app/package:
 ```bash
