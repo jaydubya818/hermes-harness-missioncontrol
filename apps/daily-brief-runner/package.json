@@ -1,0 +1,24 @@
+{
+  "name": "daily-brief-runner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/src/index.js",
+    "run:once": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@hermes-harness-with-missioncontrol/state-store": "workspace:*",
+    "@hono/node-server": "^1.19.4",
+    "hono": "^4.9.8",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "@types/node-cron": "^3.0.11",
+    "tsx": "^4.20.5"
+  }
+}

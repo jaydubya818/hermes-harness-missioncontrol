@@ -13,6 +13,8 @@
     "dev:orchestrator": "pnpm --filter orchestrator-api dev",
     "dev:eval": "pnpm --filter eval-api dev",
     "dev:worker": "pnpm --filter worker-runtime dev",
+    "dev:daily-brief": "pnpm --filter daily-brief-runner dev",
+    "run:daily-brief": "pnpm --filter daily-brief-runner run:once",
     "dev:reset-state": "rm -f data/orchestrator-state.json data/eval-state.json"
   },
   "devDependencies": {

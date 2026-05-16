@@ -18,6 +18,28 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@24.12.2)(tsx@4.21.0)(yaml@2.8.3)
 
+  apps/daily-brief-runner:
+    dependencies:
+      '@hermes-harness-with-missioncontrol/state-store':
+        specifier: workspace:*
+        version: link:../../packages/state-store
+      '@hono/node-server':
+        specifier: ^1.19.4
+        version: 1.19.13(hono@4.12.12)
+      hono:
+        specifier: ^4.9.8
+        version: 4.12.12
+      node-cron:
+        specifier: ^3.0.3
+        version: 3.0.3
+    devDependencies:
+      '@types/node-cron':
+        specifier: ^3.0.11
+        version: 3.0.11
+      tsx:
+        specifier: ^4.20.5
+        version: 4.21.0
+
   apps/eval-api:
     dependencies:
       '@hermes-harness-with-missioncontrol/eval-core':
@@ -624,6 +646,9 @@ packages:
   '@types/estree@1.0.8':
     resolution: {integrity: sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==}
 
+  '@types/node-cron@3.0.11':
+    resolution: {integrity: sha512-0ikrnug3/IyneSHqCBeslAhlK2aBfYek1fGo4bP4QnZPmiqSGRK+Oy7ZMisLWkesffJvQ1cqAcBnJC+8+nxIAg==}
+
   '@types/node@24.12.2':
     resolution: {integrity: sha512-A1sre26ke7HDIuY/M23nd9gfB+nrmhtYyMINbjI1zHJxYteKR6qSMX56FsmjMcDb3SMcjJg5BiRRgOCC/yBD0g==}
 
@@ -851,6 +876,10 @@ packages:
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
+  node-cron@3.0.3:
+    resolution: {integrity: sha512-dOal67//nohNgYWb+nWmg5dkFdIwDm8EpeGYMekPMrngV3637lqnX0lbUcCtgibHTz6SEz7DAIjKvKDFYCnO1A==}
+    engines: {node: '>=6.0.0'}
+
   node-releases@2.0.37:
     resolution: {integrity: sha512-1h5gKZCF+pO/o3Iqt5Jp7wc9rH3eJJ0+nh/CIoiRwjRxde/hAHyLPXYN4V3CqKAbiZPSeJFSWHmJsbkicta0Eg==}
 
@@ -995,6 +1024,11 @@ packages:
     resolution: {integrity: sha512-Pp6GSwGP/NrPIrxVFAIkOQeyw8lFenOHijQWkUTrDvrF4ALqylP2C/KCkeS9dpUM3KvYRQhna5vt7IL95+ZQ9w==}
     peerDependencies:
       react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
+
+  uuid@8.3.2:
+    resolution: {integrity: sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==}
+    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
+    hasBin: true
 
   vite-node@3.2.4:
     resolution: {integrity: sha512-EbKSKh+bh1E1IFxeO0pg1n4dvoOTt0UDiXMd/qn++r98+jPO1xtJilvXldeuQ8giIB5IkpjCgMleHMNEsGH6pg==}
@@ -1434,6 +1468,8 @@ snapshots:
 
   '@types/estree@1.0.8': {}
 
+  '@types/node-cron@3.0.11': {}
+
   '@types/node@24.12.2':
     dependencies:
       undici-types: 7.16.0
@@ -1657,6 +1693,10 @@ snapshots:
 
   nanoid@3.3.11: {}
 
+  node-cron@3.0.3:
+    dependencies:
+      uuid: 8.3.2
+
   node-releases@2.0.37: {}
 
   openapi-typescript@7.13.0(typescript@5.9.3):
@@ -1798,6 +1838,8 @@ snapshots:
   use-sync-external-store@1.6.0(react@19.2.5):
     dependencies:
       react: 19.2.5
+
+  uuid@8.3.2: {}
 
   vite-node@3.2.4(@types/node@24.12.2)(tsx@4.21.0)(yaml@2.8.3):
     dependencies:
