@@ -155,6 +155,8 @@ importers:
         specifier: workspace:*
         version: link:../workflow-engine
 
+  packages/humanizer-skill: {}
+
   packages/memory-runtime:
     dependencies:
       '@hermes-harness-with-missioncontrol/shared-types':
