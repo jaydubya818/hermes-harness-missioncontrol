@@ -31,6 +31,7 @@ type Mission = {
   profile_ref?: string;
   repo_path?: string;
   workspace_root?: string;
+  preferred_model?: string;
   status: "pending" | "running" | "awaiting_approval" | "paused" | "completed" | "failed" | "cancelled";
   active_run_id?: string;
   summary?: string;
@@ -242,7 +243,7 @@ function summarizeEnvelope(envelope: ExecutionEnvelope) {
   };
 }
 
-function buildStepExecutionRequest(run: WorkflowRun, step: WorkflowRun["steps"][number], mission?: Mission): StepExecutionRequest {
+function buildStepExecutionRequest(run: WorkflowRun, step: WorkflowRun["steps"][number], mission?: Mission, sessionApiKey?: string): StepExecutionRequest {
   const envelope = buildExecutionEnvelope(run, step, mission);
   validateExecutionEnvelope(envelope);
   return {
@@ -253,7 +254,9 @@ function buildStepExecutionRequest(run: WorkflowRun, step: WorkflowRun["steps"][
     kind: step.kind,
     repo_path: mission?.repo_path,
     branch_name: `hermes/${run.run_id}`,
-    envelope
+    envelope,
+    preferred_model: mission?.preferred_model,
+    api_key: sessionApiKey,
   };
 }
 
@@ -904,7 +907,7 @@ function buildArtifactsReadModel(query: Record<string, string | undefined> = {})
   };
 }
 
-async function recordEval(run: WorkflowRun, approvals: typeof state.approvals): Promise<void> {
+async function recordEval(run: WorkflowRun, approvals: typeof state.approvals): Promise<EvalRecord> {
   const scored = scoreRun({ run, approvals });
   const evalDraft: EvalRecord = {
     mission_id: run.mission_id,
@@ -917,6 +920,7 @@ async function recordEval(run: WorkflowRun, approvals: typeof state.approvals): 
     confidence: scored.confidence,
     efficiency_score: scored.efficiency_score,
     risk_score: scored.risk_score,
+    auto_promote: scored.auto_promote,
     created_at: new Date().toISOString(),
   };
 
@@ -932,6 +936,7 @@ async function recordEval(run: WorkflowRun, approvals: typeof state.approvals): 
     } as any
   });
 
+  let persisted: EvalRecord = evalDraft;
   try {
     const response = await fetch(`${evalApi}/api/evals`, {
       method: "POST",
@@ -940,20 +945,21 @@ async function recordEval(run: WorkflowRun, approvals: typeof state.approvals): 
     });
     if (!response.ok) throw new Error(`eval-api returned status ${response.status}`);
     const payload = await response.json() as { record?: EvalRecord };
-    const record = payload.record ?? evalDraft;
+    persisted = payload.record ?? evalDraft;
     recordEvent({
       type: "eval.completed",
       ts: new Date().toISOString(),
       mission_id: run.mission_id,
       run_id: run.run_id,
       payload: {
-        eval_id: record.eval_id,
-        outcome: record.outcome,
-        cost_usd: record.cost_usd,
-        confidence: record.confidence,
-        efficiency_score: record.efficiency_score,
-        risk_score: record.risk_score,
-        duration_ms: record.duration_ms,
+        eval_id: persisted.eval_id,
+        outcome: persisted.outcome,
+        cost_usd: persisted.cost_usd,
+        confidence: persisted.confidence,
+        efficiency_score: persisted.efficiency_score,
+        risk_score: persisted.risk_score,
+        duration_ms: persisted.duration_ms,
+        auto_promote: persisted.auto_promote,
       } as any
     });
   } catch (err) {
@@ -969,6 +975,118 @@ async function recordEval(run: WorkflowRun, approvals: typeof state.approvals): 
       } as any
     });
     console.error("[orchestrator] recordEval failed (eval-api unavailable):", message);
+  }
+
+  await postRunLearningWriteback(run, persisted);
+  return persisted;
+}
+
+type DiscoveryItem = { title: string; body: string };
+
+function extractDiscoveriesFromArtifacts(run: WorkflowRun): DiscoveryItem[] {
+  const items: DiscoveryItem[] = [];
+  for (const step of run.steps) {
+    for (const artifact of step.artifacts) {
+      const meta = artifact.metadata ?? {};
+      const provider = typeof meta.provider === "string" ? meta.provider : undefined;
+      const changedFiles = Array.isArray(meta.changed_files) ? meta.changed_files.filter((value): value is string => typeof value === "string") : [];
+      const summary = typeof meta.summary === "string" ? meta.summary : undefined;
+      const toolEvents = Array.isArray(meta.tool_events) ? meta.tool_events.length : undefined;
+      if (artifact.kind === "agent-transcript" && provider) {
+        items.push({
+          title: `${step.step_id} agent ran via ${provider}`,
+          body: `model=${meta.model ?? "?"} stop_reason=${meta.stop_reason ?? "?"} tool_events=${toolEvents ?? 0}`,
+        });
+      }
+      if (artifact.kind === "diff" && changedFiles.length > 0) {
+        items.push({
+          title: `${step.step_id} changed files`,
+          body: changedFiles.slice(0, 20).join("\n"),
+        });
+      }
+      if (artifact.kind === "review" && summary) {
+        items.push({ title: `${step.step_id} review summary`, body: summary });
+      }
+    }
+  }
+  return items;
+}
+
+function extractGotchasFromFailedSteps(run: WorkflowRun): DiscoveryItem[] {
+  return run.steps
+    .filter((step) => step.state === "failed")
+    .map((step) => ({
+      title: `${step.step_id} (${step.kind}) failed`,
+      body: step.blocked_reason ?? step.notes ?? `Step ${step.step_id} failed during ${run.workflow_id} run`,
+    }));
+}
+
+function extractRewriteCandidates(run: WorkflowRun, autoPromote: boolean): Array<{ target: string; kind: string; content: string }> {
+  if (!autoPromote) return [];
+  const candidates: Array<{ target: string; kind: string; content: string }> = [];
+  for (const step of run.steps) {
+    if (step.state !== "completed") continue;
+    if (step.kind !== "review" && step.kind !== "implement") continue;
+    const reviewArtifact = step.artifacts.find((artifact) => artifact.kind === "review");
+    const diffArtifact = step.artifacts.find((artifact) => artifact.kind === "diff");
+    const source = reviewArtifact ?? diffArtifact;
+    if (!source) continue;
+    const summary = typeof source.metadata?.summary === "string" ? source.metadata.summary : step.notes;
+    if (!summary) continue;
+    candidates.push({
+      target: `wiki/projects/proj_demo/auto-promoted-${run.run_id}-${step.step_id}.md`,
+      kind: "auto_promoted_learning",
+      content: `# Auto-promoted learning\n\nRun: ${run.run_id}\nStep: ${step.step_id} (${step.kind})\n\n${summary}\n`,
+    });
+  }
+  return candidates;
+}
+
+async function postRunLearningWriteback(run: WorkflowRun, evalRecord: EvalRecord) {
+  const discoveries = extractDiscoveriesFromArtifacts(run);
+  const gotchas = extractGotchasFromFailedSteps(run);
+  const rewriteCandidates = extractRewriteCandidates(run, evalRecord.auto_promote === true);
+  const summary = `Run ${run.run_id} ${evalRecord.outcome}. ${discoveries.length} discoveries, ${gotchas.length} gotchas, ${rewriteCandidates.length} auto-promoted rewrites.`;
+
+  try {
+    await fetch(`${memoryApi}/api/memory/tasks/close`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        agent_id: "agent_demo",
+        project_id: "proj_demo",
+        mission_id: run.mission_id,
+        run_id: run.run_id,
+        step_id: "post_run",
+        outcome: evalRecord.outcome === "success" ? "success" : evalRecord.outcome === "failure" ? "failure" : "partial",
+        summary,
+        discoveries,
+        gotchas,
+        rewrites: rewriteCandidates,
+        artifacts: run.steps.flatMap((step) => step.artifacts.map((artifact) => ({ type: artifact.kind, uri: artifact.uri }))),
+      }),
+    });
+  } catch (err) {
+    console.error("[orchestrator] postRunLearningWriteback writeback failed:", err instanceof Error ? err.message : err);
+    return;
+  }
+
+  if (rewriteCandidates.length === 0) return;
+  for (const candidate of rewriteCandidates) {
+    try {
+      await fetch(`${memoryApi}/api/memory/promote`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          item_id: `auto_${run.run_id}_${Date.now()}`,
+          promoted_by: "orchestrator-auto",
+          target_path: candidate.target,
+          promotion_kind: candidate.kind,
+        }),
+      });
+    } catch (err) {
+      console.error("[orchestrator] auto-promote failed:", err instanceof Error ? err.message : err);
+    }
   }
 }
 
@@ -1223,7 +1341,7 @@ app.post("/api/missions", async (c) => {
   const authError = requireOperator(c);
   if (authError) return authError;
   await ensureLoaded();
-  const body = await c.req.json<{ title: string; objective?: string; project_id: `proj_${string}`; workflow_id?: string; repo_path?: string; policy_ref?: string; profile_ref?: string; workspace_root?: string }>();
+  const body = await c.req.json<{ title: string; objective?: string; project_id: `proj_${string}`; workflow_id?: string; repo_path?: string; policy_ref?: string; profile_ref?: string; workspace_root?: string; preferred_model?: string }>();
   const now = new Date().toISOString();
   const mission: Mission = {
     mission_id: makeId("mis") as `mis_${string}`,
@@ -1235,6 +1353,7 @@ app.post("/api/missions", async (c) => {
     profile_ref: body.profile_ref,
     repo_path: body.repo_path,
     workspace_root: body.workspace_root,
+    preferred_model: body.preferred_model,
     status: "pending",
     created_at: now,
     updated_at: now
@@ -1277,9 +1396,10 @@ app.post("/api/runs/:id/execute-current", async (c) => {
   if (!step) return c.json({ error: "no current step" }, 400);
 
   const mission = getMissionForRun(run);
+  const sessionApiKey = c.req.header("x-llm-api-key") ?? undefined;
   let request: StepExecutionRequest;
   try {
-    request = buildStepExecutionRequest(run, step, mission);
+    request = buildStepExecutionRequest(run, step, mission, sessionApiKey);
   } catch (error) {
     const summary = String(error instanceof Error ? error.message : error);
     recordEvent({ type: "policy.violation", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id as `step_${string}`, execution_id: step.execution_id, payload: { reason: summary, violation_kind: "dispatch_envelope_invalid" } as any });

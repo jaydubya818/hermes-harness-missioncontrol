@@ -113,6 +113,8 @@ export interface StepExecutionRequest {
   repo_path?: string;
   branch_name?: string;
   envelope: ExecutionEnvelope;
+  preferred_model?: string;
+  api_key?: string;
 }
 
 export interface TaskExecutionResult {

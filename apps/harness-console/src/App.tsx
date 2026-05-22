@@ -13,13 +13,29 @@ function getOperatorToken() {
   return window.localStorage.getItem("harness.operatorToken") ?? import.meta.env.VITE_OPERATOR_TOKEN ?? "";
 }
 
-function authFetch(url: string, init: RequestInit = {}) {
+const LLM_PROVIDER_OPTIONS = [
+  { value: "mock", label: "Mock (no LLM)" },
+  { value: "claude", label: "Claude Sonnet 4.5" },
+  { value: "openai", label: "GPT-4o" },
+  { value: "grok", label: "Grok 3" },
+] as const;
+
+function getApiKeyForProvider(provider: string) {
+  if (provider === "claude") return window.localStorage.getItem("harness.apiKey.anthropic") ?? "";
+  if (provider === "openai") return window.localStorage.getItem("harness.apiKey.openai") ?? "";
+  if (provider === "grok") return window.localStorage.getItem("harness.apiKey.xai") ?? "";
+  return "";
+}
+
+function authFetch(url: string, init: RequestInit = {}, options: { llmProvider?: string } = {}) {
   const token = getOperatorToken();
+  const llmKey = options.llmProvider ? getApiKeyForProvider(options.llmProvider) : "";
   return fetch(url, {
     ...init,
     headers: {
       ...(init.headers ?? {}),
-      ...(token ? { authorization: `Bearer ${token}` } : {})
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(llmKey ? { "x-llm-api-key": llmKey } : {})
     }
   });
 }
@@ -33,8 +49,8 @@ async function readApiResponse(response: Response) {
   }
 }
 
-async function authJson(url: string, init: RequestInit = {}) {
-  const response = await authFetch(url, init);
+async function authJson(url: string, init: RequestInit = {}, options: { llmProvider?: string } = {}) {
+  const response = await authFetch(url, init, options);
   const body = await readApiResponse(response);
   if (!response.ok) {
     const message = typeof body === "object" && body && "error" in body ? String((body as any).error) : `Request failed (${response.status})`;
@@ -145,13 +161,14 @@ function TopBar({ active, onChange }: { active: Tab; onChange: (tab: Tab) => voi
 
 function Overview() {
   const { data: memory } = useSWR(`${MEM}/api/memory/agents/agent_demo/summary`, fetcher, { refreshInterval: 15000 });
+  const { data: writebacks } = useSWR(`${MEM}/api/memory/agents/agent_demo/writeback-count?since=today`, fetcher, { refreshInterval: 15000 });
   const { data: overview } = useSWR(`${ORCH}/api/read-models/overview`, fetcher, { refreshInterval: 5000 });
   const { data: evals } = useSWR(`${EVAL}/api/evals`, fetcher, { refreshInterval: 7000 });
   const trend = useMemo(() => ((evals?.records ?? []) as Array<{ cost_usd: number }>).slice(-7).map((item) => item.cost_usd) || [0], [evals]);
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 16, padding: 16 }}>
       <Panel title="Active Missions"><StatusRow label="Open missions" value={overview?.metrics?.open_missions ?? 0} /><StatusRow label="Pending approvals" value={overview?.metrics?.pending_approvals ?? 0} /><StatusRow label="Recent failures" value={overview?.metrics?.failed_missions ?? 0} /></Panel>
-      <Panel title="Memory Health"><CapacityBar value={memory?.learned_count ?? 0} max={20} /><div style={{ height: 12 }} /><StatusRow label="Pending rewrites" value={memory?.pending_rewrites ?? 0} /></Panel>
+      <Panel title="Memory Health"><CapacityBar value={memory?.learned_count ?? 0} max={20} /><div style={{ height: 12 }} /><StatusRow label="Pending rewrites" value={memory?.pending_rewrites ?? 0} /><StatusRow label="Learnings today" value={writebacks?.writebacks ?? 0} /></Panel>
       <Panel title="Cost Today"><CostCard label="Estimated run cost" amount={`$${(evals?.summary?.total_cost_usd ?? 0).toFixed?.(2) ?? '0.00'}`} /></Panel>
       <Panel title="Run Throughput"><Sparkline values={trend.length ? trend : [0]} /><StatusRow label="Total runs" value={evals?.summary?.total_runs ?? 0} /></Panel>
       <Panel title="Approval Load"><StatusRow label="Awaiting decision" value={overview?.metrics?.pending_approvals ?? 0} /><StatusRow label="Approved" value={evals?.summary?.approval_count ?? 0} /></Panel>
@@ -160,16 +177,68 @@ function Overview() {
   );
 }
 
+function useToolActivityStream(url: string, types: readonly string[]) {
+  const [events, setEvents] = useState<any[]>([]);
+  useEffect(() => {
+    const source = new EventSource(url);
+    const handle = (event: MessageEvent) => {
+      try {
+        const payload = JSON.parse(event.data);
+        setEvents((current) => [payload, ...current].slice(0, 30));
+      } catch {
+        // ignore malformed frames
+      }
+    };
+    types.forEach((type) => source.addEventListener(type, handle as EventListener));
+    return () => {
+      types.forEach((type) => source.removeEventListener(type, handle as EventListener));
+      source.close();
+    };
+  }, [url, types]);
+  return events;
+}
+
+const TOOL_EVENT_TYPES = ["tool.started", "tool.completed", "tool.failed"] as const;
+
+function formatToolLine(event: any) {
+  const ts = String(event.ts ?? event.timestamp ?? "").slice(11, 19);
+  const tool = event.payload?.tool_name ?? "tool";
+  const phase = event.type.split(".")[1] ?? "?";
+  const status = event.type === "tool.completed" ? "ok"
+    : event.type === "tool.failed" ? "FAIL"
+    : "...";
+  const detail = event.payload?.summary ?? event.payload?.step_kind ?? "";
+  return `[${ts}] ${tool} ${phase} ${status}${detail ? ` - ${String(detail).slice(0, 120)}` : ""}`;
+}
+
+function ToolActivityFeed() {
+  const toolEvents = useToolActivityStream(`${ORCH}/api/events/stream?last=10`, TOOL_EVENT_TYPES);
+  return (
+    <Panel title="Live Tool Activity">
+      {toolEvents.length === 0 ? <div>No tool activity yet.</div> : toolEvents.map((event, index) => (
+        <div key={`${event.event_id ?? index}`} style={{ fontFamily: "ui-monospace, SFMono-Regular, monospace", fontSize: 12, color: event.type === "tool.failed" ? "#fca5a5" : event.type === "tool.completed" ? "#86efac" : "#7dd3fc", padding: "4px 0", borderBottom: "1px solid #1e293b" }}>
+          {formatToolLine(event)}
+        </div>
+      ))}
+    </Panel>
+  );
+}
+
 function Missions() {
   const { data } = useSWR(`${ORCH}/api/read-models/missions`, fetcher, { refreshInterval: 3000 });
   const { data: approvalsView } = useSWR(`${ORCH}/api/read-models/approvals`, fetcher, { refreshInterval: 3000 });
   const [title, setTitle] = useState("Fix duplicate webhook jobs");
   const [repoPath, setRepoPath] = useState("/Users/jaywest/projects/Hermes-harness-with-missioncontrol");
+  const [provider, setProvider] = useState<string>(() => window.localStorage.getItem("harness.llmProvider") ?? "mock");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedMissionId, setSelectedMissionId] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedStep, setSelectedStep] = useState<{ runId: string; stepId: string } | null>(null);
+
+  useEffect(() => {
+    window.localStorage.setItem("harness.llmProvider", provider);
+  }, [provider]);
 
   useEffect(() => {
     if (!selectedMissionId && data?.mission_queue?.[0]?.mission_id) setSelectedMissionId(data.mission_queue[0].mission_id);
@@ -221,7 +290,7 @@ function Missions() {
       await authJson(`${ORCH}/api/missions`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title, project_id: "proj_demo", workflow_id: "bugfix", repo_path: repoPath })
+        body: JSON.stringify({ title, project_id: "proj_demo", workflow_id: "bugfix", repo_path: repoPath, preferred_model: provider })
       });
       await refreshAll();
     }, "Mission created.");
@@ -245,7 +314,7 @@ function Missions() {
 
   async function executeCurrent(runId: string) {
     await runAction(async () => {
-      await authJson(`${ORCH}/api/runs/${runId}/execute-current`, { method: "POST" });
+      await authJson(`${ORCH}/api/runs/${runId}/execute-current`, { method: "POST" }, { llmProvider: provider });
       setSelectedRunId(runId);
       await refreshAll();
     }, "Current step executed.");
@@ -266,13 +335,19 @@ function Missions() {
     <div style={{ padding: 16, display: "grid", gap: 16 }}>
       <Panel title="New Mission">
         <div style={{ display: "grid", gap: 12 }}>
-          <input value={title} onChange={(event) => setTitle(event.target.value)} style={{ flex: 1, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
-          <input value={repoPath} onChange={(event) => setRepoPath(event.target.value)} style={{ flex: 1, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+          <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="mission title" style={{ flex: 1, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+          <input value={repoPath} onChange={(event) => setRepoPath(event.target.value)} placeholder="repo path" style={{ flex: 1, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+          <select value={provider} onChange={(event) => setProvider(event.target.value)} style={{ borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }}>
+            {LLM_PROVIDER_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
           <Button onClick={createMission}>Create</Button>
           {message && <div style={{ color: "#86efac", fontSize: 13 }}>{message}</div>}
           {error && <div style={{ color: "#fca5a5", fontSize: 13 }}>Action failed: {error}. If auth is enabled, save HARNESS_OPERATOR_TOKEN in Settings first.</div>}
         </div>
       </Panel>
+      <ToolActivityFeed />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <Panel title="Mission Queue">
           {(data?.mission_queue ?? []).length === 0 ? <div>No missions yet.</div> : (data?.mission_queue ?? []).map((mission: any) => (
@@ -710,13 +785,27 @@ function Audit() {
 
 function Settings() {
   const [token, setToken] = useState(getOperatorToken());
+  const [anthropicKey, setAnthropicKey] = useState(() => window.localStorage.getItem("harness.apiKey.anthropic") ?? "");
+  const [openaiKey, setOpenaiKey] = useState(() => window.localStorage.getItem("harness.apiKey.openai") ?? "");
+  const [xaiKey, setXaiKey] = useState(() => window.localStorage.getItem("harness.apiKey.xai") ?? "");
+  const [saved, setSaved] = useState<string | null>(null);
+
   function saveToken() {
     window.localStorage.setItem("harness.operatorToken", token);
+    setSaved("Operator token saved.");
     mutate(() => true);
   }
+
+  function saveApiKeys() {
+    window.localStorage.setItem("harness.apiKey.anthropic", anthropicKey);
+    window.localStorage.setItem("harness.apiKey.openai", openaiKey);
+    window.localStorage.setItem("harness.apiKey.xai", xaiKey);
+    setSaved("API keys saved. Keys are sent as X-LLM-Api-Key per request based on the selected provider.");
+  }
+
   return (
-    <div style={{ padding: 16 }}>
-      <Panel title="Settings">
+    <div style={{ padding: 16, display: "grid", gap: 16 }}>
+      <Panel title="Operator Settings">
         <StatusRow label="Policy model" value="approval-high-risk" />
         <StatusRow label="Workflow library" value="bugfix, dependency_upgrade" />
         <StatusRow label="Eval endpoint" value={EVAL} />
@@ -726,6 +815,28 @@ function Settings() {
         <div style={{ height: 8 }} />
         <Button onClick={saveToken}>Save token</Button>
       </Panel>
+      <Panel title="LLM API Keys">
+        <div style={{ color: "#94a3b8", marginBottom: 12, fontSize: 13 }}>
+          Stored in browser localStorage. Sent as <code>X-LLM-Api-Key</code> per request based on the model selected in New Mission.
+          Server-side fallback uses ANTHROPIC_API_KEY / OPENAI_API_KEY / XAI_API_KEY env vars on worker-runtime.
+        </div>
+        <div style={{ display: "grid", gap: 12 }}>
+          <div>
+            <div style={{ color: "#94a3b8", marginBottom: 4, fontSize: 12 }}>Anthropic (Claude)</div>
+            <input type="password" value={anthropicKey} onChange={(event) => setAnthropicKey(event.target.value)} placeholder="sk-ant-..." style={{ width: "100%", borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+          </div>
+          <div>
+            <div style={{ color: "#94a3b8", marginBottom: 4, fontSize: 12 }}>OpenAI (GPT-4o)</div>
+            <input type="password" value={openaiKey} onChange={(event) => setOpenaiKey(event.target.value)} placeholder="sk-..." style={{ width: "100%", borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+          </div>
+          <div>
+            <div style={{ color: "#94a3b8", marginBottom: 4, fontSize: 12 }}>xAI (Grok)</div>
+            <input type="password" value={xaiKey} onChange={(event) => setXaiKey(event.target.value)} placeholder="xai-..." style={{ width: "100%", borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+          </div>
+          <Button onClick={saveApiKeys}>Save API keys</Button>
+        </div>
+      </Panel>
+      {saved && <Panel title="Status"><div style={{ color: "#86efac", fontSize: 13 }}>{saved}</div></Panel>}
     </div>
   );
 }

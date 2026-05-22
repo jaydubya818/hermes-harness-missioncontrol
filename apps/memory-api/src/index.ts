@@ -123,6 +123,35 @@ app.get("/api/memory/agents/:id/summary", async (c) => {
   });
 });
 
+app.get("/api/memory/agents/:id/writeback-count", async (c) => {
+  const agentId = c.req.param("id");
+  if (!isSafeId(agentId)) return c.json({ error: "unsafe id" }, 400);
+  const since = c.req.query("since") ?? "today";
+  const taskLog = await readText(safeWikiPath("agents", agentId, "task-log.md"));
+  const learned = await readText(safeWikiPath("agents", agentId, "learned.md"));
+  const now = new Date();
+  let cutoff: Date;
+  if (since === "all") {
+    cutoff = new Date(0);
+  } else if (since === "7d" || since === "week") {
+    cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  } else if (since === "24h" || since === "day") {
+    cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  } else {
+    cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  }
+  const entries = `${taskLog ?? ""}\n${learned ?? ""}`.split("\n");
+  const isoPattern = /(20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[^\s]*)/;
+  let writebacks = 0;
+  for (const line of entries) {
+    const match = line.match(isoPattern);
+    if (!match) continue;
+    const ts = new Date(match[1]);
+    if (Number.isFinite(ts.getTime()) && ts >= cutoff) writebacks += 1;
+  }
+  return c.json({ agent_id: agentId, since, cutoff: cutoff.toISOString(), writebacks });
+});
+
 app.get("/api/memory/agents/:id/rewrite-candidates", async (c) => {
   const agentId = c.req.param("id");
   if (!isSafeId(agentId)) return c.json({ error: "unsafe id" }, 400);
