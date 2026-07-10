@@ -50,6 +50,36 @@ describe("eval-api", () => {
     expect(payload.summary).toMatchObject({ total_runs: 1, failure_rate: 1 });
   });
 
+  it("rejects eval records with missing or invalid fields", async () => {
+    const app = await loadApp();
+
+    const missingIds = await app.request("/api/evals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ outcome: "success", cost_usd: 0.1 })
+    });
+    expect(missingIds.status).toBe(400);
+
+    const badOutcome = await app.request("/api/evals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mission_id: "mis_demo", run_id: "run_a", outcome: "great", cost_usd: 0.1 })
+    });
+    expect(badOutcome.status).toBe(400);
+
+    const badCost = await app.request("/api/evals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mission_id: "mis_demo", run_id: "run_a", outcome: "success" })
+    });
+    expect(badCost.status).toBe(400);
+
+    const listing = await app.request("/api/evals");
+    const payload = await listing.json() as { pagination: { total: number }; summary: { total_cost_usd: number } };
+    expect(payload.pagination.total).toBe(0);
+    expect(Number.isFinite(payload.summary.total_cost_usd)).toBe(true);
+  });
+
   it("returns eval detail by id", async () => {
     const app = await loadApp();
 
