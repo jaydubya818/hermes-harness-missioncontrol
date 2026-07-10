@@ -2,10 +2,19 @@ import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 export async function loadJsonFile<T>(path: string, fallback: T): Promise<T> {
+  let raw: string;
   try {
-    const raw = await readFile(path, "utf8");
-    return JSON.parse(raw) as T;
+    raw = await readFile(path, "utf8");
   } catch {
+    return fallback;
+  }
+  try {
+    return JSON.parse(raw) as T;
+  } catch (error) {
+    // A missing file is expected on first run, but an unparseable file means
+    // existing state would be silently discarded (and overwritten on the next
+    // save). Surface that instead of hiding it.
+    console.warn(`state-store: failed to parse ${path}; falling back to default state (${String(error)})`);
     return fallback;
   }
 }
