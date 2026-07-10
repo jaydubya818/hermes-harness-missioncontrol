@@ -1,16 +1,18 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { app, assertSafeRepoPath, cleanupRun, detectTestCommand, ensureWorkspace } from "./index.js";
 
-const sandboxRoot = "/Users/jaywest/projects/hermes-worker-runtime-test";
+// Keep in sync with the ALLOWED_REPO_ROOT default in vitest.config.ts.
+const allowedRepoRoot = resolve(process.env.ALLOWED_REPO_ROOT ?? "/Users/jaywest/projects");
+const sandboxRoot = join(allowedRepoRoot, "hermes-worker-runtime-test");
 
 function buildEnvelope(overrides: Record<string, unknown> = {}) {
   return {
     worktree_path: join(process.cwd(), "../../data/worktrees/run_contracts"),
-    workspace_root: "/Users/jaywest/projects",
+    workspace_root: allowedRepoRoot,
     repo_scope: {
-      root_path: "/Users/jaywest/projects",
+      root_path: allowedRepoRoot,
       writable_paths: ["Hermes-harness-with-missioncontrol"]
     },
     allowed_tools: ["filesystem", "git", "process"],
@@ -106,7 +108,7 @@ describe("worker-runtime", () => {
   });
 
   it("rejects repo paths outside the allowed root", () => {
-    expect(() => assertSafeRepoPath("/tmp/not-allowed")).toThrow(/allowed root/);
+    expect(() => assertSafeRepoPath(join(allowedRepoRoot, "..", "not-allowed"))).toThrow(/allowed root/);
   });
 
   it("detects pnpm test commands from package metadata", async () => {
