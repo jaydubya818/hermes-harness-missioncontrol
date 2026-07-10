@@ -32,6 +32,7 @@ describe("orchestrator-api", () => {
     delete process.env.WORKTREE_ROOT;
     delete process.env.WORKER_RUNTIME_ROOT;
     delete process.env.ORPHAN_SWEEP_INTERVAL_MS;
+    delete process.env.ALLOWED_REPO_ROOT;
     process.env.VITEST = "1";
   });
 
@@ -119,6 +120,31 @@ describe("orchestrator-api", () => {
     expect(payload.execution_result?.final_outcome).toBe("success");
     expect(payload.execution_result?.artifacts[0]).toMatchObject({ kind: "diff", label: "diff" });
     expect(payload.execution_result?.changed_files).toContain("apps/orchestrator-api/src/index.ts");
+  });
+
+  it("rejects repo paths outside the allowed root even when they embed it as a substring", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+    const allowedRoot = mkdtempSync(join(tmpdir(), "orch-allowed-"));
+    process.env.ALLOWED_REPO_ROOT = allowedRoot;
+    // e.g. /tmp/elsewhere/tmp/orch-allowed-x/evil embeds the allowed root but lives outside it
+    const evilRepo = join(tmpdir(), "elsewhere", allowedRoot, "evil");
+
+    const app = await loadApp();
+    const createMission = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Escape", project_id: "proj_demo", workflow_id: "bugfix", repo_path: evilRepo })
+    });
+    const mission = await createMission.json() as { mission_id: string };
+
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const run = await startRun.json() as { run_id: string };
+
+    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    const payload = await execute.json() as { error?: string };
+
+    expect(execute.status).toBe(400);
+    expect(payload.error).toMatch(/escapes allowed root/);
   });
 
   it("ingests worker step events into orchestrator event stream", async () => {

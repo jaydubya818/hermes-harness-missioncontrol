@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import { readdir } from "node:fs/promises";
 import { attachArtifact, createWorkflowRun, getCurrentStep, startCurrentStep, advanceRun, markCurrentStepAwaitingApproval, markCurrentStepCompleted, markCurrentStepFailed, pauseCurrentStep, resumeCurrentStep, retryCurrentStep, cancelCurrentStep, syncRunState, type WorkflowArtifact, type WorkflowRun } from "@hermes-harness-with-missioncontrol/workflow-engine";
 import { evaluateStepPolicy } from "@hermes-harness-with-missioncontrol/policy-engine";
@@ -160,8 +160,8 @@ const LEGACY_EVENT_TYPE_MAP: Record<string, HarnessEvent["type"]> = {
 };
 
 function relativeWithin(root: string, path: string) {
-  const rel = resolve(path).replace(`${resolve(root)}/`, "");
-  if (resolve(path) !== resolve(root) && (rel === resolve(path) || rel.startsWith(".."))) throw new Error("path escapes allowed root");
+  const rel = relative(resolve(root), resolve(path));
+  if (rel.startsWith("..")) throw new Error("path escapes allowed root");
   return rel;
 }
 
