@@ -128,6 +128,34 @@ describe("worker-runtime", () => {
     await expect(ensureWorkspace({ mission_id: "mis_safe", run_id: "run_safe", step_id: "implement", execution_id: "exec_safe", kind: "implement", repo_path: repo, envelope } as any, envelope)).rejects.toThrow(/git repo/);
   });
 
+  it("rejects cleanup requests targeting repos outside the allowed root", async () => {
+    const response = await app.request("/api/cleanup-run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ run_id: "run_evil", source_repo: join(allowedRepoRoot, "..", "some-other-repo"), branch_name: "main" })
+    });
+
+    expect(response.status).toBe(400);
+    const payload = await response.json() as { error?: string };
+    expect(payload.error).toMatch(/allowed root/);
+  });
+
+  it("rejects cleanup requests with unsafe run ids or flag-like branch names", async () => {
+    const badRunId = await app.request("/api/cleanup-run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ run_id: "../escape" })
+    });
+    expect(badRunId.status).toBe(400);
+
+    const badBranch = await app.request("/api/cleanup-run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ run_id: "run_cleanup", source_repo: allowedRepoRoot, branch_name: "-D" })
+    });
+    expect(badBranch.status).toBe(400);
+  });
+
   it("cleans up run directories even without git metadata", async () => {
     const runId = "run_cleanup";
     const target = join(process.cwd(), "../../data/worktrees", runId);

@@ -855,12 +855,16 @@ async function deploy(workspace: WorkspaceContext) {
 
 export async function cleanupRun(runId: string, sourceRepo?: string, branchName?: string) {
   assertSafeSegment(runId);
+  if (branchName !== undefined && (typeof branchName !== "string" || !branchName.trim() || branchName.startsWith("-"))) {
+    throw new Error("invalid branch name");
+  }
+  const repo = sourceRepo ? assertSafeRepoPath(sourceRepo) : undefined;
   const target = join(worktreesRoot, runId);
-  if (sourceRepo && await assertGitRepo(sourceRepo) && await exists(target)) {
-    await runCmd("git", ["-C", sourceRepo, "worktree", "remove", "--force", target], sourceRepo);
-    await runCmd("git", ["-C", sourceRepo, "worktree", "prune"], sourceRepo);
+  if (repo && await assertGitRepo(repo) && await exists(target)) {
+    await runCmd("git", ["-C", repo, "worktree", "remove", "--force", target], repo);
+    await runCmd("git", ["-C", repo, "worktree", "prune"], repo);
     if (branchName) {
-      await runCmd("git", ["-C", sourceRepo, "branch", "-D", branchName], sourceRepo);
+      await runCmd("git", ["-C", repo, "branch", "-D", branchName], repo);
     }
   }
   if (await exists(target)) await rm(target, { recursive: true, force: true });
@@ -921,8 +925,12 @@ app.post("/api/cleanup-run", async (c) => {
   const authError = requireOperator(c);
   if (authError) return authError;
   const body = await c.req.json<{ run_id: string; source_repo?: string; branch_name?: string }>();
-  const result = await cleanupRun(body.run_id, body.source_repo, body.branch_name);
-  return c.json(result);
+  try {
+    const result = await cleanupRun(body.run_id, body.source_repo, body.branch_name);
+    return c.json(result);
+  } catch (error) {
+    return c.json({ error: String(error instanceof Error ? error.message : error) }, 400);
+  }
 });
 
 if (!process.env.VITEST) {
