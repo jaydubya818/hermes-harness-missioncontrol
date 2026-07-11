@@ -644,9 +644,11 @@ function sortTimeline<T extends { occurred_at: string; mission_id?: string; run_
 }
 
 function paginateItems<T>(items: T[], query: Record<string, string | undefined>) {
-  const rawLimit = query.limit ? Number(query.limit) : (items.length || 1);
-  const limit = Math.max(1, Math.min(100, rawLimit));
-  const offset = Math.max(0, Number(query.offset ?? 0));
+  const parsedLimit = Number(query.limit);
+  const rawLimit = query.limit && Number.isFinite(parsedLimit) ? parsedLimit : (items.length || 1);
+  const limit = Math.max(1, Math.min(100, Math.floor(rawLimit)));
+  const parsedOffset = Number(query.offset ?? 0);
+  const offset = Number.isFinite(parsedOffset) ? Math.max(0, Math.floor(parsedOffset)) : 0;
   const page = items.slice(offset, offset + limit);
   return {
     items: page,

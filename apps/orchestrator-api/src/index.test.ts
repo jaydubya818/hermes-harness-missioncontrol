@@ -1106,6 +1106,18 @@ describe("orchestrator-api", () => {
     expect(auditPayload.pagination).toEqual({ total: 3, limit: 2, offset: 0, has_more: true });
   });
 
+  it("falls back to sane pagination when limit/offset are not numeric", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const app = await loadApp();
+    const response = await app.request("/api/read-models/audit?limit=abc&offset=oops");
+    const payload = await response.json() as { timeline: unknown[]; pagination: { total: number; limit: number; offset: number; has_more: boolean } };
+
+    expect(response.status).toBe(200);
+    expect(payload.timeline).toEqual([]);
+    expect(payload.pagination).toEqual({ total: 0, limit: 1, offset: 0, has_more: false });
+  });
+
   it("interrupts current step and pauses run + mission", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
 
