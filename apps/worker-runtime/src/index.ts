@@ -4,6 +4,7 @@ import { cors } from "hono/cors";
 import { mkdir, writeFile, access, rm, readFile, symlink, unlink, readdir } from "node:fs/promises";
 import { resolve, join, relative, dirname } from "node:path";
 import { execFile } from "node:child_process";
+import { timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { loadJsonFile, saveJsonFile } from "@hermes-harness-with-missioncontrol/state-store";
 import { EventSource, type EventEnvelope, type ExecutionEnvelope, type StepExecutionRequest } from "@hermes-harness-with-missioncontrol/contracts";
@@ -447,8 +448,9 @@ function buildFailureEvents(req: StepRequest, error: WorkerExecutionError): Even
 
 function requireOperator(c: any) {
   if (!operatorToken) return null;
-  const auth = c.req.header("authorization") ?? "";
-  if (auth !== `Bearer ${operatorToken}`) return c.json({ error: "unauthorized" }, 401);
+  const auth = Buffer.from(c.req.header("authorization") ?? "");
+  const expected = Buffer.from(`Bearer ${operatorToken}`);
+  if (auth.length !== expected.length || !timingSafeEqual(auth, expected)) return c.json({ error: "unauthorized" }, 401);
   return null;
 }
 

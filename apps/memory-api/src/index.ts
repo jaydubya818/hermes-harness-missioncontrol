@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { readdir, readFile, writeFile, mkdir, rename } from "node:fs/promises";
+import { timingSafeEqual } from "node:crypto";
 import { dirname, join, resolve, relative } from "node:path";
 import { loadContextBundle, closeTask, promoteLearning } from "@hermes-harness-with-missioncontrol/memory-runtime";
 import type { CloseTaskRequest, ContextRequest, PromoteLearningRequest, PublishBusRequest } from "@hermes-harness-with-missioncontrol/shared-types";
@@ -19,8 +20,9 @@ function isSafeId(value: string) {
 
 function requireOperator(c: any) {
   if (!operatorToken) return null;
-  const auth = c.req.header("authorization") ?? "";
-  if (auth !== `Bearer ${operatorToken}`) return c.json({ error: "unauthorized" }, 401);
+  const auth = Buffer.from(c.req.header("authorization") ?? "");
+  const expected = Buffer.from(`Bearer ${operatorToken}`);
+  if (auth.length !== expected.length || !timingSafeEqual(auth, expected)) return c.json({ error: "unauthorized" }, 401);
   return null;
 }
 

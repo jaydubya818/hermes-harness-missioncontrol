@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { relative, resolve } from "node:path";
+import { timingSafeEqual } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { attachArtifact, createWorkflowRun, getCurrentStep, startCurrentStep, advanceRun, markCurrentStepAwaitingApproval, markCurrentStepCompleted, markCurrentStepFailed, pauseCurrentStep, resumeCurrentStep, retryCurrentStep, cancelCurrentStep, syncRunState, type WorkflowArtifact, type WorkflowRun } from "@hermes-harness-with-missioncontrol/workflow-engine";
 import { evaluateStepPolicy } from "@hermes-harness-with-missioncontrol/policy-engine";
@@ -344,8 +345,9 @@ function authHeaders() {
 
 function requireOperator(c: any) {
   if (!operatorToken) return null;
-  const auth = c.req.header("authorization") ?? "";
-  if (auth !== `Bearer ${operatorToken}`) return c.json({ error: "unauthorized" }, 401);
+  const auth = Buffer.from(c.req.header("authorization") ?? "");
+  const expected = Buffer.from(`Bearer ${operatorToken}`);
+  if (auth.length !== expected.length || !timingSafeEqual(auth, expected)) return c.json({ error: "unauthorized" }, 401);
   return null;
 }
 

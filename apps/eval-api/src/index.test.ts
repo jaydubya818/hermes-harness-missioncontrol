@@ -15,6 +15,7 @@ describe("eval-api", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     delete process.env.EVAL_STATE_FILE;
+    delete process.env.HARNESS_OPERATOR_TOKEN;
     process.env.VITEST = "1";
   });
 
@@ -95,5 +96,32 @@ describe("eval-api", () => {
 
     expect(detail.status).toBe(200);
     expect(payload.record).toMatchObject({ eval_id: created.record?.eval_id, run_id: "run_detail" });
+  });
+
+  it("enforces the operator token on mutating requests when configured", async () => {
+    process.env.HARNESS_OPERATOR_TOKEN = "secret-token";
+    const app = await loadApp();
+    const record = { mission_id: "mis_demo", run_id: "run_auth", outcome: "success", cost_usd: 0.1, approval_count: 0, artifact_count: 1, created_at: "2026-04-18T19:00:00.000Z" };
+
+    const missing = await app.request("/api/evals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(record)
+    });
+    expect(missing.status).toBe(401);
+
+    const wrong = await app.request("/api/evals", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer secret-tokem" },
+      body: JSON.stringify(record)
+    });
+    expect(wrong.status).toBe(401);
+
+    const right = await app.request("/api/evals", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer secret-token" },
+      body: JSON.stringify(record)
+    });
+    expect(right.status).toBe(201);
   });
 });

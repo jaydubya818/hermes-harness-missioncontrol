@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { resolve } from "node:path";
 import { summarize, type EvalRecord } from "@hermes-harness-with-missioncontrol/eval-core";
 import { loadJsonFile, saveJsonFile } from "@hermes-harness-with-missioncontrol/state-store";
@@ -30,8 +30,9 @@ async function persist() {
 
 function requireOperator(c: any) {
   if (!operatorToken) return null;
-  const auth = c.req.header("authorization") ?? "";
-  if (auth !== `Bearer ${operatorToken}`) return c.json({ error: "unauthorized" }, 401);
+  const auth = Buffer.from(c.req.header("authorization") ?? "");
+  const expected = Buffer.from(`Bearer ${operatorToken}`);
+  if (auth.length !== expected.length || !timingSafeEqual(auth, expected)) return c.json({ error: "unauthorized" }, 401);
   return null;
 }
 
