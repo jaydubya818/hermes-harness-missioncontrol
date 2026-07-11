@@ -1467,7 +1467,10 @@ app.post("/api/runs/:id/artifacts", async (c) => {
   const run = state.runs.find((item) => item.run_id === c.req.param("id"));
   if (!run) return c.json({ error: "run not found" }, 404);
   const body = await c.req.json<{ step_id: string; type: string; artifact_id?: string; content?: string; uri?: string; metadata?: Record<string, unknown> }>();
-  const existing = run.steps.find((item) => item.step_id === body.step_id)?.artifacts.find((item) => item.artifact_id === body.artifact_id);
+  const step = run.steps.find((item) => item.step_id === body.step_id);
+  if (!step) return c.json({ error: "step not found" }, 404);
+  if (typeof body.type !== "string" || !body.type.trim()) return c.json({ error: "type required" }, 400);
+  const existing = step.artifacts.find((item) => item.artifact_id === body.artifact_id);
   if (existing) return c.json(existing);
   const artifact = { artifact_id: body.artifact_id ?? makeId("art"), type: body.type, kind: body.type, label: body.type, uri: body.uri ?? `artifact://${run.run_id}/${body.step_id}/${body.type}`, content: body.content, metadata: body.metadata };
   attachArtifact(run, body.step_id, artifact);

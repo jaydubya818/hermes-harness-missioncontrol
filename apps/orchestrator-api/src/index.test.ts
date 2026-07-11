@@ -1329,6 +1329,39 @@ describe("orchestrator-api", () => {
     expect(eventsPayload.events.filter((event) => event.type === "artifact.created" && event.payload?.artifact_id === "art_repeat")).toHaveLength(1);
   });
 
+  it("rejects artifact attachments for unknown steps or missing type", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-artifact-invalid-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [{ mission_id: "mis_demo", title: "Artifact flow", objective: "Artifact flow", project_id: "proj_demo", workflow: "bugfix", status: "running", active_run_id: "run_demo", summary: "Running", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z" }],
+      runs: [{ run_id: "run_demo", mission_id: "mis_demo", workflow_id: "bugfix", status: "running", current_step_index: 0, current_step_id: "plan", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z", steps: [{ step_id: "plan", title: "Plan fix", kind: "plan", risk: "low", approval_mode: "on_policy_trigger", state: "running", artifacts: [] }] }],
+      approvals: [],
+      events: [],
+      audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const unknownStep = await app.request("/api/runs/run_demo/artifacts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ step_id: "nope", type: "plan", uri: "file:///tmp/plan.md" })
+    });
+    expect(unknownStep.status).toBe(404);
+
+    const missingType = await app.request("/api/runs/run_demo/artifacts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ step_id: "plan", uri: "file:///tmp/plan.md" })
+    });
+    expect(missingType.status).toBe(400);
+
+    const eventsResponse = await app.request("/api/events");
+    const eventsPayload = await eventsResponse.json() as { events: Array<{ type: string }> };
+    expect(eventsPayload.events.filter((event) => event.type === "artifact.created")).toHaveLength(0);
+  });
+
   it("records eval.started and eval.completed when eval persistence succeeds", async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.includes("/api/execute-step")) {
