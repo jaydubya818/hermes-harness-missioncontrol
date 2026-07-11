@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import textwrap
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,21 +16,41 @@ ENUM_NAMES = [
     "ApprovalMode",
     "FinalOutcome",
     "EventSource",
+    "RiskLevel",
+    "RiskDomain",
+    "VerificationMethod",
+    "SourceOfTruthKind",
+    "LearningTrigger",
+    "LearningOutputType",
 ]
 
 MODEL_ORDER = [
-    "Mission",
-    "Run",
-    "Step",
+    "RiskClassification",
+    "AcceptanceCriterion",
+    "SourceOfTruth",
+    "WorkOrderAmendment",
+    "WorkOrderRepository",
+    "WorkOrder",
+    "CheckResult",
+    "AcceptanceVerificationResult",
+    "VerificationReceipt",
     "ArtifactRef",
+    "ArtifactManifest",
+    "OutcomeMetrics",
+    "LearningCandidate",
     "ApprovalRequest",
     "ApprovalResult",
+    "ApprovalDecision",
     "RepoScope",
     "ResourceBudget",
     "ExecutionEnvelope",
+    "Mission",
+    "Run",
+    "Step",
     "StepExecutionRequest",
     "TaskExecutionResult",
     "EventEnvelope",
+    "FactoryEvent",
     "ContractError",
 ]
 

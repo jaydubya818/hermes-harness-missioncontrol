@@ -1,0 +1,18 @@
+{
+  "learning_candidate_id": "learn_sellerfi_safe_copy_001",
+  "mission_id": "mis_sellerfi_safe_copy_001",
+  "run_id": "run_sellerfi_safe_copy_001",
+  "work_order_id": "wo_sellerfi_safe_copy_001",
+  "trigger": "failed_verifier",
+  "observation": "A clearly labeled illustrative verifier-failure event showed that every SellerFi safe-lane PR must attach changed-file evidence before human review.",
+  "category": "verifier-evidence",
+  "evidence_refs": ["event://run_sellerfi_safe_copy_001/illustrative-verifier-failure"],
+  "frequency": 1,
+  "impact": "medium",
+  "confidence": "high",
+  "recommended_action": "Add or update a deterministic allowed/restricted-path verifier in the SellerFi repository and include its output in the PR body.",
+  "target": "SellerFi",
+  "proposed_output_type": "new_verifier",
+  "status": "proposed",
+  "created_at": "2026-07-10T18:16:00Z"
+}

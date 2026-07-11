@@ -1,0 +1,32 @@
+{
+  "manifest_id": "manifest_sellerfi_safe_copy_001",
+  "mission_id": "mis_sellerfi_safe_copy_001",
+  "run_id": "run_sellerfi_safe_copy_001",
+  "execution_id": "exec_sellerfi_safe_copy_001",
+  "work_order_id": "wo_sellerfi_safe_copy_001",
+  "generated_at": "2026-07-10T18:10:00Z",
+  "produced_by": "pi-worker-runtime",
+  "artifacts": [
+    {
+      "artifact_id": "art_plan_001",
+      "kind": "implementation-plan",
+      "uri": "artifact://run_sellerfi_safe_copy_001/plan.md",
+      "label": "Worker implementation plan",
+      "content_type": "text/markdown",
+      "created_at": "2026-07-10T18:03:00Z"
+    },
+    {
+      "artifact_id": "art_patch_001",
+      "kind": "diff",
+      "uri": "artifact://run_sellerfi_safe_copy_001/patch.diff",
+      "label": "Git patch diff",
+      "content_type": "text/x-diff",
+      "created_at": "2026-07-10T18:08:00Z",
+      "metadata": {
+        "changed_files": ["components/marketing/Hero.tsx"]
+      }
+    }
+  ],
+  "trace_refs": ["trace://run_sellerfi_safe_copy_001/events.ndjson"],
+  "completeness": "complete"
+}

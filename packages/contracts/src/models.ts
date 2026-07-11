@@ -1,10 +1,16 @@
 import type {
   ApprovalMode,
   FinalOutcome,
+  LearningOutputType,
+  LearningTrigger,
   MissionState,
+  RiskDomain,
+  RiskLevel,
   RunState,
+  SourceOfTruthKind,
   StepKind,
   StepState,
+  VerificationMethod,
 } from "./enums.js";
 
 export interface Mission {
@@ -29,6 +35,10 @@ export interface Run {
   mission_id: string;
   status: RunState;
   current_step_id?: string;
+  work_order_id?: string;
+  source_of_truths?: SourceOfTruth[];
+  outcome_metrics?: OutcomeMetrics;
+  learning_candidates?: LearningCandidate[];
   started_at?: string;
   completed_at?: string;
   approval_id?: string;
@@ -80,6 +90,12 @@ export interface ApprovalResult {
   resolved_by?: string;
 }
 
+export interface ApprovalDecision extends ApprovalResult {
+  actor?: string;
+  decision_rationale?: string;
+  evidence_refs?: string[];
+}
+
 export interface RepoScope {
   root_path: string;
   writable_paths: string[];
@@ -89,6 +105,75 @@ export interface ResourceBudget {
   token_budget: number;
   max_artifacts: number;
   max_output_bytes: number;
+}
+
+export interface SourceOfTruth {
+  kind: SourceOfTruthKind;
+  system: string;
+  uri: string;
+  writeback_required: boolean;
+  verification_required: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+export interface RiskClassification {
+  level: RiskLevel;
+  domains: RiskDomain[];
+  rationale: string;
+  reversible?: boolean;
+  requires_human_approval?: boolean;
+}
+
+export interface AcceptanceCriterion {
+  id: string;
+  statement: string;
+  verification_method: VerificationMethod;
+  evidence_required?: boolean;
+  expected_evidence?: string[];
+}
+
+export interface WorkOrderRepository {
+  name: string;
+  path: string;
+  remote?: string;
+  default_branch?: string;
+}
+
+export interface WorkOrderAmendment {
+  amendment_id: string;
+  amended_at: string;
+  amended_by: string;
+  reason: string;
+  changes: Record<string, unknown>;
+}
+
+export interface WorkOrder {
+  schema_version: string;
+  work_order_id: string;
+  title: string;
+  goal: string;
+  problem_statement: string;
+  desired_outcome: string;
+  repository: WorkOrderRepository;
+  base_ref: string;
+  acceptance_criteria: AcceptanceCriterion[];
+  allowed_paths: string[];
+  restricted_paths: string[];
+  risk_classification: RiskClassification;
+  required_human_approvals: string[];
+  worker_profile: string;
+  max_attempts: number;
+  max_runtime_seconds: number;
+  max_cost_usd: number;
+  network_policy: "none" | "restricted" | "approved_domains" | "unrestricted";
+  required_checks: string[];
+  expected_artifacts: string[];
+  source_of_truths: SourceOfTruth[];
+  delivery_target: string;
+  auto_merge_eligible: boolean;
+  initiator: string;
+  created_at: string;
+  amendments: WorkOrderAmendment[];
 }
 
 export interface ExecutionEnvelope {
@@ -102,6 +187,8 @@ export interface ExecutionEnvelope {
   resource_budget: ResourceBudget;
   output_dir: string;
   environment_classification: "sandbox" | "staging" | "production" | "local";
+  work_order?: WorkOrder;
+  source_of_truths?: SourceOfTruth[];
 }
 
 export interface StepExecutionRequest {
@@ -113,8 +200,94 @@ export interface StepExecutionRequest {
   repo_path?: string;
   branch_name?: string;
   envelope: ExecutionEnvelope;
-  preferred_model?: string;
-  api_key?: string;
+}
+
+export interface CheckResult {
+  check_id: string;
+  status: "passed" | "failed" | "skipped" | "inconclusive";
+  summary?: string;
+  evidence_refs: string[];
+}
+
+export interface AcceptanceVerificationResult {
+  acceptance_criterion_id: string;
+  status: "verified" | "failed" | "unverified" | "not_applicable";
+  method?: VerificationMethod;
+  evidence_refs: string[];
+  notes?: string;
+}
+
+export interface VerificationReceipt {
+  receipt_id: string;
+  mission_id: string;
+  run_id: string;
+  work_order_id?: string;
+  generated_at: string;
+  verifier_id?: string;
+  overall_status: "passed" | "failed" | "inconclusive";
+  check_results: CheckResult[];
+  acceptance_results: AcceptanceVerificationResult[];
+  evidence_refs: string[];
+  limitations?: string[];
+}
+
+export interface ArtifactManifest {
+  manifest_id: string;
+  mission_id: string;
+  run_id: string;
+  execution_id?: string;
+  work_order_id?: string;
+  generated_at: string;
+  produced_by: string;
+  artifacts: ArtifactRef[];
+  trace_refs?: string[];
+  completeness?: "complete" | "partial" | "missing_required_artifacts";
+}
+
+export interface OutcomeMetrics {
+  mission_id: string;
+  run_id: string;
+  work_order_id?: string;
+  generated_at: string;
+  primary_outcome: string;
+  total_cycle_time_ms?: number;
+  queue_time_ms?: number;
+  execution_time_ms?: number;
+  verification_time_ms?: number;
+  human_approval_time_ms?: number;
+  worker_attempts?: number;
+  worker_retries?: number;
+  human_review_comment_count?: number;
+  human_takeover_required?: boolean;
+  checks_passed?: number;
+  checks_failed?: number;
+  verifier_failures?: number;
+  acceptance_criteria_verified?: number;
+  acceptance_criteria_total?: number;
+  cost_by_model_or_worker?: Record<string, number>;
+  pull_request_created?: boolean;
+  pull_request_merged?: boolean;
+  reverted?: boolean;
+  escaped_defect?: boolean;
+}
+
+export interface LearningCandidate {
+  learning_candidate_id: string;
+  mission_id: string;
+  run_id: string;
+  work_order_id?: string;
+  trigger: LearningTrigger;
+  observation: string;
+  category: string;
+  evidence_refs: string[];
+  frequency?: number;
+  impact: "low" | "medium" | "high" | "critical";
+  confidence: "low" | "medium" | "high";
+  recommended_action: string;
+  target: string;
+  proposed_output_type: LearningOutputType;
+  status?: "proposed" | "accepted" | "rejected" | "implemented" | "no_action";
+  created_at: string;
 }
 
 export interface TaskExecutionResult {
@@ -130,6 +303,10 @@ export interface TaskExecutionResult {
   approval_needed: boolean;
   recommended_next_step?: StepKind;
   confidence?: number;
+  artifact_manifest?: ArtifactManifest;
+  verification_receipt?: VerificationReceipt;
+  outcome_metrics?: OutcomeMetrics;
+  learning_candidates?: LearningCandidate[];
   command_refs?: Array<{
     kind: string;
     label: string;

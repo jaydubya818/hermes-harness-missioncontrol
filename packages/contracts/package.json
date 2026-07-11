@@ -11,7 +11,8 @@
     "test": "vitest run",
     "generate:ts": "openapi-typescript schema/openapi.yaml -o src/generated/openapi.ts",
     "generate:py": "python3 scripts/generate_python_models.py",
-    "generate": "pnpm run generate:ts && pnpm run generate:py"
+    "generate": "pnpm run generate:ts && pnpm run generate:py",
+    "validate:factory": "python3 scripts/validate_factory_examples.py"
   },
   "devDependencies": {
     "openapi-typescript": "^7.10.1",

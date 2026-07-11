@@ -25,7 +25,319 @@ components:
       enum: [success, partial, blocked, failed, cancelled]
     EventSource:
       type: string
-      enum: [hermes, missioncontrol]
+      enum: [hermes, missioncontrol, pi, worker, github, verifier]
+    RiskLevel:
+      type: string
+      enum: [low, medium, high, critical]
+    RiskDomain:
+      type: string
+      enum: [ui, copy, form_validation, accessibility, tests, logging, admin_ui, seed_data, refactor, auth, authorization, payments, database, infrastructure, secrets, external_integrations, sensitive_data, legal_financial_claims, deployment, architecture]
+    VerificationMethod:
+      type: string
+      enum: [deterministic_test, lint, typecheck, build, static_analysis, browser_smoke, accessibility_check, independent_review, manual_review, artifact_inspection, other]
+    SourceOfTruthKind:
+      type: string
+      enum: [task, code, review, execution_state, artifacts, learning, final_delivery]
+    LearningTrigger:
+      type: string
+      enum: [human_review_comment, manual_code_change_after_agent_output, failed_ci, failed_verifier, repeated_worker_retries, human_takeover, missing_repository_context, missing_tools, browser_qa_failure, escaped_defect, repeated_task_pattern, other]
+    LearningOutputType:
+      type: string
+      enum: [new_skill, updated_skill, new_deterministic_test, new_static_rule, new_verifier, new_policy, new_runbook, new_repository_instruction, new_agentic_kb_pattern, accepted_exception, no_action_with_reason]
+    RiskClassification:
+      type: object
+      additionalProperties: false
+      required: [level, domains, rationale]
+      properties:
+        level:
+          $ref: '#/components/schemas/RiskLevel'
+        domains:
+          type: array
+          items:
+            $ref: '#/components/schemas/RiskDomain'
+        rationale: { type: string }
+        reversible: { type: boolean }
+        requires_human_approval: { type: boolean }
+    AcceptanceCriterion:
+      type: object
+      additionalProperties: false
+      required: [id, statement, verification_method]
+      properties:
+        id: { type: string }
+        statement: { type: string }
+        verification_method:
+          $ref: '#/components/schemas/VerificationMethod'
+        evidence_required: { type: boolean }
+        expected_evidence:
+          type: array
+          items: { type: string }
+    SourceOfTruth:
+      type: object
+      additionalProperties: false
+      required: [kind, system, uri, writeback_required, verification_required]
+      properties:
+        kind:
+          $ref: '#/components/schemas/SourceOfTruthKind'
+        system: { type: string }
+        uri: { type: string }
+        writeback_required: { type: boolean }
+        verification_required: { type: boolean }
+        metadata:
+          type: object
+          additionalProperties: true
+    WorkOrderAmendment:
+      type: object
+      additionalProperties: false
+      required: [amendment_id, amended_at, amended_by, reason, changes]
+      properties:
+        amendment_id: { type: string }
+        amended_at: { type: string, format: date-time }
+        amended_by: { type: string }
+        reason: { type: string }
+        changes:
+          type: object
+          additionalProperties: true
+    WorkOrderRepository:
+      type: object
+      additionalProperties: false
+      required: [name, path]
+      properties:
+        name: { type: string }
+        path: { type: string }
+        remote: { type: string }
+        default_branch: { type: string }
+    WorkOrder:
+      type: object
+      additionalProperties: false
+      required: [schema_version, work_order_id, title, goal, problem_statement, desired_outcome, repository, base_ref, acceptance_criteria, allowed_paths, restricted_paths, risk_classification, required_human_approvals, worker_profile, max_attempts, max_runtime_seconds, max_cost_usd, network_policy, required_checks, expected_artifacts, source_of_truths, delivery_target, auto_merge_eligible, initiator, created_at, amendments]
+      properties:
+        schema_version: { type: string }
+        work_order_id: { type: string }
+        title: { type: string }
+        goal: { type: string }
+        problem_statement: { type: string }
+        desired_outcome: { type: string }
+        repository:
+          $ref: '#/components/schemas/WorkOrderRepository'
+        base_ref: { type: string }
+        acceptance_criteria:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcceptanceCriterion'
+        allowed_paths:
+          type: array
+          items: { type: string }
+        restricted_paths:
+          type: array
+          items: { type: string }
+        risk_classification:
+          $ref: '#/components/schemas/RiskClassification'
+        required_human_approvals:
+          type: array
+          items: { type: string }
+        worker_profile: { type: string }
+        max_attempts: { type: integer }
+        max_runtime_seconds: { type: integer }
+        max_cost_usd: { type: number }
+        network_policy:
+          type: string
+          enum: [none, restricted, approved_domains, unrestricted]
+        required_checks:
+          type: array
+          items: { type: string }
+        expected_artifacts:
+          type: array
+          items: { type: string }
+        source_of_truths:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceOfTruth'
+        delivery_target: { type: string }
+        auto_merge_eligible: { type: boolean }
+        initiator: { type: string }
+        created_at: { type: string, format: date-time }
+        amendments:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkOrderAmendment'
+    CheckResult:
+      type: object
+      additionalProperties: false
+      required: [check_id, status, evidence_refs]
+      properties:
+        check_id: { type: string }
+        status:
+          type: string
+          enum: [passed, failed, skipped, inconclusive]
+        summary: { type: string }
+        evidence_refs:
+          type: array
+          items: { type: string }
+    AcceptanceVerificationResult:
+      type: object
+      additionalProperties: false
+      required: [acceptance_criterion_id, status, evidence_refs]
+      properties:
+        acceptance_criterion_id: { type: string }
+        status:
+          type: string
+          enum: [verified, failed, unverified, not_applicable]
+        method:
+          $ref: '#/components/schemas/VerificationMethod'
+        evidence_refs:
+          type: array
+          items: { type: string }
+        notes: { type: string }
+    VerificationReceipt:
+      type: object
+      additionalProperties: false
+      required: [receipt_id, mission_id, run_id, generated_at, overall_status, check_results, acceptance_results, evidence_refs]
+      properties:
+        receipt_id: { type: string }
+        mission_id: { type: string }
+        run_id: { type: string }
+        work_order_id: { type: string }
+        generated_at: { type: string, format: date-time }
+        verifier_id: { type: string }
+        overall_status:
+          type: string
+          enum: [passed, failed, inconclusive]
+        check_results:
+          type: array
+          items:
+            $ref: '#/components/schemas/CheckResult'
+        acceptance_results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcceptanceVerificationResult'
+        evidence_refs:
+          type: array
+          items: { type: string }
+        limitations:
+          type: array
+          items: { type: string }
+    ArtifactManifest:
+      type: object
+      additionalProperties: false
+      required: [manifest_id, mission_id, run_id, generated_at, produced_by, artifacts]
+      properties:
+        manifest_id: { type: string }
+        mission_id: { type: string }
+        run_id: { type: string }
+        execution_id: { type: string }
+        work_order_id: { type: string }
+        generated_at: { type: string, format: date-time }
+        produced_by: { type: string }
+        artifacts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtifactRef'
+        trace_refs:
+          type: array
+          items: { type: string }
+        completeness:
+          type: string
+          enum: [complete, partial, missing_required_artifacts]
+    OutcomeMetrics:
+      type: object
+      additionalProperties: false
+      required: [mission_id, run_id, generated_at, primary_outcome]
+      properties:
+        mission_id: { type: string }
+        run_id: { type: string }
+        work_order_id: { type: string }
+        generated_at: { type: string, format: date-time }
+        primary_outcome: { type: string }
+        total_cycle_time_ms: { type: integer }
+        queue_time_ms: { type: integer }
+        execution_time_ms: { type: integer }
+        verification_time_ms: { type: integer }
+        human_approval_time_ms: { type: integer }
+        worker_attempts: { type: integer }
+        worker_retries: { type: integer }
+        human_review_comment_count: { type: integer }
+        human_takeover_required: { type: boolean }
+        checks_passed: { type: integer }
+        checks_failed: { type: integer }
+        verifier_failures: { type: integer }
+        acceptance_criteria_verified: { type: integer }
+        acceptance_criteria_total: { type: integer }
+        cost_by_model_or_worker:
+          type: object
+          additionalProperties: { type: number }
+        pull_request_created: { type: boolean }
+        pull_request_merged: { type: boolean }
+        reverted: { type: boolean }
+        escaped_defect: { type: boolean }
+    LearningCandidate:
+      type: object
+      additionalProperties: false
+      required: [learning_candidate_id, mission_id, run_id, trigger, observation, category, evidence_refs, impact, confidence, recommended_action, target, proposed_output_type, created_at]
+      properties:
+        learning_candidate_id: { type: string }
+        mission_id: { type: string }
+        run_id: { type: string }
+        work_order_id: { type: string }
+        trigger:
+          $ref: '#/components/schemas/LearningTrigger'
+        observation: { type: string }
+        category: { type: string }
+        evidence_refs:
+          type: array
+          items: { type: string }
+        frequency: { type: integer }
+        impact:
+          type: string
+          enum: [low, medium, high, critical]
+        confidence:
+          type: string
+          enum: [low, medium, high]
+        recommended_action: { type: string }
+        target: { type: string }
+        proposed_output_type:
+          $ref: '#/components/schemas/LearningOutputType'
+        status:
+          type: string
+          enum: [proposed, accepted, rejected, implemented, no_action]
+        created_at: { type: string, format: date-time }
+    ApprovalDecision:
+      type: object
+      additionalProperties: false
+      required: [approval_id, decision, resolved_at]
+      properties:
+        approval_id: { type: string }
+        decision:
+          type: string
+          enum: [approved, rejected]
+        resolved_at: { type: string, format: date-time }
+        resolved_by: { type: string }
+        actor: { type: string }
+        decision_rationale: { type: string }
+        evidence_refs:
+          type: array
+          items: { type: string }
+    FactoryEvent:
+      type: object
+      additionalProperties: false
+      required: [schema_version, event_id, timestamp, sequence, source, type, mission_id, payload]
+      properties:
+        schema_version:
+          type: string
+          enum: [v1]
+        event_id: { type: string }
+        timestamp: { type: string, format: date-time }
+        sequence: { type: integer }
+        source:
+          $ref: '#/components/schemas/EventSource'
+        type: { type: string }
+        mission_id: { type: string }
+        run_id: { type: string }
+        step_id: { type: string }
+        execution_id: { type: string }
+        actor: { type: string }
+        payload:
+          type: object
+          additionalProperties: true
     Mission:
       type: object
       additionalProperties: false
@@ -56,6 +368,17 @@ components:
         status:
           $ref: '#/components/schemas/RunState'
         current_step_id: { type: string }
+        work_order_id: { type: string }
+        source_of_truths:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceOfTruth'
+        outcome_metrics:
+          $ref: '#/components/schemas/OutcomeMetrics'
+        learning_candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/LearningCandidate'
         started_at: { type: string, format: date-time }
         completed_at: { type: string, format: date-time }
         approval_id: { type: string }
@@ -168,6 +491,12 @@ components:
         environment_classification:
           type: string
           enum: [sandbox, staging, production, local]
+        work_order:
+          $ref: '#/components/schemas/WorkOrder'
+        source_of_truths:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceOfTruth'
     StepExecutionRequest:
       type: object
       additionalProperties: false
@@ -210,6 +539,16 @@ components:
         recommended_next_step:
           $ref: '#/components/schemas/StepKind'
         confidence: { type: number }
+        artifact_manifest:
+          $ref: '#/components/schemas/ArtifactManifest'
+        verification_receipt:
+          $ref: '#/components/schemas/VerificationReceipt'
+        outcome_metrics:
+          $ref: '#/components/schemas/OutcomeMetrics'
+        learning_candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/LearningCandidate'
         command_refs:
           type: array
           items:
@@ -267,6 +606,20 @@ components:
             - eval.completed
             - eval.failed
             - policy.violation
+            - policy.evaluated
+            - work_order.created
+            - work_order.amended
+            - factory.eligibility_evaluated
+            - verification.started
+            - verification.completed
+            - verification.failed
+            - outcome_metrics.recorded
+            - learning_candidate.created
+            - github.pr_created
+            - github.pr_updated
+            - github.pr_merged
+            - manual.takeover_requested
+            - manual.takeover_completed
             - execution.timeout
             - execution.budget_exceeded
         mission_id: { type: string }

@@ -1,0 +1,28 @@
+{
+  "mission_id": "mis_sellerfi_safe_copy_001",
+  "run_id": "run_sellerfi_safe_copy_001",
+  "work_order_id": "wo_sellerfi_safe_copy_001",
+  "generated_at": "2026-07-10T18:15:00Z",
+  "primary_outcome": "accepted_verified_value_per_unit_human_attention",
+  "total_cycle_time_ms": 900000,
+  "queue_time_ms": 10000,
+  "execution_time_ms": 600000,
+  "verification_time_ms": 180000,
+  "human_approval_time_ms": 110000,
+  "worker_attempts": 1,
+  "worker_retries": 0,
+  "human_review_comment_count": 0,
+  "human_takeover_required": false,
+  "checks_passed": 3,
+  "checks_failed": 0,
+  "verifier_failures": 0,
+  "acceptance_criteria_verified": 2,
+  "acceptance_criteria_total": 2,
+  "cost_by_model_or_worker": {
+    "pi-worker-runtime": 0
+  },
+  "pull_request_created": true,
+  "pull_request_merged": false,
+  "reverted": false,
+  "escaped_defect": false
+}

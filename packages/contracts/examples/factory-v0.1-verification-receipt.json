@@ -1,0 +1,45 @@
+{
+  "receipt_id": "vr_sellerfi_safe_copy_001",
+  "mission_id": "mis_sellerfi_safe_copy_001",
+  "run_id": "run_sellerfi_safe_copy_001",
+  "work_order_id": "wo_sellerfi_safe_copy_001",
+  "generated_at": "2026-07-10T18:12:00Z",
+  "verifier_id": "outer-loop-reviewer",
+  "overall_status": "passed",
+  "check_results": [
+    {
+      "check_id": "restricted-paths",
+      "status": "passed",
+      "summary": "Changed files stayed inside allowed paths and avoided restricted paths.",
+      "evidence_refs": ["artifact://run_sellerfi_safe_copy_001/changed-files.txt"]
+    },
+    {
+      "check_id": "type-check",
+      "status": "passed",
+      "summary": "TypeScript check passed.",
+      "evidence_refs": ["terminal://npm-run-type-check"]
+    },
+    {
+      "check_id": "independent-review",
+      "status": "passed",
+      "summary": "Reviewer confirmed scope adherence and no auth/payment/database/deploy changes.",
+      "evidence_refs": ["review://outer-loop-reviewer/summary"]
+    }
+  ],
+  "acceptance_results": [
+    {
+      "acceptance_criterion_id": "AC-1",
+      "status": "verified",
+      "method": "static_analysis",
+      "evidence_refs": ["artifact://run_sellerfi_safe_copy_001/changed-files.txt", "review://outer-loop-reviewer/summary"]
+    },
+    {
+      "acceptance_criterion_id": "AC-2",
+      "status": "verified",
+      "method": "typecheck",
+      "evidence_refs": ["terminal://npm-run-type-check", "terminal://npm-run-lint"]
+    }
+  ],
+  "evidence_refs": ["artifact://run_sellerfi_safe_copy_001/patch.diff", "terminal://npm-run-type-check", "terminal://npm-run-lint"],
+  "limitations": ["Example only; no production merge or deployment performed."]
+}

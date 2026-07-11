@@ -32,6 +32,20 @@ export type CanonicalEventType =
   | "eval.completed"
   | "eval.failed"
   | "policy.violation"
+  | "policy.evaluated"
+  | "work_order.created"
+  | "work_order.amended"
+  | "factory.eligibility_evaluated"
+  | "verification.started"
+  | "verification.completed"
+  | "verification.failed"
+  | "outcome_metrics.recorded"
+  | "learning_candidate.created"
+  | "github.pr_created"
+  | "github.pr_updated"
+  | "github.pr_merged"
+  | "manual.takeover_requested"
+  | "manual.takeover_completed"
   | "execution.timeout"
   | "execution.budget_exceeded";
 
@@ -49,3 +63,5 @@ export interface EventEnvelope<T = Record<string, unknown>> {
   actor?: string;
   payload: T;
 }
+
+export type FactoryEvent<T = Record<string, unknown>> = EventEnvelope<T>;
