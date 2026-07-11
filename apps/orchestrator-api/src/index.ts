@@ -1224,6 +1224,8 @@ app.post("/api/missions", async (c) => {
   if (authError) return authError;
   await ensureLoaded();
   const body = await c.req.json<{ title: string; objective?: string; project_id: `proj_${string}`; workflow_id?: string; repo_path?: string; policy_ref?: string; profile_ref?: string; workspace_root?: string }>();
+  if (typeof body.title !== "string" || !body.title.trim()) return c.json({ error: "title required" }, 400);
+  if (typeof body.project_id !== "string" || !body.project_id.startsWith("proj_")) return c.json({ error: "project_id must start with proj_" }, 400);
   const now = new Date().toISOString();
   const mission: Mission = {
     mission_id: makeId("mis") as `mis_${string}`,

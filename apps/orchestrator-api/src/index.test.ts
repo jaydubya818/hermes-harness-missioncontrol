@@ -71,6 +71,36 @@ describe("orchestrator-api", () => {
     expect(mission.active_run_id).toBeUndefined();
   });
 
+  it("rejects mission payloads missing a title or a proj_-scoped project_id", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const app = await loadApp();
+    const missingTitle = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ project_id: "proj_demo" })
+    });
+    expect(missingTitle.status).toBe(400);
+
+    const blankTitle = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "   ", project_id: "proj_demo" })
+    });
+    expect(blankTitle.status).toBe(400);
+
+    const badProject = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Contracts", project_id: "demo" })
+    });
+    expect(badProject.status).toBe(400);
+
+    const missions = await app.request("/api/missions");
+    const missionsPayload = await missions.json() as { missions: unknown[] };
+    expect(missionsPayload.missions).toHaveLength(0);
+  });
+
   it("returns a TaskExecutionResult-shaped execution_result payload", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes("/api/execute-step")) {
