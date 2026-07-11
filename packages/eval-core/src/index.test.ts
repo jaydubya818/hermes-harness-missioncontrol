@@ -181,4 +181,36 @@ describe("scoreRun", () => {
     const result = scoreRun({ run: makeRun(), approvals: [] });
     expect(result.artifact_count).toBe(1); // only implement step has 1 artifact
   });
+
+  it("auto_promote is false when a high-risk step exists (default makeRun has deploy=high)", () => {
+    const result = scoreRun({ run: makeRun(), approvals: [{ status: "approved" }] });
+    expect(result.auto_promote).toBe(false);
+  });
+
+  it("auto_promote is true for clean low-risk success with high confidence", () => {
+    const run = makeRun();
+    for (const step of run.steps) {
+      step.risk = "low";
+      step.notes = "confidence: 0.95";
+    }
+    const result = scoreRun({ run, approvals: [{ status: "approved" }] });
+    expect(result.outcome).toBe("success");
+    expect(result.confidence).toBeGreaterThanOrEqual(0.8);
+    expect(result.auto_promote).toBe(true);
+  });
+
+  it("auto_promote is false when any approval was rejected", () => {
+    const run = makeRun();
+    for (const step of run.steps) {
+      step.risk = "low";
+      step.notes = "confidence: 0.95";
+    }
+    const result = scoreRun({ run, approvals: [{ status: "approved" }, { status: "rejected" }] });
+    expect(result.auto_promote).toBe(false);
+  });
+
+  it("auto_promote is false for failed runs", () => {
+    const result = scoreRun({ run: makeRun({ status: "failed" }), approvals: [] });
+    expect(result.auto_promote).toBe(false);
+  });
 });

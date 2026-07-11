@@ -7,6 +7,9 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { loadJsonFile, saveJsonFile } from "@hermes-harness-with-missioncontrol/state-store";
 import { EventSource, type EventEnvelope, type ExecutionEnvelope, type StepExecutionRequest } from "@hermes-harness-with-missioncontrol/contracts";
+import { createLlmClient, resolveProvider, type LlmClient, type LlmCompletion, type LlmMessage, type LlmToolCall, type LlmToolSchema } from "@hermes-harness-with-missioncontrol/llm-client";
+import { runTerminal, terminalToolSchema } from "@hermes-harness-with-missioncontrol/terminal-tool";
+import { browserToolSchemas, createBrowserSession, type BrowserSession } from "@hermes-harness-with-missioncontrol/browser-tool";
 
 const execFileAsync = promisify(execFile);
 const app = new Hono();
@@ -697,7 +700,7 @@ async function createPlan(workspace: WorkspaceContext) {
   } satisfies StepResult;
 }
 
-async function createImplementation(workspace: WorkspaceContext, req: StepRequest) {
+async function writeBaselineImplementationFile(workspace: WorkspaceContext, req: StepRequest, agentSummary?: string) {
   const relPath = join(".hermes-harness", "runs", req.run_id, "implementation.json");
   const filePath = join(workspace.repoWorkspace, relPath);
   assertAllowedRepoWrite(workspace, filePath);
@@ -709,9 +712,29 @@ async function createImplementation(workspace: WorkspaceContext, req: StepReques
     branch_name: workspace.branchName,
     repo_workspace: workspace.repoWorkspace,
     source_repo: workspace.sourceRepo,
-    bootstrap_cache: workspace.sandbox_cache
+    bootstrap_cache: workspace.sandbox_cache,
+    agent_summary: agentSummary ?? null,
   }, null, 2) + "\n";
   await writeFile(filePath, content, "utf8");
+  return { relPath, content };
+}
+
+async function createImplementation(workspace: WorkspaceContext, req: StepRequest): Promise<StepResult> {
+  const provider = resolveProvider(req.preferred_model ?? process.env.LLM_PROVIDER);
+  if (provider === "mock") {
+    return createDeterministicImplementation(workspace, req);
+  }
+  try {
+    return await createLlmImplementation(workspace, req, provider);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[worker-runtime] llm implement failed, falling back to deterministic: ${message}`);
+    return createDeterministicImplementation(workspace, req, message);
+  }
+}
+
+async function createDeterministicImplementation(workspace: WorkspaceContext, req: StepRequest, fallbackReason?: string): Promise<StepResult> {
+  const { relPath, content } = await writeBaselineImplementationFile(workspace, req, fallbackReason ?? "deterministic baseline (no LLM provider configured)");
   const diff = await runCmd("git", ["diff", "--", relPath], workspace.repoWorkspace);
   const status = await runCmd("git", ["status", "--short", "--", relPath], workspace.repoWorkspace);
   const diffStat = await runCmd("git", ["diff", "--stat", "--", relPath], workspace.repoWorkspace);
@@ -719,8 +742,10 @@ async function createImplementation(workspace: WorkspaceContext, req: StepReques
   const patchContent = [status.stdout.trim(), diff.stdout.trim(), content.trim()].filter(Boolean).join("\n\n") + "\n";
   await writeFile(patchPath, patchContent, "utf8");
   return {
-    summary: "Created repo-isolated patch artifact from actual workspace mutation",
-    confidence: 0.9,
+    summary: fallbackReason
+      ? `LLM agent loop failed; fell back to deterministic patch artifact (${fallbackReason})`
+      : "Created repo-isolated patch artifact from actual workspace mutation",
+    confidence: fallbackReason ? 0.6 : 0.9,
     success: true,
     artifacts: [{
       artifact_id: `art_${req.execution_id}_1`,
@@ -730,10 +755,334 @@ async function createImplementation(workspace: WorkspaceContext, req: StepReques
       metadata: {
         changed_files: [safeRelativePath(relPath)],
         diff_stat: (diffStat.stdout || diffStat.stderr || "").trim(),
-        source_file: safeRelativePath(relPath)
+        source_file: safeRelativePath(relPath),
+        provider: "deterministic",
+        fallback_reason: fallbackReason,
       }
     }]
   } satisfies StepResult;
+}
+
+async function createLlmImplementation(workspace: WorkspaceContext, req: StepRequest, provider: ReturnType<typeof resolveProvider>): Promise<StepResult> {
+  const apiKey = req.api_key ?? resolveProviderEnvKey(provider);
+  const explicitModel = req.preferred_model && !["mock", "claude", "openai", "grok", "anthropic", "gpt", "xai"].includes(req.preferred_model.toLowerCase())
+    ? req.preferred_model
+    : undefined;
+  const client = createLlmClient({ provider, apiKey, model: explicitModel });
+  const allowedDomains = (process.env.LLM_ALLOWED_DOMAINS ?? "").split(",").map((value) => value.trim()).filter(Boolean);
+  const browserEnabled = req.envelope.allowed_tools.includes("browser") && allowedDomains.length > 0;
+
+  let browserSession: BrowserSession | null = null;
+  const ensureBrowser = async () => {
+    if (!browserEnabled) throw new Error("browser tool not in execution envelope (allowed_tools must include 'browser' and LLM_ALLOWED_DOMAINS must be set)");
+    if (!browserSession) {
+      browserSession = await createBrowserSession({
+        allowedDomains,
+        screenshotDir: workspace.workdir,
+        headless: true,
+        forceStub: process.env.BROWSER_TOOL_STUB === "1",
+      });
+    }
+    return browserSession;
+  };
+
+  const transcript: AgentTranscriptEntry[] = [];
+  const toolSchemas = buildAgentToolSchemas(browserEnabled);
+  const systemPrompt = buildAgentSystemPrompt(workspace, req, allowedDomains);
+  const messages: LlmMessage[] = [
+    {
+      role: "user",
+      content: buildAgentUserPrompt(req, workspace),
+    },
+  ];
+
+  const maxIterations = Math.max(1, Math.min(10, Number(process.env.LLM_MAX_ITERATIONS ?? 6)));
+  let finalText = "";
+  let stoppedReason: LlmCompletion["stop_reason"] = "end_turn";
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  const toolEvents: ToolEvent[] = [];
+
+  try {
+    for (let iteration = 0; iteration < maxIterations; iteration += 1) {
+      const completion = await client.complete({ system: systemPrompt, messages, tools: toolSchemas, max_tokens: 4096, temperature: 0.2 });
+      totalInputTokens += completion.usage.input_tokens;
+      totalOutputTokens += completion.usage.output_tokens;
+      finalText = completion.text || finalText;
+      stoppedReason = completion.stop_reason;
+      transcript.push({ kind: "assistant", text: completion.text, tool_calls: completion.tool_calls, iteration });
+
+      if (completion.tool_calls.length === 0 || stoppedReason !== "tool_use") {
+        break;
+      }
+
+      const assistantMessage = renderAssistantMessage(completion);
+      if (assistantMessage) messages.push({ role: "assistant", content: assistantMessage });
+
+      for (const call of completion.tool_calls) {
+        const toolResult = await executeAgentTool(call, workspace, req, ensureBrowser);
+        toolEvents.push({
+          tool_name: call.name,
+          tool_call_id: call.id,
+          input: call.input,
+          ok: toolResult.ok,
+          summary: toolResult.summary,
+          duration_ms: toolResult.duration_ms,
+        });
+        transcript.push({ kind: "tool_result", tool_name: call.name, tool_call_id: call.id, result: toolResult, iteration });
+        messages.push({
+          role: "user",
+          content: `Tool ${call.name} (${call.id}) result:\n${toolResult.summary}`,
+        });
+      }
+    }
+  } finally {
+    if (browserSession) {
+      try { await browserSession.close(); } catch {}
+    }
+  }
+
+  await writeBaselineImplementationFile(workspace, req, finalText.slice(0, 4000) || "LLM agent produced no narrative output");
+  const transcriptPath = join(workspace.workdir, "agent-transcript.json");
+  await writeFile(transcriptPath, JSON.stringify({ provider, model: client.model, system: systemPrompt, messages, transcript, tool_events: toolEvents, usage: { input_tokens: totalInputTokens, output_tokens: totalOutputTokens }, stop_reason: stoppedReason }, null, 2), "utf8");
+
+  const diffResult = await runCmd("git", ["diff"], workspace.repoWorkspace);
+  const statusResult = await runCmd("git", ["status", "--short"], workspace.repoWorkspace);
+  const diffStat = await runCmd("git", ["diff", "--stat"], workspace.repoWorkspace);
+  const changedFiles = (statusResult.stdout || "")
+    .split("\n").map((line) => line.trim()).filter(Boolean)
+    .map((line) => line.replace(/^[A-Z?!\s]+/, "").trim())
+    .filter(Boolean);
+  const patchPath = join(workspace.workdir, "patch.diff");
+  const patchContent = [statusResult.stdout.trim(), diffResult.stdout.trim()].filter(Boolean).join("\n\n") + "\n";
+  await writeFile(patchPath, patchContent, "utf8");
+
+  const summary = finalText.split("\n").slice(0, 4).join(" ").slice(0, 280) || `Agent completed via ${client.provider} (${toolEvents.length} tool calls)`;
+  const confidence = computeAgentConfidence(toolEvents, changedFiles.length, stoppedReason);
+
+  return {
+    summary,
+    confidence,
+    success: true,
+    artifacts: [
+      {
+        artifact_id: `art_${req.execution_id}_1`,
+        type: "diff",
+        uri: `file://${patchPath}`,
+        content: patchContent,
+        metadata: {
+          changed_files: changedFiles,
+          diff_stat: (diffStat.stdout || diffStat.stderr || "").trim(),
+          provider: client.provider,
+          model: client.model,
+          tool_call_count: toolEvents.length,
+          tokens: { input: totalInputTokens, output: totalOutputTokens },
+        },
+      },
+      {
+        artifact_id: `art_${req.execution_id}_2`,
+        type: "agent-transcript",
+        uri: `file://${transcriptPath}`,
+        metadata: {
+          provider: client.provider,
+          model: client.model,
+          stop_reason: stoppedReason,
+          iterations: transcript.filter((entry) => entry.kind === "assistant").length,
+          tool_events: toolEvents,
+        },
+      },
+    ],
+  } satisfies StepResult;
+}
+
+function resolveProviderEnvKey(provider: string) {
+  if (provider === "claude") return process.env.ANTHROPIC_API_KEY;
+  if (provider === "openai") return process.env.OPENAI_API_KEY;
+  if (provider === "grok") return process.env.XAI_API_KEY ?? process.env.GROK_API_KEY;
+  return undefined;
+}
+
+function buildAgentSystemPrompt(workspace: WorkspaceContext, req: StepRequest, allowedDomains: string[]) {
+  const writable = req.envelope.repo_scope.writable_paths.join(", ") || "(none)";
+  const browserNote = allowedDomains.length > 0 ? `Allowed browser domains: ${allowedDomains.join(", ")}` : "Browser tool disabled.";
+  return [
+    "You are Hermes, an autonomous coding agent operating under a MissionControl execution envelope.",
+    `Workspace root (worktree): ${workspace.repoWorkspace}`,
+    `Run id: ${req.run_id}. Step id: ${req.step_id}. Step kind: ${req.kind}.`,
+    `Writable paths (relative to worktree): ${writable}`,
+    `Allowed tools: ${req.envelope.allowed_tools.join(", ")}`,
+    `Allowed actions: ${req.envelope.allowed_actions.join(", ")}`,
+    `Environment: ${req.envelope.environment_classification}.`,
+    browserNote,
+    "Use the provided tools to inspect the repo, edit files within writable paths, and run scoped shell commands.",
+    "When you are done, return a final natural-language summary. Do not request more tool calls after you finish.",
+  ].join("\n");
+}
+
+function buildAgentUserPrompt(req: StepRequest, workspace: WorkspaceContext) {
+  return [
+    `Mission ${req.mission_id} run ${req.run_id} step ${req.step_id} (${req.kind}).`,
+    `Repo workspace: ${workspace.repoWorkspace}.`,
+    `Branch: ${workspace.branchName ?? "(no git)"}.`,
+    "Implement the next slice of work for this step. Keep file edits within the writable paths declared in the envelope.",
+    "Use bash for tests/builds, read_file to inspect code, and write_file to apply changes. Summarize what you changed when done.",
+  ].join("\n");
+}
+
+function buildAgentToolSchemas(browserEnabled: boolean): LlmToolSchema[] {
+  const tools: LlmToolSchema[] = [
+    {
+      name: "read_file",
+      description: "Read a UTF-8 file from inside the worktree. path must be relative to workspace_root.",
+      input_schema: {
+        type: "object",
+        properties: { path: { type: "string", description: "relative path inside the worktree" } },
+        required: ["path"],
+      },
+    },
+    {
+      name: "write_file",
+      description: "Write a UTF-8 file inside one of the writable_paths from the envelope. Creates parent directories.",
+      input_schema: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "relative path inside a writable path" },
+          content: { type: "string", description: "file contents to write" },
+        },
+        required: ["path", "content"],
+      },
+    },
+    {
+      name: terminalToolSchema.name,
+      description: terminalToolSchema.description,
+      input_schema: terminalToolSchema.input_schema,
+    },
+  ];
+  if (browserEnabled) {
+    for (const schema of browserToolSchemas) {
+      tools.push({ name: schema.name, description: schema.description, input_schema: schema.input_schema });
+    }
+  }
+  return tools;
+}
+
+interface AgentTranscriptEntry {
+  iteration: number;
+  kind: "assistant" | "tool_result";
+  text?: string;
+  tool_calls?: LlmToolCall[];
+  tool_name?: string;
+  tool_call_id?: string;
+  result?: AgentToolResult;
+}
+
+interface ToolEvent {
+  tool_name: string;
+  tool_call_id: string;
+  input: Record<string, unknown>;
+  ok: boolean;
+  summary: string;
+  duration_ms: number;
+}
+
+interface AgentToolResult {
+  ok: boolean;
+  summary: string;
+  duration_ms: number;
+  data?: unknown;
+}
+
+async function executeAgentTool(call: LlmToolCall, workspace: WorkspaceContext, req: StepRequest, ensureBrowser: () => Promise<BrowserSession>): Promise<AgentToolResult> {
+  const started = Date.now();
+  try {
+    if (call.name === "read_file") {
+      const path = String(call.input.path ?? "");
+      const abs = resolve(workspace.repoWorkspace, path);
+      relativeWithin(workspace.repoWorkspace, abs);
+      const content = await readFile(abs, "utf8");
+      const truncated = content.length > 4000;
+      return {
+        ok: true,
+        summary: `read ${path} (${content.length} bytes${truncated ? ", truncated to 4000" : ""}):\n${content.slice(0, 4000)}`,
+        duration_ms: Date.now() - started,
+        data: { path, length: content.length, truncated },
+      };
+    }
+    if (call.name === "write_file") {
+      const path = String(call.input.path ?? "");
+      const content = String(call.input.content ?? "");
+      const abs = resolve(workspace.repoWorkspace, path);
+      assertAllowedRepoWrite(workspace, abs);
+      await mkdir(dirname(abs), { recursive: true });
+      await writeFile(abs, content, "utf8");
+      return {
+        ok: true,
+        summary: `wrote ${path} (${Buffer.byteLength(content, "utf8")} bytes)`,
+        duration_ms: Date.now() - started,
+        data: { path, bytes: Buffer.byteLength(content, "utf8") },
+      };
+    }
+    if (call.name === terminalToolSchema.name) {
+      const command = String(call.input.command ?? "");
+      const cwd = String(call.input.cwd ?? workspace.repoWorkspace);
+      const timeoutMs = typeof call.input.timeout_ms === "number" ? Number(call.input.timeout_ms) : undefined;
+      const result = await runTerminal({ command, cwd: resolve(cwd), workspaceRoot: workspace.repoWorkspace, timeoutMs });
+      const head = (result.stdout || result.stderr || "").slice(0, 2000);
+      return {
+        ok: result.exit_code === 0 && !result.blocked_reason,
+        summary: result.blocked_reason
+          ? `bash blocked: ${result.blocked_reason}`
+          : `bash exit ${result.exit_code} in ${result.duration_ms}ms\n${head}`,
+        duration_ms: result.duration_ms,
+        data: result,
+      };
+    }
+    if (call.name === "browser_navigate") {
+      const session = await ensureBrowser();
+      const result = await session.navigate(String(call.input.url ?? ""));
+      return { ok: result.ok, summary: result.blocked_reason ?? result.error ?? `navigated to ${result.url ?? call.input.url}`, duration_ms: result.duration_ms, data: result };
+    }
+    if (call.name === "browser_snapshot") {
+      const session = await ensureBrowser();
+      const result = await session.snapshot();
+      return { ok: result.ok, summary: result.snapshot ?? result.error ?? "(empty snapshot)", duration_ms: result.duration_ms, data: result };
+    }
+    if (call.name === "browser_click") {
+      const session = await ensureBrowser();
+      const result = await session.click(String(call.input.ref ?? ""));
+      return { ok: result.ok, summary: result.error ?? `clicked ${call.input.ref}`, duration_ms: result.duration_ms, data: result };
+    }
+    if (call.name === "browser_fill") {
+      const session = await ensureBrowser();
+      const result = await session.fill(String(call.input.ref ?? ""), String(call.input.text ?? ""));
+      return { ok: result.ok, summary: result.error ?? `filled ${call.input.ref}`, duration_ms: result.duration_ms, data: result };
+    }
+    if (call.name === "browser_screenshot") {
+      const session = await ensureBrowser();
+      const result = await session.screenshot(typeof call.input.filename === "string" ? call.input.filename : undefined);
+      return { ok: result.ok, summary: result.error ?? `screenshot saved to ${result.screenshot_path}`, duration_ms: result.duration_ms, data: result };
+    }
+    return { ok: false, summary: `unknown tool: ${call.name}`, duration_ms: Date.now() - started };
+  } catch (err) {
+    return { ok: false, summary: `tool error: ${err instanceof Error ? err.message : String(err)}`, duration_ms: Date.now() - started };
+  }
+}
+
+function renderAssistantMessage(completion: LlmCompletion) {
+  const parts: string[] = [];
+  if (completion.text) parts.push(completion.text);
+  for (const call of completion.tool_calls) {
+    parts.push(`[tool_call ${call.name} ${call.id}] ${JSON.stringify(call.input).slice(0, 400)}`);
+  }
+  return parts.join("\n").slice(0, 4000);
+}
+
+function computeAgentConfidence(toolEvents: ToolEvent[], changedFileCount: number, stopReason: LlmCompletion["stop_reason"]) {
+  if (toolEvents.length === 0 && changedFileCount === 0) return 0.5;
+  const successRatio = toolEvents.length === 0 ? 1 : toolEvents.filter((event) => event.ok).length / toolEvents.length;
+  const completionBonus = stopReason === "end_turn" ? 0.1 : 0;
+  const fileBonus = changedFileCount > 0 ? 0.1 : 0;
+  return Math.min(0.95, 0.65 + successRatio * 0.15 + completionBonus + fileBonus);
 }
 
 async function runTests(workspace: WorkspaceContext) {

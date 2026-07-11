@@ -36,6 +36,12 @@ export interface ScoredEval {
   efficiency_score: number;
   /** Approval coverage of high-risk steps (0–1). */
   risk_score: number;
+  /**
+   * True when the run is safe to promote learnings/rewrites without operator review.
+   * Heuristic: success outcome, high confidence, all approvals approved (none rejected),
+   * and no step marked as high risk.
+   */
+  auto_promote: boolean;
 }
 
 // -----------------------------------------------------------------------
@@ -135,6 +141,16 @@ export function scoreRun(inputs: ScoreInputs): ScoredEval {
       : Math.min(1, approvedCount / highRiskCount)
   );
 
+  // --- auto-promotion gate ---
+  // Conservative defaults: only promote when the run is clean (no rejections,
+  // no high-risk steps awaiting human judgement) AND confidence is strong.
+  const hasHighRiskStep = run.steps.some((s) => s.risk === "high");
+  const auto_promote =
+    outcome === "success" &&
+    confidence >= 0.8 &&
+    rejectedCount === 0 &&
+    !hasHighRiskStep;
+
   return {
     outcome,
     cost_usd,
@@ -144,5 +160,6 @@ export function scoreRun(inputs: ScoreInputs): ScoredEval {
     confidence,
     efficiency_score,
     risk_score,
+    auto_promote,
   };
 }

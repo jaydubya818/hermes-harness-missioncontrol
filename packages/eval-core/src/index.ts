@@ -15,6 +15,8 @@ export interface EvalRecord {
   confidence?: number;
   efficiency_score?: number;
   risk_score?: number;
+  /** Set when the eval is safe to auto-promote learnings without operator review. */
+  auto_promote?: boolean;
 }
 
 export interface EvalSummary {

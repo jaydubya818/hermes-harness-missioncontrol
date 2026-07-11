@@ -13,7 +13,12 @@
     "dev:orchestrator": "pnpm --filter orchestrator-api dev",
     "dev:eval": "pnpm --filter eval-api dev",
     "dev:worker": "pnpm --filter worker-runtime dev",
-    "dev:reset-state": "rm -f data/orchestrator-state.json data/eval-state.json"
+    "dev:daily-brief": "pnpm --filter daily-brief-runner dev",
+    "run:daily-brief": "pnpm --filter daily-brief-runner run:once",
+    "dev:reset-state": "rm -f data/orchestrator-state.json data/eval-state.json",
+    "kanban:mission": "node scripts/kanban-mission-bridge.mjs",
+    "kanban:mission:ready": "node scripts/kanban-mission-bridge.mjs --from-ready --tenant missioncontrol --start",
+    "xurl:setup": "bash scripts/xurl-setup.sh"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
