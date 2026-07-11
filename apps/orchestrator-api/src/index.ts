@@ -1526,6 +1526,9 @@ app.post("/api/approvals/:id/respond", async (c) => {
   if (!approval) return c.json({ error: "approval not found" }, 404);
   if (approval.status !== "pending") return c.json({ error: "approval already resolved" }, 409);
   const body = await c.req.json<{ decision: "approved" | "rejected"; actor?: string }>();
+  if (body.decision !== "approved" && body.decision !== "rejected") {
+    return c.json({ error: "decision must be \"approved\" or \"rejected\"" }, 400);
+  }
   const run = state.runs.find((item) => item.run_id === approval.run_id);
   const mission = state.missions.find((item) => item.mission_id === approval.mission_id);
   if (!run || !mission) return c.json({ error: "run/mission missing" }, 404);

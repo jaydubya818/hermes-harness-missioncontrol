@@ -451,6 +451,73 @@ describe("orchestrator-api", () => {
     expect(eventsPayload.events.some((event) => event.type === "step.failed")).toBe(true);
   });
 
+  it("rejects unknown approval decisions instead of treating them as approvals", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-approval-invalid-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [{
+        mission_id: "mis_demo",
+        title: "Approval flow",
+        objective: "Approval flow",
+        project_id: "proj_demo",
+        workflow: "bugfix",
+        status: "awaiting_approval",
+        active_run_id: "run_demo",
+        summary: "high-risk action requires approval",
+        created_at: "2026-04-11T00:00:00.000Z",
+        updated_at: "2026-04-11T00:00:00.000Z"
+      }],
+      runs: [{
+        run_id: "run_demo",
+        mission_id: "mis_demo",
+        workflow_id: "bugfix",
+        status: "awaiting_approval",
+        current_step_index: 4,
+        current_step_id: "deploy",
+        approval_id: "approval_demo",
+        created_at: "2026-04-11T00:00:00.000Z",
+        updated_at: "2026-04-11T00:00:00.000Z",
+        steps: [
+          { step_id: "plan", title: "Plan fix", kind: "plan", risk: "low", approval_mode: "on_policy_trigger", state: "completed", artifacts: [], completed_at: "2026-04-11T00:00:00.000Z" },
+          { step_id: "implement", title: "Implement patch", kind: "implement", risk: "medium", approval_mode: "on_policy_trigger", state: "completed", artifacts: [], completed_at: "2026-04-11T00:00:00.000Z" },
+          { step_id: "test", title: "Run tests", kind: "test", risk: "low", approval_mode: "on_policy_trigger", state: "completed", artifacts: [], completed_at: "2026-04-11T00:00:00.000Z" },
+          { step_id: "review", title: "Review diff", kind: "review", risk: "medium", approval_mode: "on_policy_trigger", state: "completed", artifacts: [], completed_at: "2026-04-11T00:00:00.000Z" },
+          { step_id: "deploy", title: "Canary deploy", kind: "deploy", risk: "high", approval_mode: "on_policy_trigger", state: "awaiting_approval", approval_id: "approval_demo", artifacts: [], started_at: "2026-04-11T00:00:00.000Z", blocked_reason: "high-risk action requires approval" }
+        ]
+      }],
+      approvals: [{
+        approval_id: "approval_demo",
+        mission_id: "mis_demo",
+        run_id: "run_demo",
+        step_id: "deploy",
+        status: "pending",
+        reason: "high-risk action requires approval",
+        created_at: "2026-04-11T00:00:00.000Z"
+      }],
+      events: [],
+      audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const response = await app.request("/api/approvals/approval_demo/respond", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision: "escalate" })
+    });
+
+    expect(response.status).toBe(400);
+
+    const approvalsResponse = await app.request("/api/approvals");
+    const approvalsPayload = await approvalsResponse.json() as { approvals: Array<{ approval_id: string; status: string }> };
+    expect(approvalsPayload.approvals.find((item) => item.approval_id === "approval_demo")?.status).toBe("pending");
+
+    const runsResponse = await app.request("/api/runs");
+    const runsPayload = await runsResponse.json() as { runs: Array<{ run_id: string; status: string }> };
+    expect(runsPayload.runs.find((run) => run.run_id === "run_demo")?.status).toBe("awaiting_approval");
+  });
+
   it("builds overview read model for console summary", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
 
