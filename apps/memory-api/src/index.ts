@@ -26,6 +26,15 @@ function requireOperator(c: any) {
   return null;
 }
 
+async function parseJsonBody<T>(c: any): Promise<T | null> {
+  try {
+    const body = await c.req.json();
+    return body && typeof body === "object" ? (body as T) : null;
+  } catch {
+    return null;
+  }
+}
+
 function safeWikiPath(...parts: string[]) {
   const root = resolve(join(vaultRoot, "wiki"));
   const full = resolve(join(root, ...parts));
@@ -67,8 +76,12 @@ app.get("/health", (c) => c.json({ ok: true, service: "memory-api" }));
 app.post("/api/memory/context/load", async (c) => {
   const authError = requireOperator(c);
   if (authError) return authError;
-  const body = await c.req.json<ContextRequest>();
-  if (!body.agent_id || !body.project_id || !body.budget_bytes) return c.json({ error: "agent_id, project_id, budget_bytes required" }, 400);
+  const body = await parseJsonBody<ContextRequest>(c);
+  if (!body) return c.json({ error: "invalid JSON body" }, 400);
+  if (!body.agent_id || !body.project_id) return c.json({ error: "agent_id, project_id, budget_bytes required" }, 400);
+  if (typeof body.budget_bytes !== "number" || !Number.isFinite(body.budget_bytes) || body.budget_bytes <= 0) {
+    return c.json({ error: "budget_bytes must be a positive number" }, 400);
+  }
   if (!isSafeId(body.agent_id) || !isSafeId(body.project_id)) return c.json({ error: "unsafe id" }, 400);
   const result = await loadContextBundle(vaultRoot, body);
   return c.json(result);
@@ -77,7 +90,8 @@ app.post("/api/memory/context/load", async (c) => {
 app.post("/api/memory/tasks/close", async (c) => {
   const authError = requireOperator(c);
   if (authError) return authError;
-  const body = await c.req.json<CloseTaskRequest>();
+  const body = await parseJsonBody<CloseTaskRequest>(c);
+  if (!body) return c.json({ error: "invalid JSON body" }, 400);
   if (!body.agent_id || !body.project_id || !body.outcome || !body.summary) return c.json({ error: "agent_id, project_id, outcome, summary required" }, 400);
   if (!isSafeId(body.agent_id) || !isSafeId(body.project_id)) return c.json({ error: "unsafe id" }, 400);
   const result = await closeTask(vaultRoot, body);
@@ -87,7 +101,8 @@ app.post("/api/memory/tasks/close", async (c) => {
 app.post("/api/memory/promote", async (c) => {
   const authError = requireOperator(c);
   if (authError) return authError;
-  const body = await c.req.json<PromoteLearningRequest>();
+  const body = await parseJsonBody<PromoteLearningRequest>(c);
+  if (!body) return c.json({ error: "invalid JSON body" }, 400);
   if (!body.item_id || !body.target_path || !body.promotion_kind) return c.json({ error: "item_id, target_path, promotion_kind required" }, 400);
   if (!isSafeId(body.target_path)) return c.json({ error: "unsafe target_path" }, 400);
   const result = await promoteLearning(vaultRoot, body);
@@ -97,7 +112,8 @@ app.post("/api/memory/promote", async (c) => {
 app.post("/api/memory/bus/publish", async (c) => {
   const authError = requireOperator(c);
   if (authError) return authError;
-  const body = await c.req.json<PublishBusRequest>();
+  const body = await parseJsonBody<PublishBusRequest>(c);
+  if (!body) return c.json({ error: "invalid JSON body" }, 400);
   if (!body.channel || !body.agent_id || !body.project_id || !body.title || !body.body) {
     return c.json({ error: "channel, agent_id, project_id, title, body required" }, 400);
   }
