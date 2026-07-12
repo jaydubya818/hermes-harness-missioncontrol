@@ -15,4 +15,12 @@ describe("loadContextBundle", () => {
     const res = await loadContextBundle(root, { agent_id: "agent_demo", agent_role: "coder", project_id: "proj_demo", budget_bytes: 1000 });
     expect(res.files.length).toBeGreaterThan(0);
   });
+
+  it("rejects agent or project ids that escape the vault root", async () => {
+    const root = mkdtempSync(join(tmpdir(), "memrt-"));
+    await expect(loadContextBundle(root, { agent_id: "agent_demo/../../../etc", agent_role: "coder", project_id: "proj_demo", budget_bytes: 1000 }))
+      .rejects.toThrow(/escapes vault root/);
+    await expect(loadContextBundle(root, { agent_id: "agent_demo", agent_role: "coder", project_id: "proj_demo/../..", budget_bytes: 1000 }))
+      .rejects.toThrow(/escapes vault root/);
+  });
 });

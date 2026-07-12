@@ -84,4 +84,15 @@ describe("writeback", () => {
     expect(result.status).toBe("promoted");
     expect(readFileSync(join(root, "wiki", "projects", "proj_demo", "standard.md"), "utf8")).toContain("disc_1");
   });
+
+  it("rejects agent ids that escape the vault root", async () => {
+    const { closeTask } = await loadWritebackModule();
+    const root = mkdtempSync(join(tmpdir(), "writeback-"));
+    await expect(closeTask(root, {
+      agent_id: "agent_demo/../../outside",
+      project_id: "proj_demo",
+      outcome: "success",
+      summary: "summary"
+    })).rejects.toThrow(/escapes vault root/);
+  });
 });

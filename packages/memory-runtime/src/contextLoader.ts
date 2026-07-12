@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { makeId, type ContextRequest, type ContextResponse, type MemoryClass } from "@hermes-harness-with-missioncontrol/shared-types";
 
 function classify(path: string): MemoryClass {
@@ -12,12 +12,21 @@ function classify(path: string): MemoryClass {
   return "bus";
 }
 
+function containedJoin(root: string, ...parts: string[]) {
+  const base = resolve(root);
+  const full = resolve(join(base, ...parts));
+  if (relative(base, full).startsWith("..")) throw new Error("path escapes vault root");
+  return full;
+}
+
 export async function loadContextBundle(vaultRoot: string, request: ContextRequest): Promise<ContextResponse> {
+  const agentDir = containedJoin(join(vaultRoot, "wiki", "agents"), request.agent_id);
+  const projectDir = containedJoin(join(vaultRoot, "wiki", "projects"), request.project_id);
   const candidates = [
-    join(vaultRoot, "wiki", "agents", request.agent_id, "profile.md"),
-    join(vaultRoot, "wiki", "agents", request.agent_id, "hot.md"),
-    join(vaultRoot, "wiki", "projects", request.project_id, "standards.md"),
-    join(vaultRoot, "wiki", "projects", request.project_id, "recipes.md")
+    join(agentDir, "profile.md"),
+    join(agentDir, "hot.md"),
+    join(projectDir, "standards.md"),
+    join(projectDir, "recipes.md")
   ];
   const files = [] as ContextResponse["files"];
   const included = [] as ContextResponse["trace"]["included"];

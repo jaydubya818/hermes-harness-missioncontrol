@@ -93,7 +93,7 @@ async function commitTextBatchAtomically(writes: PendingWrite[]) {
 export async function closeTask(vaultRoot: string, request: CloseTaskRequest): Promise<CloseTaskResponse> {
   const started = Date.now();
   const writes: CloseTaskResponse["writes"] = [];
-  const base = join(vaultRoot, "wiki", "agents", request.agent_id);
+  const base = safeVaultPath(join(vaultRoot, "wiki", "agents"), request.agent_id);
   const taskLogPath = join(base, "task-log.md");
   const learnedPath = join(base, "learned.md");
   const rewritesPath = join(base, "rewrites.md");
