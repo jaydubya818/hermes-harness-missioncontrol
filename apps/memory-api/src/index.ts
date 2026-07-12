@@ -126,6 +126,8 @@ app.post("/api/memory/bus/publish", async (c) => {
 });
 
 app.get("/api/memory/agents/:id/summary", async (c) => {
+  const authError = requireOperator(c);
+  if (authError) return authError;
   const agentId = c.req.param("id");
   if (!isSafeId(agentId)) return c.json({ error: "unsafe id" }, 400);
   const learned = await readText(safeWikiPath("agents", agentId, "learned.md"));
@@ -142,6 +144,8 @@ app.get("/api/memory/agents/:id/summary", async (c) => {
 });
 
 app.get("/api/memory/agents/:id/rewrite-candidates", async (c) => {
+  const authError = requireOperator(c);
+  if (authError) return authError;
   const agentId = c.req.param("id");
   if (!isSafeId(agentId)) return c.json({ error: "unsafe id" }, 400);
   const rewrites = await readText(safeWikiPath("agents", agentId, "rewrites.md"));
@@ -157,6 +161,8 @@ app.get("/api/memory/agents/:id/rewrite-candidates", async (c) => {
 });
 
 app.get("/api/memory/projects/:id/summary", async (c) => {
+  const authError = requireOperator(c);
+  if (authError) return authError;
   const projectId = c.req.param("id");
   if (!isSafeId(projectId)) return c.json({ error: "unsafe id" }, 400);
   const files = await listProjectFiles(projectId);
@@ -171,6 +177,8 @@ app.get("/api/memory/projects/:id/summary", async (c) => {
 });
 
 app.get("/api/memory/search", async (c) => {
+  const authError = requireOperator(c);
+  if (authError) return authError;
   const query = (c.req.query("q") ?? "").toLowerCase();
   const candidates = [
     "wiki/agents/agent_demo/profile.md",
@@ -192,6 +200,8 @@ app.get("/api/memory/search", async (c) => {
 });
 
 app.get("/api/memory/articles", async (c) => {
+  const authError = requireOperator(c);
+  if (authError) return authError;
   const section = c.req.query("section");
   if (section && !isSafeId(section)) return c.json({ error: "unsafe section" }, 400);
   try {
@@ -204,6 +214,8 @@ app.get("/api/memory/articles", async (c) => {
 });
 
 app.get("/api/memory/articles/:slug{.+}", async (c) => {
+  const authError = requireOperator(c);
+  if (authError) return authError;
   const slug = c.req.param("slug");
   if (!isSafeId(slug)) return c.json({ error: "unsafe slug" }, 400);
   try {
