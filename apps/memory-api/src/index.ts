@@ -120,7 +120,8 @@ app.post("/api/memory/bus/publish", async (c) => {
   if (!isSafeId(body.agent_id) || !isSafeId(body.project_id)) return c.json({ error: "unsafe id" }, 400);
   const busPath = safeWikiPath("projects", body.project_id, "bus.md");
   const existing = (await readText(busPath)) ?? "";
-  const entry = `\n## ${new Date().toISOString()} [${body.channel}] ${body.title}\nAgent: ${body.agent_id}\nSeverity: ${body.severity ?? "n/a"}\nTags: ${(body.tags ?? []).join(", ")}\n\n${body.body}\n`;
+  const inline = (value: string) => value.replace(/[\r\n]+/g, " ").trim();
+  const entry = `\n## ${new Date().toISOString()} [${inline(body.channel)}] ${inline(body.title)}\nAgent: ${body.agent_id}\nSeverity: ${inline(body.severity ?? "n/a")}\nTags: ${(body.tags ?? []).map(inline).join(", ")}\n\n${body.body}\n`;
   await writeTextAtomically(busPath, `${existing}${entry}`);
   return c.json({ ok: true, path: `wiki/projects/${body.project_id}/bus.md` }, 201);
 });
