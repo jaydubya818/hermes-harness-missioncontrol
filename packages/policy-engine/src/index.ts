@@ -7,7 +7,10 @@ export interface PolicyDecision {
 }
 
 export function evaluateStepPolicy(input: { kind: string; risk: "low" | "medium" | "high"; artifactCount?: number; workerConfidence?: number }): PolicyDecision {
-  const confidence = input.workerConfidence ?? 0.5;
+  const raw = input.workerConfidence;
+  // Non-finite or out-of-range confidence is untrusted input: NaN would make
+  // every comparison false and skip the low-confidence approval gate.
+  const confidence = typeof raw === "number" && Number.isFinite(raw) ? Math.min(1, Math.max(0, raw)) : 0.5;
   if (input.kind === "review" && (input.artifactCount ?? 0) === 0) {
     return { allowed: false, requires_approval: false, reason: "review step requires at least one artifact", policy_id: "review-needs-artifact", confidence_score: confidence };
   }
