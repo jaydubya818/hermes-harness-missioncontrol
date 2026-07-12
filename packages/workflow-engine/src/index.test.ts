@@ -9,6 +9,7 @@ import {
   resumeCurrentStep,
   retryCurrentStep,
   cancelCurrentStep,
+  markCurrentStepBlocked,
 } from "./index.js";
 
 describe("workflow-engine", () => {
@@ -110,5 +111,27 @@ describe("workflow-engine", () => {
       state: "cancelled",
       notes: "operator cancelled"
     });
+  });
+
+  it("does not resurrect a completed run via start or block transitions", () => {
+    const run = createWorkflowRun("run_demo", "mis_demo", "dependency_upgrade");
+    for (const _step of run.steps) {
+      startCurrentStep(run);
+      markCurrentStepCompleted(run, "done");
+    }
+    expect(run.status).toBe("completed");
+    const completedAt = run.completed_at;
+    const lastStep = run.steps[run.steps.length - 1];
+
+    startCurrentStep(run, "exec_zombie");
+    expect(run.status).toBe("completed");
+    expect(run.completed_at).toBe(completedAt);
+    expect(lastStep.state).toBe("completed");
+    expect(lastStep.execution_id).not.toBe("exec_zombie");
+
+    markCurrentStepBlocked(run, "should not apply");
+    expect(run.status).toBe("completed");
+    expect(lastStep.state).toBe("completed");
+    expect(lastStep.blocked_reason).toBeUndefined();
   });
 });

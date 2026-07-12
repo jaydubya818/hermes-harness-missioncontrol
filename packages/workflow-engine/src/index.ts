@@ -179,6 +179,8 @@ function transitionCurrentStep(
 }
 
 export function startCurrentStep(run: WorkflowRun, execution_id?: string): WorkflowRun {
+  const current = getCurrentStep(run);
+  if (!current || ["completed", "failed", "cancelled"].includes(current.state)) return run;
   return transitionCurrentStep(run, "running", { execution_id });
 }
 
@@ -231,6 +233,8 @@ export function markCurrentStepCancelled(run: WorkflowRun, notes?: string): Work
 }
 
 export function markCurrentStepBlocked(run: WorkflowRun, blocked_reason: string, notes?: string): WorkflowRun {
+  const current = getCurrentStep(run);
+  if (!current || ["completed", "failed", "cancelled"].includes(current.state)) return run;
   return transitionCurrentStep(run, "blocked", { blocked_reason, notes });
 }
 
