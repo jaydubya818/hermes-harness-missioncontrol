@@ -190,7 +190,7 @@ Operator/read models:
 ## Environment
 
 Most important env vars:
-- `HARNESS_OPERATOR_TOKEN` — bearer token for mutating APIs; also used by console auth fallback flow
+- `HARNESS_OPERATOR_TOKEN` — bearer token for mutating APIs and memory-api reads; also used by console auth fallback flow
 - `VITE_OPERATOR_TOKEN` — console-side default token for local dev
 - `HARNESS_VAULT_ROOT` — memory-api vault root; default `vault/agentic-kb`
 - `ORCHESTRATOR_STATE_FILE` — orchestrator persistence file
