@@ -1545,6 +1545,37 @@ describe("orchestrator-api", () => {
     );
   });
 
+  it("continues sweeping remaining orphans when one cleanup fails", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: { body?: string }) => {
+      const body = init?.body ? JSON.parse(init.body) as { run_id?: string } : {};
+      if (body.run_id === "run_broken") return jsonResponse({ ok: false, status: 500 });
+      return jsonResponse({ body: { ok: true } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-sweep-partial-"));
+    const stateFile = join(stateDir, "state.json");
+    const worktreesRoot = join(stateDir, "worktrees");
+    const runsRoot = join(stateDir, "worker-runs");
+    process.env.WORKTREE_ROOT = worktreesRoot;
+    process.env.WORKER_RUNTIME_ROOT = runsRoot;
+
+    mkdirSync(join(worktreesRoot, "run_broken"), { recursive: true });
+    mkdirSync(join(worktreesRoot, "run_orphan"), { recursive: true });
+
+    writeFileSync(stateFile, JSON.stringify({ missions: [], runs: [], approvals: [], events: [], audit: [] }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const response = await app.request("/api/maintenance/sweep-orphans", { method: "POST" });
+    const payload = await response.json() as { removed_run_ids: string[]; failed_run_ids: Array<{ run_id: string; error: string }>; removed_count: number; failed_count: number };
+
+    expect(response.status).toBe(200);
+    expect(payload.removed_run_ids).toEqual(["run_orphan"]);
+    expect(payload.failed_count).toBe(1);
+    expect(payload.failed_run_ids[0]).toMatchObject({ run_id: "run_broken" });
+    expect(payload.failed_run_ids[0]?.error).toContain("500");
+  });
+
   it("does not sweep active non-terminal run workspaces", async () => {
     const fetchMock = vi.fn(async () => jsonResponse({ body: { ok: true } }));
     vi.stubGlobal("fetch", fetchMock);

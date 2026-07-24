@@ -1082,6 +1082,7 @@ async function sweepOrphanedExecutionWorkspaces() {
 
   const removed_run_ids: string[] = [];
   const skipped_run_ids: string[] = [];
+  const failed_run_ids: Array<{ run_id: string; error: string }> = [];
 
   for (const runId of candidateRunIds) {
     if (protectedRunIds.has(runId)) {
@@ -1091,16 +1092,23 @@ async function sweepOrphanedExecutionWorkspaces() {
 
     const run = runsById.get(runId);
     const mission = run ? getMissionForRun(run) : undefined;
-    await requestWorkerCleanup(runId, mission);
-    removed_run_ids.push(runId);
+    try {
+      await requestWorkerCleanup(runId, mission);
+      removed_run_ids.push(runId);
+    } catch (err) {
+      // One broken workspace must not abort the rest of the sweep.
+      failed_run_ids.push({ run_id: runId, error: err instanceof Error ? err.message : String(err) });
+    }
   }
 
   return {
     scanned_run_ids: candidateRunIds,
     removed_run_ids,
     skipped_run_ids,
+    failed_run_ids,
     removed_count: removed_run_ids.length,
     skipped_count: skipped_run_ids.length,
+    failed_count: failed_run_ids.length,
   };
 }
 
