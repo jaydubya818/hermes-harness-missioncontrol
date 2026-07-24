@@ -108,6 +108,12 @@ app.post("/api/evals", async (c) => {
   if (!body.mission_id || !body.run_id) return c.json({ error: "mission_id and run_id required" }, 400);
   if (!["success", "failure", "partial"].includes(body.outcome)) return c.json({ error: "outcome must be one of success, failure, partial" }, 400);
   if (typeof body.cost_usd !== "number" || !Number.isFinite(body.cost_usd) || body.cost_usd < 0) return c.json({ error: "cost_usd must be a non-negative number" }, 400);
+  if (body.eval_id) {
+    // Replayed submissions (orchestrator retries, network replays) must not
+    // duplicate records; mirror the artifact_id dedupe behaviour.
+    const existing = records.find((item) => item.eval_id === body.eval_id);
+    if (existing) return c.json({ ok: true, record: existing, summary: summarize(records) });
+  }
   const record = {
     ...body,
     eval_id: body.eval_id ?? `eval_${randomUUID().replace(/-/g, "").slice(0, 12)}`

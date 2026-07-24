@@ -114,6 +114,31 @@ describe("eval-api", () => {
     expect(payload.record).toMatchObject({ eval_id: created.record?.eval_id, run_id: "run_detail" });
   });
 
+  it("deduplicates replayed submissions that carry an eval_id", async () => {
+    const app = await loadApp();
+    const record = { eval_id: "eval_replayed", mission_id: "mis_demo", run_id: "run_dup", outcome: "success", cost_usd: 0.1, approval_count: 0, artifact_count: 1, created_at: "2026-04-18T19:00:00.000Z" };
+
+    const first = await app.request("/api/evals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(record)
+    });
+    expect(first.status).toBe(201);
+
+    const replay = await app.request("/api/evals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...record, cost_usd: 99 })
+    });
+    const replayPayload = await replay.json() as { record?: { eval_id?: string; cost_usd?: number } };
+    expect(replay.status).toBe(200);
+    expect(replayPayload.record).toMatchObject({ eval_id: "eval_replayed", cost_usd: 0.1 });
+
+    const listing = await app.request("/api/evals");
+    const payload = await listing.json() as { pagination: { total: number } };
+    expect(payload.pagination.total).toBe(1);
+  });
+
   it("enforces the operator token on mutating requests when configured", async () => {
     process.env.HARNESS_OPERATOR_TOKEN = "secret-token";
     const app = await loadApp();
