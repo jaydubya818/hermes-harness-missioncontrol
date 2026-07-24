@@ -17,6 +17,13 @@ let initialized = false;
 async function ensureLoaded() {
   if (initialized) return;
   const loaded = await loadJsonFile<EvalRecord[]>(stateFile, []);
+  // loadJsonFile only guards against unparseable JSON; a valid JSON value of
+  // the wrong shape (e.g. an object) would crash .map on every request.
+  if (!Array.isArray(loaded)) {
+    console.warn(`eval-api: state file ${stateFile} is not an array; starting with empty records`);
+    initialized = true;
+    return;
+  }
   records.splice(0, records.length, ...loaded.map((record) => ({
     ...record,
     eval_id: record.eval_id ?? `eval_${randomUUID().replace(/-/g, "").slice(0, 12)}`

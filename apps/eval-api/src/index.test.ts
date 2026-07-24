@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -112,6 +112,20 @@ describe("eval-api", () => {
 
     expect(detail.status).toBe(200);
     expect(payload.record).toMatchObject({ eval_id: created.record?.eval_id, run_id: "run_detail" });
+  });
+
+  it("tolerates a state file with the wrong JSON shape instead of failing every request", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const stateFile = join(mkdtempSync(join(tmpdir(), "eval-state-bad-")), "state.json");
+    writeFileSync(stateFile, JSON.stringify({ records: [] }), "utf8");
+
+    const app = await loadApp(stateFile);
+    const listing = await app.request("/api/evals");
+    const payload = await listing.json() as { pagination: { total: number } };
+
+    expect(listing.status).toBe(200);
+    expect(payload.pagination.total).toBe(0);
+    expect(warn).toHaveBeenCalled();
   });
 
   it("deduplicates replayed submissions that carry an eval_id", async () => {
