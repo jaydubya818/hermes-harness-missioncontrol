@@ -351,6 +351,19 @@ function requireOperator(c: any) {
   return null;
 }
 
+// EventSource cannot set request headers, so the SSE endpoint also accepts the
+// operator token as a `token` query parameter.
+function requireOperatorForStream(c: any) {
+  if (!operatorToken) return null;
+  const headerAuth = Buffer.from(c.req.header("authorization") ?? "");
+  const expectedHeader = Buffer.from(`Bearer ${operatorToken}`);
+  if (headerAuth.length === expectedHeader.length && timingSafeEqual(headerAuth, expectedHeader)) return null;
+  const queryToken = Buffer.from(c.req.query("token") ?? "");
+  const expectedToken = Buffer.from(operatorToken);
+  if (queryToken.length === expectedToken.length && timingSafeEqual(queryToken, expectedToken)) return null;
+  return c.json({ error: "unauthorized" }, 401);
+}
+
 async function parseJsonBody<T>(c: any): Promise<T | null> {
   try {
     const body = await c.req.json();
@@ -1148,11 +1161,13 @@ app.get("/health", async (c) => {
   return c.json({ ok: true, service: "orchestrator-api", persisted_missions: state.missions.length });
 });
 
-app.get("/api/missions", async (c) => { await ensureLoaded(); return c.json({ missions: state.missions }); });
-app.get("/api/runs", async (c) => { await ensureLoaded(); return c.json({ runs: state.runs }); });
-app.get("/api/approvals", async (c) => { await ensureLoaded(); return c.json({ approvals: state.approvals }); });
-app.get("/api/events", async (c) => { await ensureLoaded(); return c.json({ events: state.events }); });
+app.get("/api/missions", async (c) => { const authError = requireOperator(c); if (authError) return authError; await ensureLoaded(); return c.json({ missions: state.missions }); });
+app.get("/api/runs", async (c) => { const authError = requireOperator(c); if (authError) return authError; await ensureLoaded(); return c.json({ runs: state.runs }); });
+app.get("/api/approvals", async (c) => { const authError = requireOperator(c); if (authError) return authError; await ensureLoaded(); return c.json({ approvals: state.approvals }); });
+app.get("/api/events", async (c) => { const authError = requireOperator(c); if (authError) return authError; await ensureLoaded(); return c.json({ events: state.events }); });
 app.get("/api/events/stream", async (c) => {
+  const authError = requireOperatorForStream(c);
+  if (authError) return authError;
   await ensureLoaded();
   const filters = normalizeSseFilters(c.req.query());
   const replay = getReplayEvents(filters, parseLastEventCount(c.req.query("last")));
@@ -1199,31 +1214,37 @@ app.get("/api/events/stream", async (c) => {
     }
   });
 });
-app.get("/api/audit", async (c) => { await ensureLoaded(); return c.json({ audit: state.audit }); });
-app.get("/api/read-models/overview", async (c) => { await ensureLoaded(); return c.json(buildOverviewReadModel()); });
-app.get("/api/read-models/missions", async (c) => { await ensureLoaded(); return c.json(buildMissionsReadModel()); });
+app.get("/api/audit", async (c) => { const authError = requireOperator(c); if (authError) return authError; await ensureLoaded(); return c.json({ audit: state.audit }); });
+app.get("/api/read-models/overview", async (c) => { const authError = requireOperator(c); if (authError) return authError; await ensureLoaded(); return c.json(buildOverviewReadModel()); });
+app.get("/api/read-models/missions", async (c) => { const authError = requireOperator(c); if (authError) return authError; await ensureLoaded(); return c.json(buildMissionsReadModel()); });
 app.get("/api/read-models/missions/:id", async (c) => {
+  const authError = requireOperator(c);
+  if (authError) return authError;
   await ensureLoaded();
   const payload = buildMissionDetailReadModel(c.req.param("id"));
   if (!payload) return c.json({ error: "mission not found" }, 404);
   return c.json(payload);
 });
 app.get("/api/read-models/runs/:id", async (c) => {
+  const authError = requireOperator(c);
+  if (authError) return authError;
   await ensureLoaded();
   const payload = buildRunDetailReadModel(c.req.param("id"));
   if (!payload) return c.json({ error: "run not found" }, 404);
   return c.json(payload);
 });
 app.get("/api/read-models/runs/:runId/steps/:stepId", async (c) => {
+  const authError = requireOperator(c);
+  if (authError) return authError;
   await ensureLoaded();
   const payload = buildStepDetailReadModel(c.req.param("runId"), c.req.param("stepId"));
   if (!payload) return c.json({ error: "step not found" }, 404);
   return c.json(payload);
 });
-app.get("/api/read-models/artifacts", async (c) => { await ensureLoaded(); return c.json(buildArtifactsReadModel(c.req.query())); });
-app.get("/api/read-models/approvals", async (c) => { await ensureLoaded(); return c.json(buildApprovalsReadModel(c.req.query())); });
-app.get("/api/read-models/approval-history", async (c) => { await ensureLoaded(); return c.json(buildApprovalHistoryReadModel(c.req.query())); });
-app.get("/api/read-models/audit", async (c) => { await ensureLoaded(); return c.json(buildAuditReadModel(c.req.query())); });
+app.get("/api/read-models/artifacts", async (c) => { const authError = requireOperator(c); if (authError) return authError; await ensureLoaded(); return c.json(buildArtifactsReadModel(c.req.query())); });
+app.get("/api/read-models/approvals", async (c) => { const authError = requireOperator(c); if (authError) return authError; await ensureLoaded(); return c.json(buildApprovalsReadModel(c.req.query())); });
+app.get("/api/read-models/approval-history", async (c) => { const authError = requireOperator(c); if (authError) return authError; await ensureLoaded(); return c.json(buildApprovalHistoryReadModel(c.req.query())); });
+app.get("/api/read-models/audit", async (c) => { const authError = requireOperator(c); if (authError) return authError; await ensureLoaded(); return c.json(buildAuditReadModel(c.req.query())); });
 
 app.post("/api/maintenance/sweep-orphans", async (c) => {
   const authError = requireOperator(c);

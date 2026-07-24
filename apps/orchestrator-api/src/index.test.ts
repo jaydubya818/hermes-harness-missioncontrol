@@ -33,6 +33,7 @@ describe("orchestrator-api", () => {
     delete process.env.WORKER_RUNTIME_ROOT;
     delete process.env.ORPHAN_SWEEP_INTERVAL_MS;
     delete process.env.ALLOWED_REPO_ROOT;
+    delete process.env.HARNESS_OPERATOR_TOKEN;
     process.env.VITEST = "1";
   });
 
@@ -123,6 +124,34 @@ describe("orchestrator-api", () => {
     expect(malformedMission.status).toBe(400);
     const payload = await malformedMission.json() as { error: string };
     expect(payload.error).toBe("invalid JSON body");
+  });
+
+  it("requires the operator token on read endpoints when configured", async () => {
+    process.env.HARNESS_OPERATOR_TOKEN = "secret-token";
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+    const app = await loadApp();
+
+    for (const path of ["/api/missions", "/api/runs", "/api/approvals", "/api/events", "/api/audit", "/api/read-models/overview", "/api/read-models/missions", "/api/read-models/artifacts", "/api/read-models/approvals", "/api/read-models/approval-history", "/api/read-models/audit"]) {
+      const denied = await app.request(path);
+      expect(denied.status, path).toBe(401);
+      const allowed = await app.request(path, { headers: { authorization: "Bearer secret-token" } });
+      expect(allowed.status, path).toBe(200);
+    }
+
+    const health = await app.request("/health");
+    expect(health.status).toBe(200);
+
+    const streamDenied = await app.request("/api/events/stream?last=0");
+    expect(streamDenied.status).toBe(401);
+    const streamWrongToken = await app.request("/api/events/stream?last=0&token=secret-tokem");
+    expect(streamWrongToken.status).toBe(401);
+    const streamWithToken = await app.request("/api/events/stream?last=0&token=secret-token");
+    expect(streamWithToken.status).toBe(200);
+    expect(streamWithToken.headers.get("content-type")).toContain("text/event-stream");
+    await streamWithToken.body?.cancel();
+    const streamWithHeader = await app.request("/api/events/stream?last=0", { headers: { authorization: "Bearer secret-token" } });
+    expect(streamWithHeader.status).toBe(200);
+    await streamWithHeader.body?.cancel();
   });
 
   it("returns a TaskExecutionResult-shaped execution_result payload", async () => {
