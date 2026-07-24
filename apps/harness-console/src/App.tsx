@@ -629,7 +629,10 @@ function Audit() {
     step_id: stepFilter || undefined,
     event_type: eventTypeFilter || undefined,
     actor: actorFilter || undefined,
-    last: "10"
+    last: "10",
+    // EventSource cannot send an Authorization header, so the stream endpoint
+    // accepts the operator token as a query parameter instead.
+    token: getOperatorToken() || undefined
   });
   const { status: liveStatus, events: liveEvents } = useLiveEventStream(liveUrl);
   return (
