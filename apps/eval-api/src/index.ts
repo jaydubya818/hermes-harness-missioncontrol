@@ -36,9 +36,18 @@ function requireOperator(c: any) {
   return null;
 }
 
+async function parseJsonBody<T>(c: any): Promise<T | null> {
+  try {
+    const body = await c.req.json();
+    return body && typeof body === "object" ? (body as T) : null;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeLimit(value?: string) {
   const parsed = Number.parseInt(value ?? "50", 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 50;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 100) : 50;
 }
 
 function normalizeOffset(value?: string) {
@@ -90,7 +99,8 @@ app.post("/api/evals", async (c) => {
   const authError = requireOperator(c);
   if (authError) return authError;
   await ensureLoaded();
-  const body = await c.req.json<EvalRecord>();
+  const body = await parseJsonBody<EvalRecord>(c);
+  if (!body) return c.json({ error: "invalid JSON body" }, 400);
   if (!body.mission_id || !body.run_id) return c.json({ error: "mission_id and run_id required" }, 400);
   if (!["success", "failure", "partial"].includes(body.outcome)) return c.json({ error: "outcome must be one of success, failure, partial" }, 400);
   if (typeof body.cost_usd !== "number" || !Number.isFinite(body.cost_usd) || body.cost_usd < 0) return c.json({ error: "cost_usd must be a non-negative number" }, 400);

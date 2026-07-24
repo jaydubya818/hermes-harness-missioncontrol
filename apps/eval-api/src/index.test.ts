@@ -81,6 +81,22 @@ describe("eval-api", () => {
     expect(Number.isFinite(payload.summary.total_cost_usd)).toBe(true);
   });
 
+  it("returns 400 for malformed JSON bodies and caps page size at 100", async () => {
+    const app = await loadApp();
+
+    const malformed = await app.request("/api/evals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{not json"
+    });
+    expect(malformed.status).toBe(400);
+    expect(await malformed.json()).toEqual({ error: "invalid JSON body" });
+
+    const listing = await app.request("/api/evals?limit=99999");
+    const payload = await listing.json() as { pagination: { limit: number } };
+    expect(payload.pagination.limit).toBe(100);
+  });
+
   it("returns eval detail by id", async () => {
     const app = await loadApp();
 
