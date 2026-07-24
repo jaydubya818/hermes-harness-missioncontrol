@@ -177,6 +177,25 @@ describe("scoreRun", () => {
     expect(result.confidence).toBeGreaterThan(0.8); // pulled from notes
   });
 
+  it("never produces negative or NaN cost/duration from corrupt timestamps", () => {
+    const outOfOrder = makeRun();
+    outOfOrder.created_at = "2025-01-01T10:05:00Z";
+    outOfOrder.updated_at = "2025-01-01T10:00:00Z";
+    outOfOrder.steps[0]!.started_at = "2025-01-01T10:03:00Z";
+    outOfOrder.steps[0]!.completed_at = "2025-01-01T10:01:00Z";
+    const scoredOutOfOrder = scoreRun({ run: outOfOrder, approvals: [] });
+    expect(scoredOutOfOrder.duration_ms).toBe(0);
+    expect(scoredOutOfOrder.cost_usd).toBeGreaterThanOrEqual(0);
+
+    const unparseable = makeRun();
+    unparseable.updated_at = "not-a-timestamp";
+    unparseable.steps[0]!.completed_at = "not-a-timestamp";
+    const scoredUnparseable = scoreRun({ run: unparseable, approvals: [] });
+    expect(scoredUnparseable.duration_ms).toBe(0);
+    expect(Number.isFinite(scoredUnparseable.cost_usd)).toBe(true);
+    expect(scoredUnparseable.cost_usd).toBeGreaterThanOrEqual(0);
+  });
+
   it("counts artifacts across all steps", () => {
     const result = scoreRun({ run: makeRun(), approvals: [] });
     expect(result.artifact_count).toBe(1); // only implement step has 1 artifact

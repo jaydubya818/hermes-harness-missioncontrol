@@ -44,10 +44,12 @@ export interface ScoredEval {
 
 function stepDurationMs(step: WorkflowRun["steps"][number]): number {
   if (step.started_at && step.completed_at) {
-    return (
+    const elapsed =
       new Date(step.completed_at).getTime() -
-      new Date(step.started_at).getTime()
-    );
+      new Date(step.started_at).getTime();
+    // Guard against unparseable or out-of-order timestamps so corrupt state
+    // can never produce NaN or negative costs.
+    if (Number.isFinite(elapsed) && elapsed >= 0) return elapsed;
   }
   return FALLBACK_STEP_MINUTES * 60_000;
 }
@@ -96,10 +98,11 @@ export function scoreRun(inputs: ScoreInputs): ScoredEval {
   );
 
   // --- duration: wall-clock from run timestamps ---
-  const duration_ms =
+  const rawDuration =
     run.created_at && run.updated_at
       ? new Date(run.updated_at).getTime() - new Date(run.created_at).getTime()
       : 0;
+  const duration_ms = Number.isFinite(rawDuration) && rawDuration >= 0 ? rawDuration : 0;
 
   // --- artifacts ---
   const artifact_count = run.steps.reduce(
