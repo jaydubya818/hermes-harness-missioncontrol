@@ -393,7 +393,17 @@ async function ensureLoaded() {
   maxEventSequence = 0;
 
   const normalizedEvents = (loaded.events ?? [])
-    .map((event) => normalizeEventRecord(event))
+    .flatMap((event) => {
+      try {
+        return [normalizeEventRecord(event)];
+      } catch (err) {
+        // ensureLoaded runs on every request, so one unrecognized persisted
+        // event (e.g. written by a newer version) must not turn the whole
+        // service into a 500 loop. Drop it and keep the rest of the state.
+        console.warn("[orchestrator] skipping unrecognized persisted event:", err instanceof Error ? err.message : err);
+        return [];
+      }
+    })
     .sort((a, b) => (a.ts ?? a.timestamp ?? "").localeCompare(b.ts ?? b.timestamp ?? ""));
   for (const event of normalizedEvents) {
     recordEvent(event);

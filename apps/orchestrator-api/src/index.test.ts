@@ -1713,4 +1713,31 @@ describe("orchestrator-api", () => {
     expect(persisted.processed_event_ids).toContain("evt_evicted");
     expect(persisted.processed_event_ids).toContain("evt_recent");
   });
+
+  it("skips unrecognized persisted events instead of failing every request", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-bad-event-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [],
+      runs: [],
+      approvals: [],
+      events: [
+        { event_id: "evt_bad", type: "mission.exploded", ts: "2026-04-11T00:00:00.000Z", mission_id: "mis_demo", payload: {} },
+        { event_id: "evt_good", type: "mission.created", ts: "2026-04-11T00:01:00.000Z", mission_id: "mis_demo", payload: {} }
+      ],
+      audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const response = await app.request("/api/events");
+    const payload = await response.json() as { events: Array<{ event_id?: string; type: string }> };
+
+    expect(response.status).toBe(200);
+    expect(payload.events).toHaveLength(1);
+    expect(payload.events[0]).toMatchObject({ event_id: "evt_good", type: "mission.created" });
+    expect(warn).toHaveBeenCalled();
+  });
 });
