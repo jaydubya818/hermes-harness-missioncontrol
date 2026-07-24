@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { app, assertSafeRepoPath, cleanupRun, detectTestCommand, ensureWorkspace } from "./index.js";
 
@@ -187,5 +187,32 @@ describe("worker-runtime", () => {
     await writeFile(join(target, "marker.txt"), "ok", "utf8");
 
     await expect(cleanupRun(runId)).resolves.toMatchObject({ ok: true });
+  });
+
+  it("removes the run output root only when remove_outputs is requested", async () => {
+    const runId = "run_cleanup_outputs";
+    const outputRoot = join(process.cwd(), "../../data/worker-runs", runId);
+    await mkdir(join(outputRoot, "step_plan"), { recursive: true });
+    await writeFile(join(outputRoot, "step_plan", "plan.md"), "plan", "utf8");
+
+    const keep = await app.request("/api/cleanup-run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ run_id: runId })
+    });
+    expect(keep.status).toBe(200);
+    // Recorded artifacts reference files under the output root, so a normal
+    // terminal cleanup must keep it.
+    await expect(access(join(outputRoot, "step_plan", "plan.md"))).resolves.toBeUndefined();
+
+    const sweep = await app.request("/api/cleanup-run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ run_id: runId, remove_outputs: true })
+    });
+    expect(sweep.status).toBe(200);
+    const payload = await sweep.json() as { removed_paths?: string[] };
+    expect(payload.removed_paths).toContain(outputRoot);
+    await expect(access(outputRoot)).rejects.toThrow();
   });
 });

@@ -869,7 +869,7 @@ async function deploy(workspace: WorkspaceContext) {
   } satisfies StepResult;
 }
 
-export async function cleanupRun(runId: string, sourceRepo?: string, branchName?: string) {
+export async function cleanupRun(runId: string, sourceRepo?: string, branchName?: string, removeOutputs = false) {
   assertSafeSegment(runId);
   if (branchName !== undefined && (typeof branchName !== "string" || !branchName.trim() || branchName.startsWith("-"))) {
     throw new Error("invalid branch name");
@@ -884,7 +884,16 @@ export async function cleanupRun(runId: string, sourceRepo?: string, branchName?
     }
   }
   if (await exists(target)) await rm(target, { recursive: true, force: true });
-  return { ok: true, removed: target };
+  const removed_paths = [target];
+  // Normal terminal cleanup keeps the run output root because recorded
+  // artifacts reference files inside it; the orphan sweep asks for full
+  // removal explicitly.
+  if (removeOutputs) {
+    const outputRoot = join(runsRoot, runId);
+    if (await exists(outputRoot)) await rm(outputRoot, { recursive: true, force: true });
+    removed_paths.push(outputRoot);
+  }
+  return { ok: true, removed: target, removed_paths };
 }
 
 app.use("*", cors());
@@ -950,10 +959,10 @@ app.post("/api/execute-step", async (c) => {
 app.post("/api/cleanup-run", async (c) => {
   const authError = requireOperator(c);
   if (authError) return authError;
-  const body = await parseJsonBody<{ run_id: string; source_repo?: string; branch_name?: string }>(c);
+  const body = await parseJsonBody<{ run_id: string; source_repo?: string; branch_name?: string; remove_outputs?: boolean }>(c);
   if (!body || typeof body.run_id !== "string") return c.json({ error: "invalid JSON body: run_id required" }, 400);
   try {
-    const result = await cleanupRun(body.run_id, body.source_repo, body.branch_name);
+    const result = await cleanupRun(body.run_id, body.source_repo, body.branch_name, body.remove_outputs === true);
     return c.json(result);
   } catch (error) {
     return c.json({ error: String(error instanceof Error ? error.message : error) }, 400);

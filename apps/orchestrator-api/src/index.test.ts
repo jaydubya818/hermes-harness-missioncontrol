@@ -1537,12 +1537,12 @@ describe("orchestrator-api", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
       expect.stringContaining("/api/cleanup-run"),
-      expect.objectContaining({ body: JSON.stringify({ run_id: "run_done", source_repo: "/repo/done", branch_name: "hermes/run_done" }) })
+      expect.objectContaining({ body: JSON.stringify({ run_id: "run_done", source_repo: "/repo/done", branch_name: "hermes/run_done", remove_outputs: true }) })
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       expect.stringContaining("/api/cleanup-run"),
-      expect.objectContaining({ body: JSON.stringify({ run_id: "run_orphan", source_repo: undefined, branch_name: "hermes/run_orphan" }) })
+      expect.objectContaining({ body: JSON.stringify({ run_id: "run_orphan", source_repo: undefined, branch_name: "hermes/run_orphan", remove_outputs: true }) })
     );
   });
 

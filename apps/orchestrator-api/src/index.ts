@@ -1102,14 +1102,14 @@ function isTerminalRun(run: WorkflowRun) {
   return ["completed", "failed", "cancelled"].includes(run.status);
 }
 
-async function requestWorkerCleanup(runId: `run_${string}` | string, mission?: Mission, execution?: WorkerExecution | null) {
+async function requestWorkerCleanup(runId: `run_${string}` | string, mission?: Mission, execution?: WorkerExecution | null, removeOutputs = false) {
   const sourceRepo = execution?.sourceRepo ?? execution?.source_repo ?? mission?.repo_path;
   const branchName = execution?.branchName ?? execution?.branch_name ?? `hermes/${runId}`;
   const response = await fetch(`${workerApi}/api/cleanup-run`, {
     method: "POST",
     headers: authHeaders(),
     signal: AbortSignal.timeout(CLEANUP_TIMEOUT_MS),
-    body: JSON.stringify({ run_id: runId, source_repo: sourceRepo, branch_name: branchName })
+    body: JSON.stringify({ run_id: runId, source_repo: sourceRepo, branch_name: branchName, remove_outputs: removeOutputs })
   });
   if (!response.ok) throw new Error(`worker cleanup failed with status ${response.status}`);
   return { run_id: runId, source_repo: sourceRepo, branch_name: branchName };
@@ -1136,7 +1136,10 @@ async function sweepOrphanedExecutionWorkspaces() {
     const run = runsById.get(runId);
     const mission = run ? getMissionForRun(run) : undefined;
     try {
-      await requestWorkerCleanup(runId, mission);
+      // Orphans are gone from active use, so ask the worker to prune the
+      // run output root too (normal terminal cleanup keeps it because
+      // recorded artifacts reference files inside it).
+      await requestWorkerCleanup(runId, mission, null, true);
       removed_run_ids.push(runId);
     } catch (err) {
       // One broken workspace must not abort the rest of the sweep.
