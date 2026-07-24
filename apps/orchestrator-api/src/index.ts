@@ -399,9 +399,19 @@ async function ensureLoaded() {
     recordEvent(event);
   }
 
-  if (!state.processed_event_ids.length && Array.isArray(loaded.processed_event_ids)) {
-    state.processed_event_ids.splice(0, state.processed_event_ids.length, ...loaded.processed_event_ids);
-    for (const eventId of loaded.processed_event_ids) processedEventIdSet.add(eventId);
+  // Replay above only repopulates ids for the retained event window (500
+  // events), but processed ids persist up to 2000. Merge the older persisted
+  // ids back in so replays of already-ingested events stay deduplicated
+  // across restarts.
+  if (Array.isArray(loaded.processed_event_ids)) {
+    for (const eventId of loaded.processed_event_ids) {
+      if (typeof eventId !== "string" || !eventId || processedEventIdSet.has(eventId)) continue;
+      state.processed_event_ids.push(eventId);
+      processedEventIdSet.add(eventId);
+    }
+    if (state.processed_event_ids.length > 2000) {
+      for (const dropped of state.processed_event_ids.splice(2000)) processedEventIdSet.delete(dropped);
+    }
   }
 
   for (const mission of state.missions) {

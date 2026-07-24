@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -1674,5 +1674,43 @@ describe("orchestrator-api", () => {
     expect(response.status).toBe(200);
     expect(chunk).toContain("event: mission.created");
     expect(chunk).toContain('"type":"mission.created"');
+  });
+
+  it("keeps persisted processed event ids beyond the retained event window across restarts", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-processed-ids-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [],
+      runs: [{
+        run_id: "run_demo", mission_id: "mis_demo", workflow_id: "bugfix", status: "running", current_step_index: 0, current_step_id: "plan", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z",
+        steps: [{ step_id: "plan", title: "Plan fix", kind: "plan", risk: "low", approval_mode: "on_policy_trigger", state: "running", artifacts: [], started_at: "2026-04-11T00:00:00.000Z" }]
+      }],
+      approvals: [],
+      events: [
+        { event_id: "evt_recent", type: "mission.created", ts: "2026-04-11T00:00:00.000Z", mission_id: "mis_demo", payload: {} }
+      ],
+      audit: [],
+      // Simulates an id whose event has already been evicted from the
+      // retained event window but must stay deduplicated after restart.
+      processed_event_ids: ["evt_evicted"]
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    await app.request("/health");
+    const before = await (await app.request("/api/events")).json() as { events: Array<{ event_id?: string }> };
+    expect(before.events.some((event) => event.event_id === "evt_evicted")).toBe(false);
+
+    // Trigger a mutation so state is persisted again, then assert the
+    // evicted id survived the load/persist round trip.
+    await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Restart", project_id: "proj_demo" })
+    });
+    const persisted = JSON.parse(readFileSync(stateFile, "utf8")) as { processed_event_ids: string[] };
+    expect(persisted.processed_event_ids).toContain("evt_evicted");
+    expect(persisted.processed_event_ids).toContain("evt_recent");
   });
 });
