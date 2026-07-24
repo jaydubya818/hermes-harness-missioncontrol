@@ -34,6 +34,7 @@ describe("orchestrator-api", () => {
     delete process.env.ORPHAN_SWEEP_INTERVAL_MS;
     delete process.env.ALLOWED_REPO_ROOT;
     delete process.env.HARNESS_OPERATOR_TOKEN;
+    delete process.env.SSE_HEARTBEAT_MS;
     process.env.VITEST = "1";
   });
 
@@ -1607,6 +1608,20 @@ describe("orchestrator-api", () => {
     expect(payload.removed_run_ids).toEqual([]);
     expect(payload.skipped_run_ids).toEqual(["run_live"]);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("emits SSE keep-alive comments so idle streams survive proxies", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+    process.env.SSE_HEARTBEAT_MS = "20";
+
+    const app = await loadApp();
+    const response = await app.request("/api/events/stream?last=0");
+    expect(response.status).toBe(200);
+
+    const reader = response.body!.getReader();
+    const { value } = await reader.read();
+    expect(new TextDecoder().decode(value)).toContain(": keep-alive");
+    await reader.cancel();
   });
 
   it("streams recent events over SSE with filters", async () => {

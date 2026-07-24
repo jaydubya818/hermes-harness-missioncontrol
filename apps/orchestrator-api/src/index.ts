@@ -19,6 +19,9 @@ const workerApi = process.env.WORKER_API_URL ?? "http://localhost:4304";
 const workerRunsRoot = resolve(process.env.WORKER_RUNTIME_ROOT ?? resolve(process.cwd(), "../../data/worker-runs"));
 const workerWorktreesRoot = resolve(process.env.WORKTREE_ROOT ?? resolve(process.cwd(), "../../data/worktrees"));
 const orphanSweepIntervalMs = Number(process.env.ORPHAN_SWEEP_INTERVAL_MS ?? "0");
+// SSE comment frames keep idle streams alive through proxies/load balancers
+// that drop quiet connections. Set to 0 to disable.
+const sseHeartbeatMs = Number(process.env.SSE_HEARTBEAT_MS ?? "25000");
 const allowedRepoRoot = resolve(process.env.ALLOWED_REPO_ROOT ?? "/Users/jaywest/projects");
 const operatorToken = process.env.HARNESS_OPERATOR_TOKEN;
 
@@ -1194,10 +1197,12 @@ app.get("/api/events/stream", async (c) => {
   const encoder = new TextEncoder();
   let closed = false;
   let controllerRef: ReadableStreamDefaultController<Uint8Array> | null = null;
+  let heartbeat: NodeJS.Timeout | undefined;
 
   const close = () => {
     if (closed) return;
     closed = true;
+    if (heartbeat) clearInterval(heartbeat);
     eventSubscribers.delete(subscriberId);
     try {
       controllerRef?.close();
@@ -1217,6 +1222,17 @@ app.get("/api/events/stream", async (c) => {
         },
         close,
       });
+      if (Number.isFinite(sseHeartbeatMs) && sseHeartbeatMs > 0) {
+        heartbeat = setInterval(() => {
+          if (closed) return;
+          try {
+            controller.enqueue(encoder.encode(": keep-alive\n\n"));
+          } catch {
+            close();
+          }
+        }, sseHeartbeatMs);
+        heartbeat.unref?.();
+      }
       c.req.raw.signal?.addEventListener("abort", close, { once: true });
     },
     cancel() {
