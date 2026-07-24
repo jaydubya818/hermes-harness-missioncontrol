@@ -24,6 +24,11 @@ const orphanSweepIntervalMs = Number(process.env.ORPHAN_SWEEP_INTERVAL_MS ?? "0"
 const sseHeartbeatMs = Number(process.env.SSE_HEARTBEAT_MS ?? "25000");
 const allowedRepoRoot = resolve(process.env.ALLOWED_REPO_ROOT ?? "/Users/jaywest/projects");
 const operatorToken = process.env.HARNESS_OPERATOR_TOKEN;
+// Sidecar calls run inside lifecycle handlers; without a bound, one
+// unresponsive service hangs the mission forever. Failures are already
+// caught and logged by each caller.
+const SIDECAR_TIMEOUT_MS = 10_000;
+const CLEANUP_TIMEOUT_MS = 60_000;
 
 type Mission = {
   mission_id: `mis_${string}`;
@@ -997,6 +1002,7 @@ async function recordEval(run: WorkflowRun, approvals: typeof state.approvals): 
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify(evalDraft),
+      signal: AbortSignal.timeout(SIDECAR_TIMEOUT_MS),
     });
     if (!response.ok) throw new Error(`eval-api returned status ${response.status}`);
     const payload = await response.json() as { record?: EvalRecord };
@@ -1038,6 +1044,7 @@ async function writebackStep(run: WorkflowRun, stepId: string, outcome: "success
     await fetch(`${memoryApi}/api/memory/tasks/close`, {
       method: "POST",
       headers: authHeaders(),
+      signal: AbortSignal.timeout(SIDECAR_TIMEOUT_MS),
       body: JSON.stringify({
         agent_id: "agent_demo",
         project_id: "proj_demo",
@@ -1060,6 +1067,7 @@ async function publishDiscovery(run: WorkflowRun, stepId: string, title: string,
     await fetch(`${memoryApi}/api/memory/bus/publish`, {
       method: "POST",
       headers: authHeaders(),
+      signal: AbortSignal.timeout(SIDECAR_TIMEOUT_MS),
       body: JSON.stringify({
         channel: "discovery",
         agent_id: "agent_demo",
@@ -1100,6 +1108,7 @@ async function requestWorkerCleanup(runId: `run_${string}` | string, mission?: M
   const response = await fetch(`${workerApi}/api/cleanup-run`, {
     method: "POST",
     headers: authHeaders(),
+    signal: AbortSignal.timeout(CLEANUP_TIMEOUT_MS),
     body: JSON.stringify({ run_id: runId, source_repo: sourceRepo, branch_name: branchName })
   });
   if (!response.ok) throw new Error(`worker cleanup failed with status ${response.status}`);
@@ -1182,6 +1191,9 @@ async function fetchWorkerExecution(request: StepExecutionRequest): Promise<Work
   const response = await fetch(`${workerApi}/api/execute-step`, {
     method: "POST",
     headers: authHeaders(),
+    // The worker enforces the envelope timeout itself; the margin covers
+    // workspace bootstrap and cleanup around the step execution.
+    signal: AbortSignal.timeout((request.envelope.timeout_seconds + 60) * 1000),
     body: JSON.stringify(request)
   });
   const payload = await response.json() as WorkerExecution & { error?: string; error_code?: string };
