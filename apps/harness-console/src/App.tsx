@@ -506,6 +506,7 @@ function Memory() {
 function Code() {
   const { data } = useSWR(`${ORCH}/api/read-models/missions`, fetcher, { refreshInterval: 4000 });
   const [artifactContent, setArtifactContent] = useState("diff --git a/file.ts b/file.ts\n+ bounded autonomy patch");
+  const [artifactError, setArtifactError] = useState<string | null>(null);
   const [missionFilter, setMissionFilter] = useState("");
   const [runFilter, setRunFilter] = useState("");
   const [stepFilter, setStepFilter] = useState("");
@@ -526,11 +527,17 @@ function Code() {
   const { data: artifactsView } = useSWR(artifactsUrl, fetcher, { refreshInterval: 4000 });
 
   async function addArtifact(runId: string, stepId: string) {
-    await authFetch(`${ORCH}/api/runs/${runId}/artifacts`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ step_id: stepId, type: "diff", content: artifactContent })
-    });
+    setArtifactError(null);
+    try {
+      await authJson(`${ORCH}/api/runs/${runId}/artifacts`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ step_id: stepId, type: "diff", content: artifactContent })
+      });
+    } catch (err) {
+      setArtifactError(err instanceof Error ? err.message : String(err));
+      return;
+    }
     mutate(`${ORCH}/api/runs`);
     mutate(`${ORCH}/api/read-models/missions`);
     mutate(artifactsUrl);
@@ -540,6 +547,7 @@ function Code() {
     <div style={{ padding: 16, display: "grid", gap: 16 }}>
       <Panel title="Artifact Composer">
         <textarea value={artifactContent} onChange={(event) => setArtifactContent(event.target.value)} style={{ width: "100%", minHeight: 140, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+        {artifactError && <div style={{ color: "#fca5a5", fontSize: 13, marginTop: 8 }}>Adding artifact failed: {artifactError}. If auth is enabled, save HARNESS_OPERATOR_TOKEN in Settings first.</div>}
       </Panel>
       <Panel title="Artifact Filters">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 8 }}>
