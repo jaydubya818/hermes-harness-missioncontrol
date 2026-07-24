@@ -107,6 +107,10 @@ function toTaskExecutionResult(run: WorkflowRun, stepId: string, execution: Work
 
 const state: OrchestratorState = { missions: [], runs: [], approvals: [], events: [], audit: [], processed_event_ids: [] };
 let initialized = false;
+// O(1) companions to state.processed_event_ids / state.events so hot-path
+// event recording does not scan arrays (2000-entry includes() per event).
+const processedEventIdSet = new Set<string>();
+let maxEventSequence = 0;
 
 function normalizeApproval(approval: Approval): Approval {
   return {
@@ -268,7 +272,7 @@ function normalizeEventType(type: unknown): HarnessEvent["type"] {
 }
 
 function nextEventSequence() {
-  return state.events.reduce((max, event: any) => Math.max(max, Number(event.sequence ?? 0)), 0) + 1;
+  return maxEventSequence + 1;
 }
 
 function normalizeEventRecord(event: HarnessEvent | Record<string, unknown>) {
@@ -382,6 +386,8 @@ async function ensureLoaded() {
   state.events.splice(0, state.events.length);
   state.audit.splice(0, state.audit.length);
   state.processed_event_ids.splice(0, state.processed_event_ids.length);
+  processedEventIdSet.clear();
+  maxEventSequence = 0;
 
   const normalizedEvents = (loaded.events ?? [])
     .map((event) => normalizeEventRecord(event))
@@ -392,6 +398,7 @@ async function ensureLoaded() {
 
   if (!state.processed_event_ids.length && Array.isArray(loaded.processed_event_ids)) {
     state.processed_event_ids.splice(0, state.processed_event_ids.length, ...loaded.processed_event_ids);
+    for (const eventId of loaded.processed_event_ids) processedEventIdSet.add(eventId);
   }
 
   for (const mission of state.missions) {
@@ -476,11 +483,15 @@ function getReplayEvents(filters: EventStreamFilters, last: number) {
 
 function recordEvent(event: HarnessEvent | Record<string, unknown>) {
   const normalized = normalizeEventRecord(event) as any;
-  if (normalized.event_id && state.processed_event_ids.includes(normalized.event_id)) return false;
+  if (normalized.event_id && processedEventIdSet.has(normalized.event_id)) return false;
   if (normalized.event_id) {
     state.processed_event_ids.unshift(normalized.event_id);
-    if (state.processed_event_ids.length > 2000) state.processed_event_ids.length = 2000;
+    processedEventIdSet.add(normalized.event_id);
+    if (state.processed_event_ids.length > 2000) {
+      for (const dropped of state.processed_event_ids.splice(2000)) processedEventIdSet.delete(dropped);
+    }
   }
+  maxEventSequence = Math.max(maxEventSequence, Number(normalized.sequence) || 0);
   state.events.unshift(normalized as any);
   state.audit.unshift({ ...normalized, audit_id: makeId("audit") });
   if (state.events.length > 500) state.events.length = 500;
