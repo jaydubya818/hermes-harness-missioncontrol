@@ -738,6 +738,10 @@ export function App() {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
+      // Number keys are tab shortcuts only when the user is not typing into
+      // a form field (mission titles, filters, the operator token, ...).
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) return;
       const num = Number(event.key);
       if (!Number.isNaN(num) && num >= 1 && num <= tabs.length) setActive(tabs[num - 1]);
     };
