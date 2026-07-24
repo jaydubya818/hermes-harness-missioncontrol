@@ -190,7 +190,8 @@ Operator/read models:
 ## Environment
 
 Most important env vars:
-- `HARNESS_OPERATOR_TOKEN` — bearer token for mutating APIs and memory-api reads; also used by console auth fallback flow
+- `HARNESS_OPERATOR_TOKEN` — bearer token guarding all mutating APIs and all read endpoints (orchestrator, eval, memory) except `/health`; the SSE event stream also accepts it as a `token` query parameter since `EventSource` cannot send headers; also used by console auth fallback flow
+- `SSE_HEARTBEAT_MS` — keep-alive comment cadence on `GET /api/events/stream` (default 25000, 0 disables)
 - `VITE_OPERATOR_TOKEN` — console-side default token for local dev
 - `HARNESS_VAULT_ROOT` — memory-api vault root; default `vault/agentic-kb`
 - `ORCHESTRATOR_STATE_FILE` — orchestrator persistence file
