@@ -67,6 +67,30 @@ describe("worker-runtime", () => {
     expect(payload.step_events?.[payload.step_events.length - 1]).toMatchObject({ type: "step.completed" });
   });
 
+  it("returns 400 instead of 500 for malformed JSON bodies", async () => {
+    const execute = await app.request("/api/execute-step", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{not json"
+    });
+    expect(execute.status).toBe(400);
+    expect(await execute.json()).toEqual({ error: "invalid JSON body" });
+
+    const cleanup = await app.request("/api/cleanup-run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{not json"
+    });
+    expect(cleanup.status).toBe(400);
+
+    const missingRunId = await app.request("/api/cleanup-run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ source_repo: "/tmp/somewhere" })
+    });
+    expect(missingRunId.status).toBe(400);
+  });
+
   it("rejects invalid execution envelopes", async () => {
     const response = await app.request("/api/execute-step", {
       method: "POST",

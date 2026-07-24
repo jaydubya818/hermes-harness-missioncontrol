@@ -454,6 +454,15 @@ function requireOperator(c: any) {
   return null;
 }
 
+async function parseJsonBody<T>(c: any): Promise<T | null> {
+  try {
+    const body = await c.req.json();
+    return body && typeof body === "object" ? (body as T) : null;
+  } catch {
+    return null;
+  }
+}
+
 function cacheKeyForRepo(repoPath: string) {
   return Buffer.from(repoPath).toString("base64url");
 }
@@ -880,7 +889,8 @@ app.get("/health", (c) => c.json({ ok: true, service: "worker-runtime", allowed_
 app.post("/api/execute-step", async (c) => {
   const authError = requireOperator(c);
   if (authError) return authError;
-  const body = await c.req.json<StepRequest>();
+  const body = await parseJsonBody<StepRequest>(c);
+  if (!body) return c.json({ error: "invalid JSON body" }, 400);
   try {
     const envelope = validateEnvelope(body);
     const workspace = await ensureWorkspace(body, envelope);
@@ -926,7 +936,8 @@ app.post("/api/execute-step", async (c) => {
 app.post("/api/cleanup-run", async (c) => {
   const authError = requireOperator(c);
   if (authError) return authError;
-  const body = await c.req.json<{ run_id: string; source_repo?: string; branch_name?: string }>();
+  const body = await parseJsonBody<{ run_id: string; source_repo?: string; branch_name?: string }>(c);
+  if (!body || typeof body.run_id !== "string") return c.json({ error: "invalid JSON body: run_id required" }, 400);
   try {
     const result = await cleanupRun(body.run_id, body.source_repo, body.branch_name);
     return c.json(result);
