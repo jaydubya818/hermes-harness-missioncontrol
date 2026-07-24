@@ -139,5 +139,14 @@ describe("eval-api", () => {
       body: JSON.stringify(record)
     });
     expect(right.status).toBe(201);
+
+    const readDenied = await app.request("/api/evals");
+    expect(readDenied.status).toBe(401);
+    const detailDenied = await app.request("/api/evals/eval_missing");
+    expect(detailDenied.status).toBe(401);
+    const readAllowed = await app.request("/api/evals", { headers: { authorization: "Bearer secret-token" } });
+    expect(readAllowed.status).toBe(200);
+    const health = await app.request("/health");
+    expect(health.status).toBe(200);
   });
 });

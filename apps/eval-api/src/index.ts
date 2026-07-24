@@ -70,6 +70,8 @@ app.get("/health", async (c) => {
 });
 
 app.get("/api/evals", async (c) => {
+  const authError = requireOperator(c);
+  if (authError) return authError;
   await ensureLoaded();
   const query = c.req.query();
   const filtered = filterRecords(query);
@@ -89,6 +91,8 @@ app.get("/api/evals", async (c) => {
 });
 
 app.get("/api/evals/:id", async (c) => {
+  const authError = requireOperator(c);
+  if (authError) return authError;
   await ensureLoaded();
   const record = records.find((item) => item.eval_id === c.req.param("id"));
   if (!record) return c.json({ error: "eval not found" }, 404);
