@@ -351,6 +351,15 @@ function requireOperator(c: any) {
   return null;
 }
 
+async function parseJsonBody<T>(c: any): Promise<T | null> {
+  try {
+    const body = await c.req.json();
+    return body && typeof body === "object" ? (body as T) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function ensureLoaded() {
   if (initialized) return;
   const loaded = await loadJsonFile<OrchestratorState>(stateFile, state);
@@ -1227,7 +1236,8 @@ app.post("/api/missions", async (c) => {
   const authError = requireOperator(c);
   if (authError) return authError;
   await ensureLoaded();
-  const body = await c.req.json<{ title: string; objective?: string; project_id: `proj_${string}`; workflow_id?: string; repo_path?: string; policy_ref?: string; profile_ref?: string; workspace_root?: string }>();
+  const body = await parseJsonBody<{ title: string; objective?: string; project_id: `proj_${string}`; workflow_id?: string; repo_path?: string; policy_ref?: string; profile_ref?: string; workspace_root?: string }>(c);
+  if (!body) return c.json({ error: "invalid JSON body" }, 400);
   if (typeof body.title !== "string" || !body.title.trim()) return c.json({ error: "title required" }, 400);
   if (typeof body.project_id !== "string" || !body.project_id.startsWith("proj_")) return c.json({ error: "project_id must start with proj_" }, 400);
   const now = new Date().toISOString();
@@ -1468,7 +1478,8 @@ app.post("/api/runs/:id/artifacts", async (c) => {
   await ensureLoaded();
   const run = state.runs.find((item) => item.run_id === c.req.param("id"));
   if (!run) return c.json({ error: "run not found" }, 404);
-  const body = await c.req.json<{ step_id: string; type: string; artifact_id?: string; content?: string; uri?: string; metadata?: Record<string, unknown> }>();
+  const body = await parseJsonBody<{ step_id: string; type: string; artifact_id?: string; content?: string; uri?: string; metadata?: Record<string, unknown> }>(c);
+  if (!body) return c.json({ error: "invalid JSON body" }, 400);
   const step = run.steps.find((item) => item.step_id === body.step_id);
   if (!step) return c.json({ error: "step not found" }, 404);
   if (typeof body.type !== "string" || !body.type.trim()) return c.json({ error: "type required" }, 400);
@@ -1534,7 +1545,8 @@ app.post("/api/approvals/:id/respond", async (c) => {
   const approval = state.approvals.find((item) => item.approval_id === c.req.param("id"));
   if (!approval) return c.json({ error: "approval not found" }, 404);
   if (approval.status !== "pending") return c.json({ error: "approval already resolved" }, 409);
-  const body = await c.req.json<{ decision: "approved" | "rejected"; actor?: string }>();
+  const body = await parseJsonBody<{ decision: "approved" | "rejected"; actor?: string }>(c);
+  if (!body) return c.json({ error: "invalid JSON body" }, 400);
   if (body.decision !== "approved" && body.decision !== "rejected") {
     return c.json({ error: "decision must be \"approved\" or \"rejected\"" }, 400);
   }

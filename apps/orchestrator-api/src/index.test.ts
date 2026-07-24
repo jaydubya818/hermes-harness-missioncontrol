@@ -101,6 +101,30 @@ describe("orchestrator-api", () => {
     expect(missionsPayload.missions).toHaveLength(0);
   });
 
+  it("returns 400 instead of 500 for malformed JSON bodies", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const app = await loadApp();
+    for (const path of ["/api/missions", "/api/runs/run_x/artifacts", "/api/approvals/approval_x/respond"]) {
+      const response = await app.request(path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{not json"
+      });
+      expect([400, 404]).toContain(response.status);
+      expect(response.status).not.toBe(500);
+    }
+
+    const malformedMission = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{not json"
+    });
+    expect(malformedMission.status).toBe(400);
+    const payload = await malformedMission.json() as { error: string };
+    expect(payload.error).toBe("invalid JSON body");
+  });
+
   it("returns a TaskExecutionResult-shaped execution_result payload", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes("/api/execute-step")) {
