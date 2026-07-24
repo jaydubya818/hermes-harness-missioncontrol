@@ -151,8 +151,14 @@ Authoritative read models
 
 Replay / idempotency
 - processed event IDs persisted in orchestrator state
-- duplicate event replay ignored
+- duplicate event replay ignored, including after restart for events already evicted from the retained event window
+- unrecognized persisted events are skipped (with a warning) on load instead of turning every request into a 500
+- eval submissions carrying an `eval_id` are deduplicated by eval-api
 - retry clears prior blockers and execution IDs safely
+
+Sidecar call bounds
+- orchestrator calls to eval-api and memory-api abort after 10s; worker cleanup after 60s
+- worker step execution is bounded by the envelope timeout plus a 60s bootstrap/cleanup margin (the worker still enforces the envelope timeout itself)
 
 Cleanup
 - terminal runs trigger worker cleanup
