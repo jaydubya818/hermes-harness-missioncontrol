@@ -501,9 +501,14 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
-async function runCmd(cmd: string, args: string[], cwd: string): Promise<CommandResult> {
+// Bound every spawned command so a hung child process cannot outlive its
+// request forever (the envelope timeout only rejects the HTTP response; it
+// does not kill the child).
+const DEFAULT_CMD_TIMEOUT_MS = 10 * 60 * 1000;
+
+async function runCmd(cmd: string, args: string[], cwd: string, timeoutMs = DEFAULT_CMD_TIMEOUT_MS): Promise<CommandResult> {
   try {
-    const { stdout, stderr } = await execFileAsync(cmd, args, { cwd, maxBuffer: 1024 * 1024 * 25 });
+    const { stdout, stderr } = await execFileAsync(cmd, args, { cwd, maxBuffer: 1024 * 1024 * 25, timeout: timeoutMs, killSignal: "SIGKILL" });
     return { stdout, stderr, exitCode: 0 };
   } catch (error: any) {
     return {
@@ -756,7 +761,7 @@ async function runTests(workspace: WorkspaceContext) {
   if (!detected) {
     report = "No known test runner detected.";
   } else {
-    const result = await runCmd(detected.cmd, detected.args, workspace.repoWorkspace);
+    const result = await runCmd(detected.cmd, detected.args, workspace.repoWorkspace, workspace.envelope.timeout_seconds * 1000);
     report = [`Command: ${detected.label}`, "", result.stdout, result.stderr].filter(Boolean).join("\n").trim();
     success = result.exitCode === 0;
     exitCode = result.exitCode;
@@ -902,15 +907,24 @@ app.post("/api/execute-step", async (c) => {
       if (body.kind === "review") return review(workspace);
       return deploy(workspace);
     };
-    result = await Promise.race([
-      execute(),
-      new Promise<StepResult>((_, reject) => setTimeout(() => reject(new WorkerExecutionError(`step execution timed out after ${envelope.timeout_seconds}s`, {
-        statusCode: 408,
-        eventType: "execution.timeout",
-        payload: { timeout_seconds: envelope.timeout_seconds },
-        started: true,
-      })), envelope.timeout_seconds * 1000))
-    ]);
+    let timeoutTimer: NodeJS.Timeout | undefined;
+    try {
+      result = await Promise.race([
+        execute(),
+        new Promise<StepResult>((_, reject) => {
+          timeoutTimer = setTimeout(() => reject(new WorkerExecutionError(`step execution timed out after ${envelope.timeout_seconds}s`, {
+            statusCode: 408,
+            eventType: "execution.timeout",
+            payload: { timeout_seconds: envelope.timeout_seconds },
+            started: true,
+          })), envelope.timeout_seconds * 1000);
+        })
+      ]);
+    } finally {
+      // Without this, every request leaks a live timer for the full envelope
+      // timeout (up to 15 minutes) even after the step finishes.
+      clearTimeout(timeoutTimer);
+    }
     enforceBudget(body, result);
     const step_events = buildStepEvents(body, result);
     return c.json({ run_id: body.run_id, mission_id: body.mission_id, execution_id: body.execution_id, step_id: body.step_id, ...workspace, ...result, step_events });
