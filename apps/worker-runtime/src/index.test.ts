@@ -144,6 +144,15 @@ describe("worker-runtime", () => {
     await expect(detectTestCommand(repo)).resolves.toEqual({ cmd: "pnpm", args: ["test"], label: "pnpm test", framework: "node-pnpm" });
   });
 
+  it("runs the package.json test script via bun run for bun repos", async () => {
+    const repo = join(sandboxRoot, "repo-bun");
+    await mkdir(repo, { recursive: true });
+    await writeFile(join(repo, "package.json"), JSON.stringify({ scripts: { test: "vitest run" } }), "utf8");
+    await writeFile(join(repo, "bun.lock"), "{}\n", "utf8");
+
+    await expect(detectTestCommand(repo)).resolves.toEqual({ cmd: "bun", args: ["run", "test"], label: "bun run test", framework: "node-bun" });
+  });
+
   it("refuses write-capable steps for non-git repos", async () => {
     const repo = join(sandboxRoot, "repo-b");
     await mkdir(repo, { recursive: true });

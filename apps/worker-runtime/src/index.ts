@@ -666,7 +666,9 @@ async function detectTestCommand(repoWorkspace: string): Promise<TestCommand | n
         const packageManager = await detectPackageManager(repoWorkspace);
         if (packageManager === "pnpm") return { cmd: "pnpm", args: ["test"], label: "pnpm test", framework: "node-pnpm" };
         if (packageManager === "yarn") return { cmd: "yarn", args: ["test"], label: "yarn test", framework: "node-yarn" };
-        if (packageManager === "bun") return { cmd: "bun", args: ["test"], label: "bun test", framework: "node-bun" };
+        // `bun test` invokes Bun's built-in runner and ignores the package.json
+        // script this branch just detected; `bun run test` executes the script.
+        if (packageManager === "bun") return { cmd: "bun", args: ["run", "test"], label: "bun run test", framework: "node-bun" };
         return { cmd: "npm", args: ["test"], label: "npm test", framework: "node-npm" };
       }
     } catch {
