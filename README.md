@@ -153,8 +153,10 @@ Replay / idempotency
 - processed event IDs persisted in orchestrator state
 - duplicate event replay ignored, including after restart for events already evicted from the retained event window
 - unrecognized persisted events are skipped (with a warning) on load instead of turning every request into a 500
-- eval submissions carrying an `eval_id` are deduplicated by eval-api
+- eval submissions carrying an `eval_id` are deduplicated by eval-api; malformed scoring fields are rejected with a 400
 - retry clears prior blockers and execution IDs safely
+- concurrent `execute-current` dispatches for the same run are rejected with a 409 while one is in flight
+- `GET /api/events/stream` resumes from `Last-Event-ID` (header or `last_event_id` query param) on reconnect, falling back to `last`-count replay when the id has been evicted
 
 Sidecar call bounds
 - orchestrator calls to eval-api and memory-api abort after 10s; worker cleanup after 60s
