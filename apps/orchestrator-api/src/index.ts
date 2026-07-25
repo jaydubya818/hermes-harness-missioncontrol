@@ -514,6 +514,20 @@ function getReplayEvents(filters: EventStreamFilters, last: number) {
     .reverse();
 }
 
+// Standard EventSource reconnects resend the last received `id:` via the
+// Last-Event-ID header. Replaying everything after that id (instead of a
+// fixed count) lets reconnecting consoles resume without dropping or
+// duplicating events. Returns null when the id has already been evicted
+// from the retained window, so callers can fall back to count-based replay.
+function getReplayEventsSince(filters: EventStreamFilters, lastEventId: string) {
+  const index = state.events.findIndex((event) => event.event_id === lastEventId);
+  if (index === -1) return null;
+  return state.events
+    .slice(0, index)
+    .filter((event) => eventMatchesFilters(event, filters))
+    .reverse();
+}
+
 function recordEvent(event: HarnessEvent | Record<string, unknown>) {
   const normalized = normalizeEventRecord(event) as any;
   if (normalized.event_id && processedEventIdSet.has(normalized.event_id)) return false;
@@ -1232,7 +1246,9 @@ app.get("/api/events/stream", async (c) => {
   if (authError) return authError;
   await ensureLoaded();
   const filters = normalizeSseFilters(c.req.query());
-  const replay = getReplayEvents(filters, parseLastEventCount(c.req.query("last")));
+  const lastEventId = c.req.header("last-event-id") ?? c.req.query("last_event_id");
+  const replay = (lastEventId ? getReplayEventsSince(filters, lastEventId) : null)
+    ?? getReplayEvents(filters, parseLastEventCount(c.req.query("last")));
   const subscriberId = makeId("sub");
   const encoder = new TextEncoder();
   let closed = false;

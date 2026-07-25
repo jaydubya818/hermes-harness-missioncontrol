@@ -1771,4 +1771,68 @@ describe("orchestrator-api", () => {
     const workerCalls = fetchMock.mock.calls.filter((call) => String(call[0]).includes("/api/execute-step"));
     expect(workerCalls).toHaveLength(1);
   });
+
+  it("resumes the SSE stream after the Last-Event-ID on reconnect", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-stream-resume-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [],
+      runs: [],
+      approvals: [],
+      events: [
+        { event_id: "evt_1", type: "mission.created", ts: "2026-04-11T00:00:00.000Z", mission_id: "mis_demo", payload: {} },
+        { event_id: "evt_2", type: "mission.updated", ts: "2026-04-11T00:01:00.000Z", mission_id: "mis_demo", payload: {} },
+        { event_id: "evt_3", type: "mission.running", ts: "2026-04-11T00:02:00.000Z", mission_id: "mis_demo", payload: {} }
+      ],
+      audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    // `last=1` would replay a single event; Last-Event-ID must win and
+    // replay everything recorded after evt_1 instead.
+    const response = await app.request("/api/events/stream?last=1", { headers: { "last-event-id": "evt_1" } });
+    expect(response.status).toBe(200);
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let chunk = decoder.decode((await reader.read()).value);
+    if (!chunk.includes("evt_3")) {
+      chunk += decoder.decode((await reader.read()).value);
+    }
+    await reader.cancel();
+
+    expect(chunk).toContain('"event_id":"evt_2"');
+    expect(chunk).toContain('"event_id":"evt_3"');
+    expect(chunk).not.toContain('"event_id":"evt_1"');
+  });
+
+  it("falls back to count-based replay when the Last-Event-ID is unknown", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-stream-resume-unknown-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [],
+      runs: [],
+      approvals: [],
+      events: [
+        { event_id: "evt_1", type: "mission.created", ts: "2026-04-11T00:00:00.000Z", mission_id: "mis_demo", payload: {} },
+        { event_id: "evt_2", type: "mission.updated", ts: "2026-04-11T00:01:00.000Z", mission_id: "mis_demo", payload: {} }
+      ],
+      audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const response = await app.request("/api/events/stream?last=1", { headers: { "last-event-id": "evt_evicted" } });
+    expect(response.status).toBe(200);
+
+    const reader = response.body!.getReader();
+    const chunk = new TextDecoder().decode((await reader.read()).value);
+    await reader.cancel();
+
+    expect(chunk).toContain('"event_id":"evt_2"');
+    expect(chunk).not.toContain('"event_id":"evt_1"');
+  });
 });
