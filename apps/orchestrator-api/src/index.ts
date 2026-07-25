@@ -465,6 +465,11 @@ type EventSubscriber = {
 
 const eventSubscribers = new Map<string, EventSubscriber>();
 
+// Runs whose current step dispatch is currently in flight. A second
+// concurrent execute-current for the same run would double-dispatch the
+// worker and advance the workflow twice off a single real execution.
+const inFlightDispatches = new Set<string>();
+
 function normalizeSseFilters(query: Record<string, string | undefined>): EventStreamFilters {
   return {
     mission_id: query.mission_id,
@@ -1380,6 +1385,9 @@ app.post("/api/runs/:id/execute-current", async (c) => {
   if (run.status === "awaiting_approval") return c.json({ error: "run awaiting approval" }, 409);
   if (run.status === "paused") return c.json({ error: "run paused" }, 409);
   if (["cancelled", "completed", "failed"].includes(run.status)) return c.json({ error: "run not executable" }, 409);
+  if (inFlightDispatches.has(run.run_id)) return c.json({ error: "step dispatch already in progress for this run" }, 409);
+  inFlightDispatches.add(run.run_id);
+  try {
   const step = getCurrentStep(run);
   if (!step) return c.json({ error: "no current step" }, 400);
 
@@ -1472,6 +1480,9 @@ app.post("/api/runs/:id/execute-current", async (c) => {
   }
   await persist();
   return c.json({ run, policy, execution, execution_result: executionResult });
+  } finally {
+    inFlightDispatches.delete(run.run_id);
+  }
 });
 
 app.post("/api/runs/:id/interrupt-step", async (c) => {

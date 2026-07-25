@@ -1740,4 +1740,35 @@ describe("orchestrator-api", () => {
     expect(payload.events[0]).toMatchObject({ event_id: "evt_good", type: "mission.created" });
     expect(warn).toHaveBeenCalled();
   });
+
+  it("rejects a second execute-current dispatch while one is already in flight", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/execute-step")) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        return jsonResponse({ body: { success: true, summary: "planned", confidence: 0.95, artifacts: [{ type: "plan", uri: "file:///tmp/plan.md" }] } });
+      }
+      return jsonResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await loadApp();
+    const createMission = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Concurrent dispatch", project_id: "proj_demo", workflow_id: "bugfix" })
+    });
+    const mission = await createMission.json() as { mission_id: string };
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const run = await startRun.json() as { run_id: string };
+
+    const [first, second] = await Promise.all([
+      app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" }),
+      app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" })
+    ]);
+
+    expect([first.status, second.status].sort((a, b) => a - b)).toEqual([200, 409]);
+    const workerCalls = fetchMock.mock.calls.filter((call) => String(call[0]).includes("/api/execute-step"));
+    expect(workerCalls).toHaveLength(1);
+  });
 });
