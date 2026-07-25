@@ -1,5 +1,9 @@
 import type {
   ApprovalMode,
+  ConnectorOperation,
+  ExternalWorkItemHierarchy,
+  ExternalWorkItemSystem,
+  FactoryLoopType,
   FinalOutcome,
   LearningOutputType,
   LearningTrigger,
@@ -116,6 +120,77 @@ export interface SourceOfTruth {
   metadata?: Record<string, unknown>;
 }
 
+export interface ExternalWorkItem {
+  system: ExternalWorkItemSystem;
+  external_id: string;
+  external_key: string;
+  url?: string;
+  hierarchy: ExternalWorkItemHierarchy;
+  parent_external_key?: string;
+  title: string;
+  description?: string;
+  status: string;
+  assignee?: string;
+  team?: string;
+  priority?: string;
+  acceptance_criteria?: AcceptanceCriterion[];
+  labels?: string[];
+  components?: string[];
+  sprint?: string;
+  updated_at: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface FactoryMissionBinding {
+  binding_id: string;
+  mission_id: string;
+  run_id?: string;
+  work_items: ExternalWorkItem[];
+  context_packet_uri?: string;
+  receipt_packet_uri?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface FactoryThroughputMetric {
+  metric_id: string;
+  generated_at: string;
+  window_start: string;
+  window_end: string;
+  team?: string;
+  assignee?: string;
+  agent_id?: string;
+  stories_closed: number;
+  tasks_closed: number;
+  active_runs: number;
+  blocked_runs: number;
+  approval_wait_count: number;
+  verifier_failure_count: number;
+  average_cycle_time_ms?: number;
+  estimated_cost_usd?: number;
+}
+
+export interface ConnectorCapabilityScope {
+  connector: ExternalWorkItemSystem | string;
+  scopes: string[];
+  secret_ref?: string;
+  allowed_operations: ConnectorOperation[];
+  risk_level: RiskLevel;
+  expires_at?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface LoopPolicy {
+  loop_type: FactoryLoopType;
+  evaluator: VerificationMethod;
+  max_attempts: number;
+  max_runtime_seconds: number;
+  max_cost_usd?: number;
+  human_approval_required_after_attempts?: number;
+  stop_on_verifier_failure?: boolean;
+  metadata?: Record<string, unknown>;
+}
+
 export interface RiskClassification {
   level: RiskLevel;
   domains: RiskDomain[];
@@ -189,6 +264,8 @@ export interface ExecutionEnvelope {
   environment_classification: "sandbox" | "staging" | "production" | "local";
   work_order?: WorkOrder;
   source_of_truths?: SourceOfTruth[];
+  connector_scopes?: ConnectorCapabilityScope[];
+  loop_policy?: LoopPolicy;
 }
 
 export interface StepExecutionRequest {
@@ -199,6 +276,9 @@ export interface StepExecutionRequest {
   kind: StepKind;
   repo_path?: string;
   branch_name?: string;
+  preferred_model?: string;
+  /** @deprecated Use connector_scopes/secret_ref-backed provider resolution instead of raw request keys. */
+  api_key?: string;
   envelope: ExecutionEnvelope;
 }
 

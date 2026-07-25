@@ -8,7 +8,7 @@ import { evaluateStepPolicy } from "@hermes-harness-with-missioncontrol/policy-e
 import { loadJsonFile, saveJsonFile } from "@hermes-harness-with-missioncontrol/state-store";
 import { makeId, type HarnessEvent } from "@hermes-harness-with-missioncontrol/shared-types";
 import { scoreRun, type EvalRecord } from "@hermes-harness-with-missioncontrol/eval-core";
-import { FinalOutcome, StepKind, type ApprovalRequest, type ApprovalResult, type ArtifactRef, type ExecutionEnvelope, type StepExecutionRequest, type TaskExecutionResult } from "@hermes-harness-with-missioncontrol/contracts";
+import { FinalOutcome, StepKind, type ApprovalRequest, type ApprovalResult, type ArtifactRef, type ConnectorCapabilityScope, type ExecutionEnvelope, type ExternalWorkItem, type FactoryMissionBinding, type FactoryThroughputMetric, type LoopPolicy, type StepExecutionRequest, type TaskExecutionResult } from "@hermes-harness-with-missioncontrol/contracts";
 
 const app = new Hono();
 const stateFile = process.env.ORCHESTRATOR_STATE_FILE ?? resolve(process.cwd(), "../../data/orchestrator-state.json");
@@ -491,6 +491,177 @@ function buildOverviewReadModel() {
       pending_approvals: state.approvals.filter((approval) => approval.status === "pending").length,
       failed_missions: state.missions.filter((mission) => mission.status === "failed").length
     }
+  };
+}
+
+const factoryFixtureWorkItems: ExternalWorkItem[] = [
+  {
+    system: "jira",
+    external_id: "10001",
+    external_key: "WAID-42",
+    url: "https://jira.example.com/browse/WAID-42",
+    hierarchy: "story",
+    parent_external_key: "WAID-7",
+    title: "Create scoped retrieval eval dashboard",
+    description: "Expose retrieval quality movement with evidence-backed receipts.",
+    status: "In Progress",
+    assignee: "missioncontrol-agent",
+    team: "WAID",
+    priority: "High",
+    acceptance_criteria: [{ id: "AC-1", statement: "Operator can inspect eval movement and linked evidence for a sprint.", verification_method: "artifact_inspection", evidence_required: true }],
+    labels: ["factory", "retrieval", "hopper"],
+    components: ["Hopper"],
+    sprint: "Sprint 24",
+    updated_at: "2026-07-12T15:00:00Z",
+  },
+  {
+    system: "jira",
+    external_id: "10002",
+    external_key: "WAID-43",
+    url: "https://jira.example.com/browse/WAID-43",
+    hierarchy: "task",
+    parent_external_key: "WAID-42",
+    title: "Generate context packet from Jira issue and repo scope",
+    description: "Create the bounded input packet workers need before execution starts.",
+    status: "Done",
+    assignee: "hermes-worker-01",
+    team: "WAID",
+    priority: "High",
+    acceptance_criteria: [{ id: "AC-1", statement: "Context packet includes issue, repo scope, checks, risk, and source-of-truth refs.", verification_method: "independent_review", evidence_required: true }],
+    labels: ["factory", "context-packet"],
+    components: ["MissionControl"],
+    sprint: "Sprint 24",
+    updated_at: "2026-07-12T14:20:00Z",
+  },
+  {
+    system: "jira",
+    external_id: "10003",
+    external_key: "WAID-44",
+    url: "https://jira.example.com/browse/WAID-44",
+    hierarchy: "task",
+    parent_external_key: "WAID-42",
+    title: "Approval-gated Jira writeback dry run",
+    description: "Prepare writeback plan artifacts without mutating Jira.",
+    status: "Blocked",
+    assignee: "missioncontrol-agent",
+    team: "WAID",
+    priority: "Medium",
+    acceptance_criteria: [{ id: "AC-1", statement: "Dry run displays exact Jira transition/comment payload and requires approval for execution.", verification_method: "manual_review", evidence_required: true }],
+    labels: ["factory", "jira", "writeback"],
+    components: ["ConnectorGateway"],
+    sprint: "Sprint 24",
+    updated_at: "2026-07-12T13:45:00Z",
+  }
+];
+
+const factoryFixtureConnectorScopes: ConnectorCapabilityScope[] = [
+  {
+    connector: "jira",
+    scopes: ["board:read", "issue:read", "comment:write"],
+    secret_ref: "secret://connectors/jira/workday-prod",
+    allowed_operations: ["read", "comment"],
+    risk_level: "medium",
+  }
+];
+
+const factoryFixtureLoopPolicy: LoopPolicy = {
+  loop_type: "goal_based",
+  evaluator: "independent_review",
+  max_attempts: 3,
+  max_runtime_seconds: 3600,
+  max_cost_usd: 15,
+  human_approval_required_after_attempts: 2,
+  stop_on_verifier_failure: true,
+};
+
+const factoryFixtureBindings: FactoryMissionBinding[] = [
+  {
+    binding_id: "fbind_waid_42",
+    mission_id: "mis_factory_fixture_waid_42",
+    run_id: "run_factory_fixture_waid_42",
+    work_items: factoryFixtureWorkItems,
+    context_packet_uri: "artifact://run_factory_fixture_waid_42/context-packet.json",
+    receipt_packet_uri: "artifact://run_factory_fixture_waid_42/receipt-packet.json",
+    created_at: "2026-07-12T15:05:00Z",
+  }
+];
+
+const factoryFixtureThroughput: FactoryThroughputMetric[] = [
+  {
+    metric_id: "fmetric_today_waid",
+    generated_at: "2026-07-12T16:00:00Z",
+    window_start: "2026-07-12T00:00:00Z",
+    window_end: "2026-07-12T16:00:00Z",
+    team: "WAID",
+    assignee: "missioncontrol-agent",
+    agent_id: "agent_factory_01",
+    stories_closed: 1,
+    tasks_closed: 7,
+    active_runs: 6,
+    blocked_runs: 1,
+    approval_wait_count: 2,
+    verifier_failure_count: 1,
+    average_cycle_time_ms: 42 * 60 * 1000,
+    estimated_cost_usd: 8.25,
+  }
+];
+
+function buildFactoryOverviewReadModel() {
+  const activeRuns = state.runs.filter((run) => !["completed", "failed", "cancelled"].includes(run.status)).length;
+  const blockedRuns = state.runs.filter((run) => run.status === "failed" || run.steps.some((step) => step.state === "blocked" || step.state === "failed")).length;
+  const pendingApprovals = state.approvals.filter((approval) => approval.status === "pending").length;
+  const latestMetric = factoryFixtureThroughput[0];
+  return {
+    mode: "fixture",
+    connector_status: {
+      jira: "fixture_only",
+      writeback: "disabled",
+      credentials: "not_required",
+    },
+    metrics: {
+      stories_closed_today: latestMetric.stories_closed,
+      tasks_closed_today: latestMetric.tasks_closed,
+      active_agent_runs: activeRuns || latestMetric.active_runs,
+      blocked_or_failed_runs: blockedRuns || latestMetric.blocked_runs,
+      pending_approvals: pendingApprovals || latestMetric.approval_wait_count,
+      verifier_failures: latestMetric.verifier_failure_count,
+      average_cycle_time_ms: latestMetric.average_cycle_time_ms,
+      estimated_cost_usd: latestMetric.estimated_cost_usd,
+    },
+    connector_scopes: factoryFixtureConnectorScopes,
+    loop_policy: factoryFixtureLoopPolicy,
+    bindings: factoryFixtureBindings,
+  };
+}
+
+function buildFactoryWorkItemsReadModel(query: Record<string, string | undefined> = {}) {
+  const filtered = factoryFixtureWorkItems.filter((item) =>
+    (!query.team || item.team === query.team)
+    && (!query.assignee || item.assignee === query.assignee)
+    && (!query.status || item.status.toLowerCase() === query.status.toLowerCase())
+    && (!query.hierarchy || item.hierarchy === query.hierarchy)
+    && (!query.search || `${item.external_key} ${item.title} ${item.description ?? ""}`.toLowerCase().includes(query.search.toLowerCase()))
+  ).sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  const page = paginateItems(filtered, query);
+  return {
+    mode: "fixture",
+    work_items: page.items,
+    pagination: page.pagination,
+    bindings: factoryFixtureBindings,
+  };
+}
+
+function buildFactoryThroughputReadModel(query: Record<string, string | undefined> = {}) {
+  const filtered = factoryFixtureThroughput.filter((metric) =>
+    (!query.team || metric.team === query.team)
+    && (!query.assignee || metric.assignee === query.assignee)
+    && (!query.agent_id || metric.agent_id === query.agent_id)
+  ).sort((a, b) => b.generated_at.localeCompare(a.generated_at));
+  const page = paginateItems(filtered, query);
+  return {
+    mode: "fixture",
+    throughput: page.items,
+    pagination: page.pagination,
   };
 }
 
@@ -1306,6 +1477,9 @@ app.get("/api/events/stream", async (c) => {
 });
 app.get("/api/audit", async (c) => { await ensureLoaded(); return c.json({ audit: state.audit }); });
 app.get("/api/read-models/overview", async (c) => { await ensureLoaded(); return c.json(buildOverviewReadModel()); });
+app.get("/api/read-models/factory/overview", async (c) => { await ensureLoaded(); return c.json(buildFactoryOverviewReadModel()); });
+app.get("/api/read-models/factory/work-items", async (c) => { await ensureLoaded(); return c.json(buildFactoryWorkItemsReadModel(c.req.query())); });
+app.get("/api/read-models/factory/throughput", async (c) => { await ensureLoaded(); return c.json(buildFactoryThroughputReadModel(c.req.query())); });
 app.get("/api/read-models/missions", async (c) => { await ensureLoaded(); return c.json(buildMissionsReadModel()); });
 app.get("/api/read-models/missions/:id", async (c) => {
   await ensureLoaded();

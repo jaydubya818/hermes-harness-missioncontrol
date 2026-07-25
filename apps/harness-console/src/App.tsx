@@ -3,7 +3,7 @@ import useSWR, { mutate } from "swr";
 import { CapacityBar, CostCard, Panel, Sparkline, StatusRow } from "@hermes-harness-with-missioncontrol/ui-kit";
 import { CommandPalette } from "./CommandPalette.js";
 
-const tabs = ["Overview", "Missions", "Agents", "Memory", "Code", "Audit", "Settings"] as const;
+const tabs = ["Overview", "Factory", "Missions", "Agents", "Memory", "Code", "Audit", "Settings"] as const;
 type Tab = (typeof tabs)[number];
 const ORCH = import.meta.env.VITE_ORCH_URL ?? "/orchestrator";
 const MEM = import.meta.env.VITE_MEMORY_URL ?? "/memory";
@@ -122,6 +122,9 @@ function useLiveEventStream(url: string) {
         mutate(`${ORCH}/api/events`);
         mutate(`${ORCH}/api/read-models/audit`);
         mutate(`${ORCH}/api/read-models/overview`);
+        mutate(`${ORCH}/api/read-models/factory/overview`);
+        mutate(`${ORCH}/api/read-models/factory/work-items`);
+        mutate(`${ORCH}/api/read-models/factory/throughput`);
         mutate(`${EVAL}/api/evals`);
       } catch {
         // ignore malformed stream frames
@@ -173,6 +176,60 @@ function Overview() {
       <Panel title="Run Throughput"><Sparkline values={trend.length ? trend : [0]} /><StatusRow label="Total runs" value={evals?.summary?.total_runs ?? 0} /></Panel>
       <Panel title="Approval Load"><StatusRow label="Awaiting decision" value={overview?.metrics?.pending_approvals ?? 0} /><StatusRow label="Approved" value={evals?.summary?.approval_count ?? 0} /></Panel>
       <Panel title="Eval Snapshot"><StatusRow label="Success rate" value={`${Math.round((evals?.summary?.success_rate ?? 0) * 100)}%`} /><StatusRow label="Avg cost" value={`$${(evals?.summary?.average_cost_usd ?? 0).toFixed?.(2) ?? '0.00'}`} /></Panel>
+    </div>
+  );
+}
+
+function Factory() {
+  const { data: overview } = useSWR(`${ORCH}/api/read-models/factory/overview`, fetcher, { refreshInterval: 5000 });
+  const { data: workItems } = useSWR(`${ORCH}/api/read-models/factory/work-items?team=WAID`, fetcher, { refreshInterval: 5000 });
+  const { data: throughput } = useSWR(`${ORCH}/api/read-models/factory/throughput?team=WAID`, fetcher, { refreshInterval: 7000 });
+  const metrics = overview?.metrics ?? {};
+  const scope = overview?.connector_scopes?.[0];
+  const latestThroughput = throughput?.throughput?.[0];
+  const cycleMinutes = latestThroughput?.average_cycle_time_ms ? Math.round(latestThroughput.average_cycle_time_ms / 60000) : 0;
+
+  return (
+    <div style={{ padding: 16, display: "grid", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 16 }}>
+        <Panel title="Stories Closed"><StatusRow label="Today" value={metrics.stories_closed_today ?? 0} /><StatusRow label="Mode" value={overview?.mode ?? "loading"} /></Panel>
+        <Panel title="Tasks Closed"><StatusRow label="Today" value={metrics.tasks_closed_today ?? 0} /><StatusRow label="Avg cycle" value={cycleMinutes ? `${cycleMinutes}m` : "n/a"} /></Panel>
+        <Panel title="Agent Runs"><StatusRow label="Active" value={metrics.active_agent_runs ?? 0} /><StatusRow label="Blocked/failed" value={metrics.blocked_or_failed_runs ?? 0} /></Panel>
+        <Panel title="Factory Risk"><StatusRow label="Pending approvals" value={metrics.pending_approvals ?? 0} /><StatusRow label="Verifier failures" value={metrics.verifier_failures ?? 0} /></Panel>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1.25fr .75fr", gap: 16 }}>
+        <Panel title="Workday / Jira Work Items">
+          {(workItems?.work_items ?? []).length === 0 ? <div>No factory work items loaded.</div> : (workItems?.work_items ?? []).map((item: any) => (
+            <div key={item.external_key} style={{ padding: 12, borderBottom: "1px solid #1e293b" }}>
+              <StatusRow label={`${item.external_key} · ${item.hierarchy}`} value={item.status} />
+              <div style={{ color: "#e2e8f0", fontWeight: 700, marginTop: 6 }}>{item.title}</div>
+              <div style={{ color: "#94a3b8", fontSize: 13, marginTop: 6 }}>{item.description}</div>
+              <div style={{ color: "#64748b", fontSize: 12, marginTop: 6 }}>{[item.team, item.assignee, item.priority, item.sprint].filter(Boolean).join(" · ")}</div>
+            </div>
+          ))}
+        </Panel>
+        <Panel title="Connector + Loop Policy">
+          <StatusRow label="Jira" value={overview?.connector_status?.jira ?? "loading"} />
+          <StatusRow label="Writeback" value={overview?.connector_status?.writeback ?? "loading"} />
+          <StatusRow label="Credentials" value={overview?.connector_status?.credentials ?? "loading"} />
+          <div style={{ height: 12 }} />
+          <StatusRow label="Secret ref" value={scope?.secret_ref ?? "none"} />
+          <StatusRow label="Allowed ops" value={(scope?.allowed_operations ?? []).join(", ") || "none"} />
+          <StatusRow label="Loop" value={overview?.loop_policy?.loop_type ?? "none"} />
+          <StatusRow label="Max attempts" value={overview?.loop_policy?.max_attempts ?? 0} />
+        </Panel>
+      </div>
+      <Panel title="Throughput Receipt Source">
+        {(throughput?.throughput ?? []).map((metric: any) => (
+          <div key={metric.metric_id} style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, padding: 12, borderBottom: "1px solid #1e293b" }}>
+            <StatusRow label="Team" value={metric.team ?? "n/a"} />
+            <StatusRow label="Agent" value={metric.agent_id ?? "n/a"} />
+            <StatusRow label="Window" value={`${metric.window_start?.slice(11, 16)}-${metric.window_end?.slice(11, 16)}`} />
+            <StatusRow label="Est. cost" value={`$${(metric.estimated_cost_usd ?? 0).toFixed?.(2) ?? "0.00"}`} />
+          </div>
+        ))}
+        <div style={{ color: "#64748b", fontSize: 12, marginTop: 8 }}>Fixture-backed first slice. Real Jira intake and approval-gated writeback are intentionally disabled.</div>
+      </Panel>
     </div>
   );
 }
@@ -858,6 +915,7 @@ export function App() {
       <CommandPalette commands={commands} />
       <TopBar active={active} onChange={setActive} />
       {active === "Overview" && <Overview />}
+      {active === "Factory" && <Factory />}
       {active === "Missions" && <Missions />}
       {active === "Agents" && <Agents />}
       {active === "Memory" && <Memory />}

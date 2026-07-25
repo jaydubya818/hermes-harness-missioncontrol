@@ -137,6 +137,44 @@ export const SourceOfTruthKind = {
 
 export type SourceOfTruthKind = (typeof SourceOfTruthKind)[keyof typeof SourceOfTruthKind];
 
+export const ExternalWorkItemSystem = {
+  Jira: "jira",
+  Linear: "linear",
+  GitHub: "github",
+  Manual: "manual",
+} as const;
+
+export type ExternalWorkItemSystem = (typeof ExternalWorkItemSystem)[keyof typeof ExternalWorkItemSystem];
+
+export const ExternalWorkItemHierarchy = {
+  Epic: "epic",
+  Story: "story",
+  Task: "task",
+  Subtask: "subtask",
+} as const;
+
+export type ExternalWorkItemHierarchy = (typeof ExternalWorkItemHierarchy)[keyof typeof ExternalWorkItemHierarchy];
+
+export const ConnectorOperation = {
+  Read: "read",
+  Create: "create",
+  Update: "update",
+  Comment: "comment",
+  Transition: "transition",
+  Delete: "delete",
+} as const;
+
+export type ConnectorOperation = (typeof ConnectorOperation)[keyof typeof ConnectorOperation];
+
+export const FactoryLoopType = {
+  TurnBased: "turn_based",
+  GoalBased: "goal_based",
+  TimeBased: "time_based",
+  Proactive: "proactive",
+} as const;
+
+export type FactoryLoopType = (typeof FactoryLoopType)[keyof typeof FactoryLoopType];
+
 export const LearningTrigger = {
   HumanReviewComment: "human_review_comment",
   ManualCodeChangeAfterAgentOutput: "manual_code_change_after_agent_output",

@@ -70,6 +70,40 @@ describe("orchestrator-api", () => {
     expect(mission.active_run_id).toBeUndefined();
   });
 
+  it("exposes fixture-backed Workday factory read models without Jira credentials", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const app = await loadApp();
+    const overviewResponse = await app.request("/api/read-models/factory/overview");
+    const overview = await overviewResponse.json() as {
+      mode: string;
+      connector_status: { jira: string; writeback: string; credentials: string };
+      metrics: { stories_closed_today: number; tasks_closed_today: number; active_agent_runs: number };
+      connector_scopes: Array<{ secret_ref?: string; allowed_operations: string[] }>;
+      loop_policy: { loop_type: string; max_attempts: number };
+    };
+
+    expect(overviewResponse.status).toBe(200);
+    expect(overview.mode).toBe("fixture");
+    expect(overview.connector_status).toMatchObject({ jira: "fixture_only", writeback: "disabled", credentials: "not_required" });
+    expect(overview.metrics.tasks_closed_today).toBeGreaterThanOrEqual(overview.metrics.stories_closed_today);
+    expect(overview.connector_scopes[0].secret_ref).toMatch(/^secret:\/\//);
+    expect(overview.connector_scopes[0].allowed_operations).not.toContain("transition");
+    expect(overview.loop_policy).toMatchObject({ loop_type: "goal_based", max_attempts: 3 });
+
+    const workItemsResponse = await app.request("/api/read-models/factory/work-items?team=WAID&search=context");
+    const workItems = await workItemsResponse.json() as { work_items: Array<{ external_key: string; title: string; team?: string }>; pagination: { total: number } };
+    expect(workItemsResponse.status).toBe(200);
+    expect(workItems.pagination.total).toBe(1);
+    expect(workItems.work_items[0]).toMatchObject({ external_key: "WAID-43", team: "WAID" });
+
+    const throughputResponse = await app.request("/api/read-models/factory/throughput?team=WAID");
+    const throughput = await throughputResponse.json() as { throughput: Array<{ tasks_closed: number; verifier_failure_count: number }> };
+    expect(throughputResponse.status).toBe(200);
+    expect(throughput.throughput[0].tasks_closed).toBeGreaterThan(0);
+    expect(throughput.throughput[0].verifier_failure_count).toBeGreaterThanOrEqual(0);
+  });
+
   it("returns a TaskExecutionResult-shaped execution_result payload", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes("/api/execute-step")) {

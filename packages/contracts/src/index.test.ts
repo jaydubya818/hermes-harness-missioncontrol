@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   ApprovalMode,
+  ConnectorOperation,
+  ExternalWorkItemHierarchy,
+  ExternalWorkItemSystem,
+  FactoryLoopType,
   FinalOutcome,
   LearningOutputType,
   LearningTrigger,
@@ -15,10 +19,15 @@ import {
   type ApprovalRequest,
   type ArtifactManifest,
   type ArtifactRef,
+  type ConnectorCapabilityScope,
   type EventEnvelope,
   type ExecutionEnvelope,
+  type ExternalWorkItem,
   type FactoryEvent,
+  type FactoryMissionBinding,
+  type FactoryThroughputMetric,
   type LearningCandidate,
+  type LoopPolicy,
   type Mission,
   type OutcomeMetrics,
   type Run,
@@ -40,6 +49,10 @@ describe("contracts package exports", () => {
     expect(RiskDomain.Ui).toBe("ui");
     expect(VerificationMethod.Typecheck).toBe("typecheck");
     expect(SourceOfTruthKind.Code).toBe("code");
+    expect(ExternalWorkItemSystem.Jira).toBe("jira");
+    expect(ExternalWorkItemHierarchy.Story).toBe("story");
+    expect(ConnectorOperation.Comment).toBe("comment");
+    expect(FactoryLoopType.GoalBased).toBe("goal_based");
     expect(LearningTrigger.FailedVerifier).toBe("failed_verifier");
     expect(LearningOutputType.NewVerifier).toBe("new_verifier");
   });
@@ -164,6 +177,99 @@ describe("contracts package exports", () => {
     expect(approval.reason).toContain("approval");
     expect(run.current_step_id).toBe(step.step_id);
     expect(stepRequest.envelope.output_dir).toContain("step_123");
+  });
+
+  it("supports Workday factory work-item bindings, connector scopes, loops, and throughput metrics", () => {
+    const workItem: ExternalWorkItem = {
+      system: ExternalWorkItemSystem.Jira,
+      external_id: "10001",
+      external_key: "WAID-42",
+      url: "https://jira.example.com/browse/WAID-42",
+      hierarchy: ExternalWorkItemHierarchy.Story,
+      parent_external_key: "WAID-7",
+      title: "Create scoped retrieval eval dashboard",
+      description: "As an operator, I need evidence that retrieval quality is moving.",
+      status: "In Progress",
+      assignee: "missioncontrol-agent",
+      team: "WAID",
+      priority: "High",
+      acceptance_criteria: [{
+        id: "AC-1",
+        statement: "Dashboard shows verified retrieval eval movement for the sprint.",
+        verification_method: VerificationMethod.ArtifactInspection,
+        evidence_required: true,
+      }],
+      labels: ["factory", "retrieval"],
+      components: ["Hopper"],
+      sprint: "Sprint 24",
+      updated_at: "2026-07-12T15:00:00Z",
+    };
+
+    const binding: FactoryMissionBinding = {
+      binding_id: "fbind_waid_42",
+      mission_id: "mis_waid_42",
+      run_id: "run_waid_42",
+      work_items: [workItem],
+      context_packet_uri: "artifact://run_waid_42/context-packet.json",
+      receipt_packet_uri: "artifact://run_waid_42/receipt-packet.json",
+      created_at: "2026-07-12T15:05:00Z",
+    };
+
+    const connectorScope: ConnectorCapabilityScope = {
+      connector: ExternalWorkItemSystem.Jira,
+      scopes: ["board:read", "issue:read", "comment:write"],
+      secret_ref: "secret://connectors/jira/workday-prod",
+      allowed_operations: [ConnectorOperation.Read, ConnectorOperation.Comment],
+      risk_level: RiskLevel.Medium,
+    };
+
+    const loopPolicy: LoopPolicy = {
+      loop_type: FactoryLoopType.GoalBased,
+      evaluator: VerificationMethod.IndependentReview,
+      max_attempts: 3,
+      max_runtime_seconds: 3600,
+      max_cost_usd: 15,
+      human_approval_required_after_attempts: 2,
+      stop_on_verifier_failure: true,
+    };
+
+    const metric: FactoryThroughputMetric = {
+      metric_id: "fmetric_today_waid",
+      generated_at: "2026-07-12T16:00:00Z",
+      window_start: "2026-07-12T00:00:00Z",
+      window_end: "2026-07-12T16:00:00Z",
+      team: "WAID",
+      assignee: "missioncontrol-agent",
+      agent_id: "agent_factory_01",
+      stories_closed: 4,
+      tasks_closed: 23,
+      active_runs: 6,
+      blocked_runs: 1,
+      approval_wait_count: 2,
+      verifier_failure_count: 1,
+      average_cycle_time_ms: 42 * 60 * 1000,
+      estimated_cost_usd: 8.25,
+    };
+
+    const envelope: ExecutionEnvelope = {
+      worktree_path: "/repo/.worktrees/run_waid_42",
+      workspace_root: "/repo",
+      repo_scope: { root_path: "/repo", writable_paths: ["apps/harness-console/src"] },
+      allowed_tools: ["filesystem", "git", "process"],
+      allowed_actions: ["plan", "read_repo", "write_repo"],
+      approval_mode: ApprovalMode.OnPolicyTrigger,
+      timeout_seconds: 3600,
+      resource_budget: { token_budget: 120000, max_artifacts: 20, max_output_bytes: 1048576 },
+      output_dir: "/repo/.hermes-harness/runs/run_waid_42",
+      environment_classification: "sandbox",
+      connector_scopes: [connectorScope],
+      loop_policy: loopPolicy,
+    };
+
+    expect(binding.work_items[0].external_key).toBe("WAID-42");
+    expect(envelope.connector_scopes?.[0].secret_ref).toMatch(/^secret:\/\//);
+    expect(envelope.loop_policy?.loop_type).toBe(FactoryLoopType.GoalBased);
+    expect(metric.tasks_closed).toBeGreaterThan(metric.stories_closed);
   });
 
   it("supports Factory v0.1 work-order, evidence, outcome, and learning contracts", () => {
