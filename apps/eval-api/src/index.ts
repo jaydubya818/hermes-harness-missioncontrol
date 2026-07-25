@@ -11,6 +11,7 @@ const stateFile = process.env.EVAL_STATE_FILE ?? resolve(process.cwd(), "../../d
 const operatorToken = process.env.HARNESS_OPERATOR_TOKEN;
 
 app.use("*", cors());
+const OPTIONAL_NUMERIC_FIELDS = ["approval_count", "artifact_count", "duration_ms", "confidence", "efficiency_score", "risk_score"] as const;
 const records: EvalRecord[] = [];
 let initialized = false;
 
@@ -115,6 +116,14 @@ app.post("/api/evals", async (c) => {
   if (!body.mission_id || !body.run_id) return c.json({ error: "mission_id and run_id required" }, 400);
   if (!["success", "failure", "partial"].includes(body.outcome)) return c.json({ error: "outcome must be one of success, failure, partial" }, 400);
   if (typeof body.cost_usd !== "number" || !Number.isFinite(body.cost_usd) || body.cost_usd < 0) return c.json({ error: "cost_usd must be a non-negative number" }, 400);
+  // Scoring fields feed summary averages; a single string or negative value
+  // here would turn average_confidence & co into NaN (serialized as null).
+  for (const field of OPTIONAL_NUMERIC_FIELDS) {
+    const value = (body as unknown as Record<string, unknown>)[field];
+    if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) {
+      return c.json({ error: `${field} must be a non-negative finite number` }, 400);
+    }
+  }
   if (body.eval_id) {
     // Replayed submissions (orchestrator retries, network replays) must not
     // duplicate records; mirror the artifact_id dedupe behaviour.

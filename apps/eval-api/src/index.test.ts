@@ -188,4 +188,34 @@ describe("eval-api", () => {
     const health = await app.request("/health");
     expect(health.status).toBe(200);
   });
+
+  it("rejects malformed scoring fields that would poison summary averages", async () => {
+    const app = await loadApp();
+
+    const stringConfidence = await app.request("/api/evals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mission_id: "mis_demo", run_id: "run_a", outcome: "success", cost_usd: 0.1, confidence: "high" })
+    });
+    expect(stringConfidence.status).toBe(400);
+
+    const negativeDuration = await app.request("/api/evals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mission_id: "mis_demo", run_id: "run_a", outcome: "success", cost_usd: 0.1, duration_ms: -5 })
+    });
+    expect(negativeDuration.status).toBe(400);
+
+    const valid = await app.request("/api/evals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mission_id: "mis_demo", run_id: "run_a", outcome: "success", cost_usd: 0.1, confidence: 0.9, duration_ms: 1200 })
+    });
+    expect(valid.status).toBe(201);
+
+    const listing = await app.request("/api/evals");
+    const payload = await listing.json() as { summary: { total_runs: number; average_confidence: number } };
+    expect(payload.summary.total_runs).toBe(1);
+    expect(payload.summary.average_confidence).toBe(0.9);
+  });
 });
