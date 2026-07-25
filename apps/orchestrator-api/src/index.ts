@@ -1548,13 +1548,17 @@ app.post("/api/runs/:id/retry-step", async (c) => {
   const mission = getMissionForRun(run);
   const current = getCurrentStep(run);
   if (!current || !["failed", "paused", "cancelled", "blocked", "awaiting_approval"].includes(current.state)) return c.json({ error: "current step not retryable" }, 409);
+  // Retrying an awaiting-approval step supersedes its pending approval;
+  // without resolving it, the approval sits in the operator queue forever
+  // (any later respond hits the staleness guard).
+  const approval = rejectPendingApprovalForCurrentStep(run, "operator");
   const previousExecutionId = current.execution_id;
   retryCurrentStep(run, "operator retried current step");
   updateMissionState(mission, "running", "operator retried current step", { run_id: run.run_id, step_id: current.step_id, actor: "operator" });
   recordRunStatusEvent(run, { step_id: current.step_id, actor: "operator", summary: "operator retried current step" });
   recordEvent({ type: "step.retried", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: current.step_id as `step_${string}`, actor: "operator", execution_id: previousExecutionId, payload: { previous_execution_id: previousExecutionId } as any });
   await persist();
-  return c.json({ run, mission });
+  return c.json({ run, mission, approval });
 });
 
 app.post("/api/runs/:id/cancel-step", async (c) => {

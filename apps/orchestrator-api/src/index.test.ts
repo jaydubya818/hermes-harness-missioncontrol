@@ -1864,4 +1864,27 @@ describe("orchestrator-api", () => {
     const body = JSON.parse(String(writebackCall![1]?.body)) as { project_id: string; agent_id: string };
     expect(body.project_id).toBe("proj_alpha");
   });
+
+  it("rejects the pending approval when an awaiting-approval step is retried", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-retry-approval-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [{ mission_id: "mis_demo", title: "Retry approval flow", objective: "Retry approval flow", project_id: "proj_demo", workflow: "bugfix", status: "awaiting_approval", active_run_id: "run_demo", summary: "waiting approval", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z" }],
+      runs: [{ run_id: "run_demo", mission_id: "mis_demo", workflow_id: "bugfix", status: "awaiting_approval", current_step_index: 0, current_step_id: "deploy", approval_id: "approval_demo", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z", steps: [{ step_id: "deploy", title: "Canary deploy", kind: "deploy", risk: "high", approval_mode: "on_policy_trigger", state: "awaiting_approval", approval_id: "approval_demo", notes: "waiting approval", blocked_reason: "needs approval", artifacts: [], started_at: "2026-04-11T00:00:00.000Z" }] }],
+      approvals: [{ approval_id: "approval_demo", mission_id: "mis_demo", run_id: "run_demo", step_id: "deploy", status: "pending", reason: "needs approval", decision_scope: "step", requested_at: "2026-04-11T00:00:00.000Z" }], events: [], audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const response = await app.request("/api/runs/run_demo/retry-step", { method: "POST" });
+    const payload = await response.json() as { run: { status: string }; approval?: { status: string; resolved_by?: string } };
+
+    expect(response.status).toBe(200);
+    expect(payload.run.status).toBe("running");
+    expect(payload.approval).toMatchObject({ status: "rejected", resolved_by: "operator" });
+
+    const approvals = await (await app.request("/api/approvals")).json() as { approvals: Array<{ approval_id: string; status: string }> };
+    expect(approvals.approvals.find((item) => item.approval_id === "approval_demo")?.status).toBe("rejected");
+  });
 });
