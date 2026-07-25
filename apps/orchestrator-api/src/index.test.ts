@@ -1835,4 +1835,33 @@ describe("orchestrator-api", () => {
     expect(chunk).toContain('"event_id":"evt_2"');
     expect(chunk).not.toContain('"event_id":"evt_1"');
   });
+
+  it("attributes memory writebacks to the mission's project instead of proj_demo", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/execute-step")) {
+        return jsonResponse({ body: { success: true, summary: "planned", confidence: 0.95, artifacts: [{ type: "plan", uri: "file:///tmp/plan.md" }] } });
+      }
+      return jsonResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await loadApp();
+    const createMission = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Attribution", project_id: "proj_alpha", workflow_id: "bugfix" })
+    });
+    const mission = await createMission.json() as { mission_id: string };
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const run = await startRun.json() as { run_id: string };
+
+    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    expect(execute.status).toBe(200);
+
+    const writebackCall = fetchMock.mock.calls.find((call) => String(call[0]).includes("/api/memory/tasks/close"));
+    expect(writebackCall).toBeDefined();
+    const body = JSON.parse(String(writebackCall![1]?.body)) as { project_id: string; agent_id: string };
+    expect(body.project_id).toBe("proj_alpha");
+  });
 });

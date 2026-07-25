@@ -1059,6 +1059,9 @@ async function recordEval(run: WorkflowRun, approvals: typeof state.approvals): 
 
 async function writebackStep(run: WorkflowRun, stepId: string, outcome: "success" | "failure" | "partial", summary: string) {
   const current = run.steps.find((step) => step.step_id === stepId);
+  // Attribute the writeback to the mission's real project so memory lands
+  // in the right wiki section instead of always polluting proj_demo.
+  const projectId = getMissionForRun(run)?.project_id ?? "proj_demo";
   try {
     await fetch(`${memoryApi}/api/memory/tasks/close`, {
       method: "POST",
@@ -1066,7 +1069,7 @@ async function writebackStep(run: WorkflowRun, stepId: string, outcome: "success
       signal: AbortSignal.timeout(SIDECAR_TIMEOUT_MS),
       body: JSON.stringify({
         agent_id: "agent_demo",
-        project_id: "proj_demo",
+        project_id: projectId,
         mission_id: run.mission_id,
         run_id: run.run_id,
         step_id: stepId,
@@ -1082,6 +1085,7 @@ async function writebackStep(run: WorkflowRun, stepId: string, outcome: "success
 }
 
 async function publishDiscovery(run: WorkflowRun, stepId: string, title: string, body: string) {
+  const projectId = getMissionForRun(run)?.project_id ?? "proj_demo";
   try {
     await fetch(`${memoryApi}/api/memory/bus/publish`, {
       method: "POST",
@@ -1090,7 +1094,7 @@ async function publishDiscovery(run: WorkflowRun, stepId: string, title: string,
       body: JSON.stringify({
         channel: "discovery",
         agent_id: "agent_demo",
-        project_id: "proj_demo",
+        project_id: projectId,
         mission_id: run.mission_id,
         run_id: run.run_id,
         title,
