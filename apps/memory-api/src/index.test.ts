@@ -112,6 +112,30 @@ describe("memory-api", () => {
     expect(bus).toContain("real title ## 2099-01-01");
   });
 
+  it("rejects bus publishes with non-string fields instead of crashing", async () => {
+    const app = await loadApp({ vaultRoot: makeVault() });
+    const badTitle = await app.request("/api/memory/bus/publish", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "alerts", agent_id: "agent_demo", project_id: "proj_demo", title: 123, body: "body text" })
+    });
+    expect(badTitle.status).toBe(400);
+
+    const badTags = await app.request("/api/memory/bus/publish", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "alerts", agent_id: "agent_demo", project_id: "proj_demo", title: "t", body: "b", tags: "not-a-list" })
+    });
+    expect(badTags.status).toBe(400);
+
+    const badSeverity = await app.request("/api/memory/bus/publish", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "alerts", agent_id: "agent_demo", project_id: "proj_demo", title: "t", body: "b", severity: { level: 9 } })
+    });
+    expect(badSeverity.status).toBe(400);
+  });
+
   it("rejects unsafe article slugs", async () => {
     const app = await loadApp();
     const res = await app.request("/api/memory/articles/..%2F..%2Fetc");

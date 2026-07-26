@@ -114,8 +114,16 @@ app.post("/api/memory/bus/publish", async (c) => {
   if (authError) return authError;
   const body = await parseJsonBody<PublishBusRequest>(c);
   if (!body) return c.json({ error: "invalid JSON body" }, 400);
-  if (!body.channel || !body.agent_id || !body.project_id || !body.title || !body.body) {
-    return c.json({ error: "channel, agent_id, project_id, title, body required" }, 400);
+  // These fields are interpolated into markdown below; a non-string value
+  // (or a non-array tags field) would crash the handler into a 500.
+  for (const field of ["channel", "agent_id", "project_id", "title", "body"] as const) {
+    if (typeof body[field] !== "string" || !body[field].trim()) {
+      return c.json({ error: "channel, agent_id, project_id, title, body must be non-empty strings" }, 400);
+    }
+  }
+  if (body.severity !== undefined && typeof body.severity !== "string") return c.json({ error: "severity must be a string" }, 400);
+  if (body.tags !== undefined && (!Array.isArray(body.tags) || body.tags.some((tag) => typeof tag !== "string"))) {
+    return c.json({ error: "tags must be an array of strings" }, 400);
   }
   if (!isSafeId(body.agent_id) || !isSafeId(body.project_id)) return c.json({ error: "unsafe id" }, 400);
   const busPath = safeWikiPath("projects", body.project_id, "bus.md");
