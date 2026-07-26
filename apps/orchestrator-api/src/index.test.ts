@@ -720,7 +720,7 @@ describe("orchestrator-api", () => {
 
     expect(response.status).toBe(200);
     expect(payload.metrics).toEqual({
-      open_missions: 2,
+      open_missions: 1,
       pending_approvals: 1,
       failed_missions: 1
     });

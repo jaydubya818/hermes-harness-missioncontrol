@@ -581,7 +581,9 @@ function getStepArtifact(run: WorkflowRun, stepId: string, type: string): Workfl
 function buildOverviewReadModel() {
   return {
     metrics: {
-      open_missions: state.missions.filter((mission) => !["completed", "cancelled"].includes(mission.status)).length,
+      // Failed is terminal too; counting failed missions as open double-counts
+      // them against the separate failed_missions metric.
+      open_missions: state.missions.filter((mission) => !["completed", "cancelled", "failed"].includes(mission.status)).length,
       pending_approvals: state.approvals.filter((approval) => approval.status === "pending").length,
       failed_missions: state.missions.filter((mission) => mission.status === "failed").length
     }
