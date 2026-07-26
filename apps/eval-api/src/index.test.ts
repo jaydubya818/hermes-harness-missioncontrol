@@ -81,6 +81,23 @@ describe("eval-api", () => {
     expect(Number.isFinite(payload.summary.total_cost_usd)).toBe(true);
   });
 
+  it("rejects non-string ids so records stay addressable by GET /api/evals/:id", async () => {
+    const app = await loadApp();
+    const numericEvalId = await app.request("/api/evals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ eval_id: 42, mission_id: "mis_a", run_id: "run_a", outcome: "success", cost_usd: 1 })
+    });
+    expect(numericEvalId.status).toBe(400);
+
+    const numericMissionId = await app.request("/api/evals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mission_id: 7, run_id: "run_a", outcome: "success", cost_usd: 1 })
+    });
+    expect(numericMissionId.status).toBe(400);
+  });
+
   it("returns 400 for malformed JSON bodies and caps page size at 100", async () => {
     const app = await loadApp();
 

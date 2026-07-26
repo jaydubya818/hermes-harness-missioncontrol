@@ -113,7 +113,14 @@ app.post("/api/evals", async (c) => {
   await ensureLoaded();
   const body = await parseJsonBody<EvalRecord>(c);
   if (!body) return c.json({ error: "invalid JSON body" }, 400);
-  if (!body.mission_id || !body.run_id) return c.json({ error: "mission_id and run_id required" }, 400);
+  if (typeof body.mission_id !== "string" || !body.mission_id || typeof body.run_id !== "string" || !body.run_id) {
+    return c.json({ error: "mission_id and run_id required" }, 400);
+  }
+  // A non-string eval_id would create a record that GET /api/evals/:id can
+  // never address (route params are strings) and break replay dedupe.
+  if (body.eval_id !== undefined && (typeof body.eval_id !== "string" || !body.eval_id)) {
+    return c.json({ error: "eval_id must be a non-empty string when provided" }, 400);
+  }
   if (!["success", "failure", "partial"].includes(body.outcome)) return c.json({ error: "outcome must be one of success, failure, partial" }, 400);
   if (typeof body.cost_usd !== "number" || !Number.isFinite(body.cost_usd) || body.cost_usd < 0) return c.json({ error: "cost_usd must be a non-negative number" }, 400);
   // Scoring fields feed summary averages; a single string or negative value
