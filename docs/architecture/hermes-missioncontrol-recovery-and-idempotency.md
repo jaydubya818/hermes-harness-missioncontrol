@@ -11,6 +11,9 @@ Make MissionControl credible under restart, replay, duplicate delivery, and repe
 - MissionControl persists `processed_event_ids` in orchestrator state.
 - `recordEvent()` ignores duplicate `event_id`.
 - persisted events are normalized on load before reuse.
+- worker-supplied `step_events` with unrecognized event types are logged and
+  dropped during dispatch instead of failing the request, so a newer/foreign
+  worker cannot strand a run mid-step after a successful execution.
 - audit timeline is rebuilt from canonical events, not trusted as separate truth.
 
 ### Approval resolution
@@ -31,6 +34,8 @@ Make MissionControl credible under restart, replay, duplicate delivery, and repe
 - workflow-engine attach path dedupes by `artifact_id`
 - worker artifact ids are stable per execution when possible
 - MissionControl manual artifact POST is idempotent when client repeats the same `artifact_id`
+- MissionControl stamps `created_at` at attach time, so artifact read models
+  sort on real attach order rather than shared step timestamps
 
 ### Worker result replay
 - MissionControl reuses an existing `step.execution_id` when redispatching a still-running step after restart
