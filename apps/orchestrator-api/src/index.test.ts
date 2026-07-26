@@ -281,6 +281,63 @@ describe("orchestrator-api", () => {
     expect(eventsPayload.events.some((event) => event.source === "hermes" && event.type === "step.progress" && event.execution_id === "exec_worker_1")).toBe(true);
   });
 
+  it("completes the dispatch even when the worker sends an unrecognized step event type", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/api/execute-step")) {
+        return jsonResponse({
+          body: {
+            success: true,
+            summary: "implemented change",
+            confidence: 0.91,
+            artifacts: [],
+            step_events: [
+              {
+                schema_version: "v1",
+                event_id: "evt_worker_ok",
+                timestamp: "2026-04-18T18:00:00Z",
+                sequence: 1,
+                source: "hermes",
+                type: "step.progress",
+                payload: { message: "thinking" }
+              },
+              {
+                schema_version: "v1",
+                event_id: "evt_worker_unknown",
+                timestamp: "2026-04-18T18:00:01Z",
+                sequence: 2,
+                source: "hermes",
+                type: "step.telemetry_v2",
+                payload: { message: "future event shape" }
+              }
+            ]
+          }
+        });
+      }
+      return jsonResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await loadApp();
+    const createMission = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Unknown worker event", project_id: "proj_demo", workflow_id: "bugfix" })
+    });
+    const mission = await createMission.json() as { mission_id: string };
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const run = await startRun.json() as { run_id: string };
+
+    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    expect(execute.status).toBe(200);
+    const executePayload = await execute.json() as { run: { steps: Array<{ step_id: string; state: string }> } };
+    expect(executePayload.run.steps.find((step) => step.step_id === "plan")?.state).toBe("completed");
+
+    const eventsResponse = await app.request("/api/events");
+    const eventsPayload = await eventsResponse.json() as { events: Array<{ event_id?: string }> };
+    expect(eventsPayload.events.some((event) => event.event_id === "evt_worker_ok")).toBe(true);
+    expect(eventsPayload.events.some((event) => event.event_id === "evt_worker_unknown")).toBe(false);
+  });
+
   it("fails the run when worker execution returns success false", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes("/api/execute-step")) {

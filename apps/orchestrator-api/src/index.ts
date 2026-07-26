@@ -555,6 +555,19 @@ function recordEvent(event: HarnessEvent | Record<string, unknown>) {
   return true;
 }
 
+// Worker step_events cross a service boundary. recordEvent throws on
+// unrecognized event types, and one bad event from the worker must not 500
+// the dispatch after the step already executed (stranding the run
+// mid-step); drop the event and keep the lifecycle moving.
+function recordExternalEvent(event: HarnessEvent | Record<string, unknown>) {
+  try {
+    return recordEvent(event);
+  } catch (err) {
+    console.warn("[orchestrator] skipping unrecognized worker event:", err instanceof Error ? err.message : err);
+    return false;
+  }
+}
+
 function getMissionForRun(run: WorkflowRun) {
   return state.missions.find((item) => item.mission_id === run.mission_id);
 }
@@ -1434,7 +1447,7 @@ app.post("/api/runs/:id/execute-current", async (c) => {
   } catch (error) {
     const workerExecution = (error as Error & { workerExecution?: WorkerExecution }).workerExecution;
     for (const event of workerExecution?.step_events ?? []) {
-      recordEvent(event);
+      recordExternalEvent(event);
     }
     const summary = String(error instanceof Error ? error.message : error);
     await failRun(run, step.step_id, summary, workerExecution ?? { execution_id: request.execution_id, summary, confidence: 0, success: false, artifacts: [] });
@@ -1451,7 +1464,7 @@ app.post("/api/runs/:id/execute-current", async (c) => {
     recordEvent({ type: "artifact.created", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id as `step_${string}`, execution_id: execution.execution_id, payload: { artifact_id: artifactId, kind: artifact.type, label: artifact.type, uri: artifact.uri, metadata: artifact.metadata } as any });
   }
   for (const event of execution.step_events ?? []) {
-    recordEvent(event);
+    recordExternalEvent(event);
   }
 
   if (!execution.success) {
