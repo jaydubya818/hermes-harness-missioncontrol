@@ -1459,7 +1459,9 @@ app.post("/api/runs/:id/execute-current", async (c) => {
     const artifactId = artifact.artifact_id ?? `art_${execution.execution_id}_${index + 1}`;
     const existing = run.steps.find((item) => item.step_id === step.step_id)?.artifacts.some((item) => item.artifact_id === artifactId);
     if (existing) continue;
-    const artifactRef = { artifact_id: artifactId, type: artifact.type, uri: artifact.uri, content: artifact.content, metadata: artifact.metadata } as any;
+    // Stamp attach time: read models sort artifacts by created_at, and the
+    // step-timestamp fallback gives every artifact of a step the same value.
+    const artifactRef = { artifact_id: artifactId, type: artifact.type, uri: artifact.uri, content: artifact.content, metadata: artifact.metadata, created_at: new Date().toISOString() } as any;
     attachArtifact(run, step.step_id, artifactRef);
     recordEvent({ type: "artifact.created", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id as `step_${string}`, execution_id: execution.execution_id, payload: { artifact_id: artifactId, kind: artifact.type, label: artifact.type, uri: artifact.uri, metadata: artifact.metadata } as any });
   }
@@ -1624,7 +1626,7 @@ app.post("/api/runs/:id/artifacts", async (c) => {
   if (typeof body.type !== "string" || !body.type.trim()) return c.json({ error: "type required" }, 400);
   const existing = step.artifacts.find((item) => item.artifact_id === body.artifact_id);
   if (existing) return c.json(existing);
-  const artifact = { artifact_id: body.artifact_id ?? makeId("art"), type: body.type, kind: body.type, label: body.type, uri: body.uri ?? `artifact://${run.run_id}/${body.step_id}/${body.type}`, content: body.content, metadata: body.metadata };
+  const artifact = { artifact_id: body.artifact_id ?? makeId("art"), type: body.type, kind: body.type, label: body.type, uri: body.uri ?? `artifact://${run.run_id}/${body.step_id}/${body.type}`, content: body.content, metadata: body.metadata, created_at: new Date().toISOString() };
   attachArtifact(run, body.step_id, artifact);
   recordEvent({ type: "artifact.created", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: body.step_id as `step_${string}`, payload: { artifact_id: artifact.artifact_id, kind: artifact.kind, label: artifact.label, uri: artifact.uri, metadata: artifact.metadata } as any });
   await persist();

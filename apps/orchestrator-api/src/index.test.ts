@@ -1434,6 +1434,8 @@ describe("orchestrator-api", () => {
     });
 
     expect(first.status).toBe(201);
+    const created = await first.json() as { created_at?: string };
+    expect(typeof created.created_at).toBe("string");
     expect(second.status).toBe(200);
     const eventsResponse = await app.request("/api/events");
     const eventsPayload = await eventsResponse.json() as { events: Array<{ type: string; payload?: { artifact_id?: string } }> };
