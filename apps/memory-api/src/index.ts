@@ -185,22 +185,46 @@ app.get("/api/memory/projects/:id/summary", async (c) => {
   });
 });
 
+// Search walks the whole wiki (bounded) instead of a hardcoded demo file
+// list, so memory written for non-demo agents/projects is discoverable.
+const SEARCH_MAX_FILES = 200;
+const SEARCH_MAX_RESULTS = 20;
+
+async function listWikiMarkdownFiles(root: string) {
+  const results: string[] = [];
+  const queue: string[] = [""];
+  while (queue.length > 0 && results.length < SEARCH_MAX_FILES) {
+    const relDir = queue.shift()!;
+    let entries;
+    try {
+      entries = await readdir(join(root, relDir), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith(".")) continue;
+      const rel = relDir ? `${relDir}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) queue.push(rel);
+      else if (entry.isFile() && entry.name.endsWith(".md")) {
+        results.push(rel);
+        if (results.length >= SEARCH_MAX_FILES) break;
+      }
+    }
+  }
+  return results.sort();
+}
+
 app.get("/api/memory/search", async (c) => {
   const authError = requireOperator(c);
   if (authError) return authError;
   const query = (c.req.query("q") ?? "").toLowerCase();
-  const candidates = [
-    "wiki/agents/agent_demo/profile.md",
-    "wiki/agents/agent_demo/hot.md",
-    "wiki/agents/agent_demo/learned.md",
-    "wiki/agents/agent_demo/rewrites.md",
-    "wiki/projects/proj_demo/standards.md",
-    "wiki/projects/proj_demo/recipes.md"
-  ];
+  const wikiRoot = safeWikiPath();
+  const files = await listWikiMarkdownFiles(wikiRoot);
   const results = [] as Array<{ path: string; snippet: string }>;
-  for (const path of candidates) {
-    const fullPath = safeWikiPath(...path.replace(/^wiki\//, "").split("/"));
-    const content = await readText(fullPath);
+  for (const rel of files) {
+    if (results.length >= SEARCH_MAX_RESULTS) break;
+    const path = `wiki/${rel}`;
+    const content = await readText(join(wikiRoot, rel));
     if (content && (!query || content.toLowerCase().includes(query) || path.toLowerCase().includes(query))) {
       results.push({ path, snippet: content.slice(0, 240) });
     }

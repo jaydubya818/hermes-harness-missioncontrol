@@ -112,6 +112,19 @@ describe("memory-api", () => {
     expect(bus).toContain("real title ## 2099-01-01");
   });
 
+  it("finds memory for non-demo agents and projects via search", async () => {
+    const root = makeVault();
+    mkdirSync(join(root, "wiki", "projects", "proj_real"), { recursive: true });
+    writeFileSync(join(root, "wiki", "projects", "proj_real", "standards.md"), "zebra-pattern guidance");
+    const app = await loadApp({ vaultRoot: root });
+    const res = await app.request("/api/memory/search?q=zebra-pattern");
+    expect(res.status).toBe(200);
+    const payload = await res.json() as { results: Array<{ path: string; snippet: string }> };
+    expect(payload.results).toHaveLength(1);
+    expect(payload.results[0]).toMatchObject({ path: "wiki/projects/proj_real/standards.md" });
+    expect(payload.results[0]!.snippet).toContain("zebra-pattern");
+  });
+
   it("rejects bus publishes with non-string fields instead of crashing", async () => {
     const app = await loadApp({ vaultRoot: makeVault() });
     const badTitle = await app.request("/api/memory/bus/publish", {
