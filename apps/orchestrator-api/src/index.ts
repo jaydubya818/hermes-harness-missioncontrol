@@ -294,6 +294,8 @@ function normalizeEventRecord(event: HarnessEvent | Record<string, unknown>) {
     sequence: Number.isFinite(raw.sequence) ? raw.sequence : nextEventSequence(),
     source: raw.source === "hermes" ? "hermes" : "missioncontrol",
     type: normalizeEventType(raw.type),
+    project_id: raw.project_id,
+    agent_id: raw.agent_id,
     mission_id: raw.mission_id,
     run_id: raw.run_id,
     step_id: raw.step_id,

@@ -277,8 +277,10 @@ describe("orchestrator-api", () => {
     expect(execute.status).toBe(200);
 
     const eventsResponse = await app.request("/api/events");
-    const eventsPayload = await eventsResponse.json() as { events: Array<{ source?: string; type: string; execution_id?: string }> };
+    const eventsPayload = await eventsResponse.json() as { events: Array<{ source?: string; type: string; execution_id?: string; project_id?: string }> };
     expect(eventsPayload.events.some((event) => event.source === "hermes" && event.type === "step.progress" && event.execution_id === "exec_worker_1")).toBe(true);
+    // Lifecycle events recorded with a project_id must not lose it during normalization.
+    expect(eventsPayload.events.some((event) => event.type === "mission.created" && event.project_id === "proj_demo")).toBe(true);
   });
 
   it("completes the dispatch even when the worker sends an unrecognized step event type", async () => {
