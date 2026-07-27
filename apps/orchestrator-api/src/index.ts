@@ -1746,8 +1746,9 @@ app.post("/api/approvals/:id/respond", async (c) => {
 });
 
 if (!process.env.VITEST) {
-  serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 4302) });
-  console.log("orchestrator-api listening on http://localhost:4302");
+  const port = Number(process.env.PORT ?? 4302);
+  serve({ fetch: app.fetch, port });
+  console.log(`orchestrator-api listening on http://localhost:${port}`);
   if (Number.isFinite(orphanSweepIntervalMs) && orphanSweepIntervalMs > 0) {
     const timer = setInterval(() => {
       void ensureLoaded()

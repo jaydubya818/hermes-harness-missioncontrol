@@ -150,8 +150,9 @@ app.post("/api/evals", async (c) => {
 });
 
 if (!process.env.VITEST) {
-  serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 4303) });
-  console.log("eval-api listening on http://localhost:4303");
+  const port = Number(process.env.PORT ?? 4303);
+  serve({ fetch: app.fetch, port });
+  console.log(`eval-api listening on http://localhost:${port}`);
 }
 
 export { app };

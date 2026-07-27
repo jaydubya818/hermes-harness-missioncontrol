@@ -977,8 +977,9 @@ app.post("/api/cleanup-run", async (c) => {
 });
 
 if (!process.env.VITEST) {
-  serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 4304) });
-  console.log("worker-runtime listening on http://localhost:4304");
+  const port = Number(process.env.PORT ?? 4304);
+  serve({ fetch: app.fetch, port });
+  console.log(`worker-runtime listening on http://localhost:${port}`);
 }
 
 export { app, ensureWorkspace, detectTestCommand, bootstrapWorkspaceDependencies };
