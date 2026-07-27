@@ -674,7 +674,10 @@ function Audit() {
             <option value="step">step</option>
             <option value="run">run</option>
             <option value="mission">mission</option>
-            <option value="deployment">deployment</option>
+            <option value="tool">tool</option>
+            <option value="artifact">artifact</option>
+            <option value="policy">policy</option>
+            <option value="execution">execution</option>
           </select>
           <select value={timelineSort} onChange={(event) => setTimelineSort(event.target.value)} style={{ borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }}>
             <option value="newest">timeline newest</option>
