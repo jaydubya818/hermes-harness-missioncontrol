@@ -107,6 +107,7 @@ function useLiveEventStream(url: string) {
         mutate(`${ORCH}/api/read-models/audit`);
         mutate(`${ORCH}/api/read-models/overview`);
         mutate(`${EVAL}/api/evals`);
+        mutate(`${EVAL}/api/evals?order=desc`);
       } catch {
         // ignore malformed stream frames
       }
@@ -146,15 +147,17 @@ function TopBar({ active, onChange }: { active: Tab; onChange: (tab: Tab) => voi
 function Overview() {
   const { data: memory } = useSWR(`${MEM}/api/memory/agents/agent_demo/summary`, fetcher, { refreshInterval: 15000 });
   const { data: overview } = useSWR(`${ORCH}/api/read-models/overview`, fetcher, { refreshInterval: 5000 });
-  const { data: evals } = useSWR(`${EVAL}/api/evals`, fetcher, { refreshInterval: 7000 });
-  const trend = useMemo(() => ((evals?.records ?? []) as Array<{ cost_usd: number }>).slice(-7).map((item) => item.cost_usd) || [0], [evals]);
+  // order=desc so the trend reflects the latest runs; the default ascending
+  // order pages from the oldest records and goes stale past the page size.
+  const { data: evals } = useSWR(`${EVAL}/api/evals?order=desc`, fetcher, { refreshInterval: 7000 });
+  const trend = useMemo(() => ((evals?.records ?? []) as Array<{ cost_usd: number }>).slice(0, 7).map((item) => item.cost_usd).reverse(), [evals]);
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 16, padding: 16 }}>
       <Panel title="Active Missions"><StatusRow label="Open missions" value={overview?.metrics?.open_missions ?? 0} /><StatusRow label="Pending approvals" value={overview?.metrics?.pending_approvals ?? 0} /><StatusRow label="Recent failures" value={overview?.metrics?.failed_missions ?? 0} /></Panel>
       <Panel title="Memory Health"><CapacityBar value={memory?.learned_count ?? 0} max={20} /><div style={{ height: 12 }} /><StatusRow label="Pending rewrites" value={memory?.pending_rewrites ?? 0} /></Panel>
       <Panel title="Cost Today"><CostCard label="Estimated run cost" amount={`$${(evals?.summary?.total_cost_usd ?? 0).toFixed?.(2) ?? '0.00'}`} /></Panel>
       <Panel title="Run Throughput"><Sparkline values={trend.length ? trend : [0]} /><StatusRow label="Total runs" value={evals?.summary?.total_runs ?? 0} /></Panel>
-      <Panel title="Approval Load"><StatusRow label="Awaiting decision" value={overview?.metrics?.pending_approvals ?? 0} /><StatusRow label="Approved" value={evals?.summary?.approval_count ?? 0} /></Panel>
+      <Panel title="Approval Load"><StatusRow label="Awaiting decision" value={overview?.metrics?.pending_approvals ?? 0} /><StatusRow label="Approved" value={evals?.summary?.total_approvals ?? 0} /></Panel>
       <Panel title="Eval Snapshot"><StatusRow label="Success rate" value={`${Math.round((evals?.summary?.success_rate ?? 0) * 100)}%`} /><StatusRow label="Avg cost" value={`$${(evals?.summary?.average_cost_usd ?? 0).toFixed?.(2) ?? '0.00'}`} /></Panel>
     </div>
   );
@@ -213,6 +216,7 @@ function Missions() {
       mutate(withQuery(`${ORCH}/api/read-models/artifacts`, { run_id: selectedStep.runId, step_id: selectedStep.stepId, limit: "20", offset: "0" }));
     }
     mutate(`${EVAL}/api/evals`);
+    mutate(`${EVAL}/api/evals?order=desc`);
     mutate(`${MEM}/api/memory/agents/agent_demo/summary`);
   }
 
