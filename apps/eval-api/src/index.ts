@@ -83,9 +83,12 @@ app.get("/api/evals", async (c) => {
   await ensureLoaded();
   const query = c.req.query();
   const filtered = filterRecords(query);
+  // Records accumulate in submission order (oldest first). order=desc lets
+  // consumers page from the most recent runs without knowing the total.
+  const ordered = query.order === "desc" ? [...filtered].reverse() : filtered;
   const limit = normalizeLimit(query.limit);
   const offset = normalizeOffset(query.offset);
-  const page = filtered.slice(offset, offset + limit);
+  const page = ordered.slice(offset, offset + limit);
   return c.json({
     records: page,
     pagination: {

@@ -51,6 +51,24 @@ describe("eval-api", () => {
     expect(payload.summary).toMatchObject({ total_runs: 1, failure_rate: 1 });
   });
 
+  it("returns newest records first when order=desc is requested", async () => {
+    const app = await loadApp();
+    for (const runId of ["run_a", "run_b", "run_c"]) {
+      const created = await app.request("/api/evals", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mission_id: "mis_demo", run_id: runId, outcome: "success", cost_usd: 0.1, approval_count: 0, artifact_count: 0, created_at: new Date().toISOString() })
+      });
+      expect(created.status).toBe(201);
+    }
+
+    const listing = await app.request("/api/evals?order=desc&limit=2");
+    const payload = await listing.json() as { records: Array<{ run_id: string }>; pagination: { total: number; has_more: boolean } };
+    expect(listing.status).toBe(200);
+    expect(payload.records.map((record) => record.run_id)).toEqual(["run_c", "run_b"]);
+    expect(payload.pagination).toMatchObject({ total: 3, has_more: true });
+  });
+
   it("rejects eval records with missing or invalid fields", async () => {
     const app = await loadApp();
 
