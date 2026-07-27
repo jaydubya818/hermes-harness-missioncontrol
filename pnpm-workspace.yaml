@@ -1,3 +1,8 @@
 packages:
   - apps/*
   - packages/*
+
+# Supply-chain hardening: refuse to resolve package versions published less
+# than 3 days ago (in minutes), giving the registry time to catch and unpublish
+# compromised releases before they can land here on install/update.
+minimumReleaseAge: 4320
