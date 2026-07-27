@@ -878,8 +878,13 @@ export async function cleanupRun(runId: string, sourceRepo?: string, branchName?
   }
   const repo = sourceRepo ? assertSafeRepoPath(sourceRepo) : undefined;
   const target = join(worktreesRoot, runId);
-  if (repo && await assertGitRepo(repo) && await exists(target)) {
-    await runCmd("git", ["-C", repo, "worktree", "remove", "--force", target], repo);
+  if (repo && await assertGitRepo(repo)) {
+    // Prune bookkeeping and delete the run branch even when the worktree
+    // directory has already disappeared (partial cleanup, manual removal);
+    // otherwise stale hermes/run_* branches accumulate in the source repo.
+    if (await exists(target)) {
+      await runCmd("git", ["-C", repo, "worktree", "remove", "--force", target], repo);
+    }
     await runCmd("git", ["-C", repo, "worktree", "prune"], repo);
     if (branchName) {
       await runCmd("git", ["-C", repo, "branch", "-D", branchName], repo);

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { access, mkdir, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { join, resolve } from "node:path";
 import { app, assertSafeRepoPath, cleanupRun, detectTestCommand, ensureWorkspace } from "./index.js";
 
@@ -187,6 +189,29 @@ describe("worker-runtime", () => {
       body: JSON.stringify({ run_id: "run_cleanup", source_repo: allowedRepoRoot, branch_name: "-D" })
     });
     expect(badBranch.status).toBe(400);
+  });
+
+  it("deletes the stale run branch even when the worktree directory is already gone", async () => {
+    const run = promisify(execFile);
+    const runId = "run_stale_branch";
+    const branchName = `hermes/${runId}`;
+    const repo = join(sandboxRoot, "stale-branch-repo");
+    const worktree = join(process.cwd(), "../../data/worktrees", runId);
+    await mkdir(repo, { recursive: true });
+    await run("git", ["-C", repo, "init", "-q"]);
+    await writeFile(join(repo, "file.txt"), "content", "utf8");
+    await run("git", ["-C", repo, "add", "."]);
+    await run("git", ["-C", repo, "-c", "user.email=test@example.com", "-c", "user.name=test", "commit", "-q", "-m", "init"]);
+    await run("git", ["-C", repo, "worktree", "add", "-B", branchName, worktree, "HEAD"]);
+
+    // Simulate a partial cleanup: the worktree directory disappears but the
+    // branch (and worktree bookkeeping) stay behind in the source repo.
+    await rm(worktree, { recursive: true, force: true });
+
+    await expect(cleanupRun(runId, repo, branchName)).resolves.toMatchObject({ ok: true });
+
+    const branches = await run("git", ["-C", repo, "branch", "--list", branchName]);
+    expect(branches.stdout.trim()).toBe("");
   });
 
   it("cleans up run directories even without git metadata", async () => {
