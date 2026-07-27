@@ -127,7 +127,8 @@ Worker/runtime:
 - timeout + budget enforcement
 
 Eval / observability:
-- eval record persistence and summaries
+- eval record persistence and summaries (including `total_approvals`)
+- `GET /api/evals` supports `order=desc` for newest-first paging
 - eval lifecycle events: `eval.started`, `eval.completed`, `eval.failed`
 - canonical event taxonomy including SSE replay/live stream
 
@@ -164,6 +165,7 @@ Sidecar call bounds
 
 Cleanup
 - terminal runs trigger worker cleanup
+- run branches and worktree bookkeeping are pruned even when the worktree directory is already gone
 - `POST /api/maintenance/sweep-orphans` prunes orphaned worktree/output roots
 - `ORPHAN_SWEEP_INTERVAL_MS` enables periodic sweep outside normal request flow
 
