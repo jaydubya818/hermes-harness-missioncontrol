@@ -48,6 +48,27 @@ describe("memory-api", () => {
     expect(res.status).toBe(400);
   });
 
+  it("counts promotions attributed to the agent in its summary", async () => {
+    const vault = makeVault();
+    const app = await loadApp({ vaultRoot: vault });
+
+    const before = await app.request("/api/memory/agents/agent_demo/summary");
+    expect(((await before.json()) as { recent_promotions: number }).recent_promotions).toBe(0);
+
+    const promoted = await app.request("/api/memory/promote", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ item_id: "rewrite_1", promoted_by: "agent_demo", target_path: "wiki/projects/proj_demo/promoted-rewrite_1.md", promotion_kind: "standard" })
+    });
+    expect(promoted.status).toBe(200);
+
+    // Promotions by other agents do not count toward this agent's summary.
+    writeFileSync(join(vault, "wiki", "projects", "proj_demo", "promoted-other.md"), "---\npromoted_by: agent_other\n---\n");
+
+    const after = await app.request("/api/memory/agents/agent_demo/summary");
+    expect(((await after.json()) as { recent_promotions: number }).recent_promotions).toBe(1);
+  });
+
   it("rejects non-numeric budget_bytes instead of disabling the budget", async () => {
     const app = await loadApp();
     const res = await app.request("/api/memory/context/load", {

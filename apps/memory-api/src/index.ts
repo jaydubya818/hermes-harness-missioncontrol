@@ -71,6 +71,26 @@ async function listProjectFiles(projectId: string) {
   return listDir(safeWikiPath("projects", projectId));
 }
 
+// Promotions land as promoted-*.md files under project wikis with a
+// `promoted_by:` frontmatter line; count the ones attributed to this agent.
+const PROMOTION_SCAN_MAX_FILES = 500;
+
+async function countAgentPromotions(agentId: string) {
+  const projectsRoot = safeWikiPath("projects");
+  let scanned = 0;
+  let count = 0;
+  for (const project of await listDir(projectsRoot)) {
+    for (const file of await listDir(join(projectsRoot, project))) {
+      if (!file.startsWith("promoted-") || !file.endsWith(".md")) continue;
+      if (scanned >= PROMOTION_SCAN_MAX_FILES) return count;
+      scanned += 1;
+      const content = await readText(join(projectsRoot, project, file));
+      if (content?.includes(`promoted_by: ${agentId}`)) count += 1;
+    }
+  }
+  return count;
+}
+
 app.get("/health", (c) => c.json({ ok: true, service: "memory-api" }));
 
 app.post("/api/memory/context/load", async (c) => {
@@ -148,7 +168,7 @@ app.get("/api/memory/agents/:id/summary", async (c) => {
     working_path: `wiki/agents/${agentId}/task-log.md`,
     learned_count: learned ? learned.split("\n").filter((line) => line.trim().startsWith("-")).length : 0,
     pending_rewrites: rewrites ? rewrites.split("\n").filter((line) => line.trim().startsWith("###")).length : 0,
-    recent_promotions: 0
+    recent_promotions: await countAgentPromotions(agentId)
   });
 });
 
