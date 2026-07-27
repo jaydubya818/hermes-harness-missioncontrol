@@ -43,7 +43,9 @@ async function authJson(url: string, init: RequestInit = {}) {
   return body;
 }
 
-const fetcher = (url: string) => authFetch(url).then((r) => r.json());
+// Throw on HTTP errors so SWR keeps `data` undefined (panels render their
+// empty states) instead of treating an error body like a read model.
+const fetcher = (url: string) => authJson(url);
 
 function withQuery(url: string, params: Record<string, string | undefined>) {
   const search = new URLSearchParams();
