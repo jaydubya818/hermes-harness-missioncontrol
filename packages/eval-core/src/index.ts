@@ -21,6 +21,7 @@ export interface EvalSummary {
   total_runs: number;
   success_rate: number;
   failure_rate: number;
+  total_approvals: number;
   total_cost_usd: number;
   average_cost_usd: number;
   average_confidence: number;
@@ -36,6 +37,7 @@ export function summarize(records: EvalRecord[]): EvalSummary {
       total_runs: 0,
       success_rate: 0,
       failure_rate: 0,
+      total_approvals: 0,
       total_cost_usd: 0,
       average_cost_usd: 0,
       average_confidence: 0,
@@ -48,6 +50,7 @@ export function summarize(records: EvalRecord[]): EvalSummary {
   const successes = records.filter((r) => r.outcome === "success").length;
   const failures  = records.filter((r) => r.outcome === "failure").length;
   const cost      = records.reduce((sum, r) => sum + r.cost_usd, 0);
+  const approvals = records.reduce((sum, r) => sum + (Number.isFinite(r.approval_count) ? r.approval_count : 0), 0);
 
   // Optional fields: only average over records that have them
   const withConfidence  = records.filter((r) => r.confidence   != null);
@@ -64,6 +67,7 @@ export function summarize(records: EvalRecord[]): EvalSummary {
     total_runs:          total,
     success_rate:        successes / total,
     failure_rate:        failures  / total,
+    total_approvals:     approvals,
     total_cost_usd:      Math.round(cost * 1000) / 1000,
     average_cost_usd:    Math.round((cost / total) * 1000) / 1000,
     average_confidence:  Math.round(avg(withConfidence, "confidence") * 100) / 100,

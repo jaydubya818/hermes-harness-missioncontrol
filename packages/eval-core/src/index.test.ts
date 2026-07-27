@@ -74,6 +74,7 @@ describe("summarize", () => {
     expect(result.total_runs).toBe(0);
     expect(result.success_rate).toBe(0);
     expect(result.average_cost_usd).toBe(0);
+    expect(result.total_approvals).toBe(0);
   });
 
   it("aggregates a single success record", () => {
@@ -97,6 +98,7 @@ describe("summarize", () => {
         confidence: 0.1, efficiency_score: 0.0, risk_score: 0.5 },
     ]);
     expect(result.total_runs).toBe(2);
+    expect(result.total_approvals).toBe(1);
     expect(result.average_confidence).toBe(0.5);
     expect(result.average_efficiency).toBe(0.4);
     expect(result.average_risk_score).toBe(0.75);
