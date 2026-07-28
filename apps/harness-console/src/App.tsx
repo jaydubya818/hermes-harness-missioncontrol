@@ -391,13 +391,21 @@ function Missions() {
 function Agents() {
   const { data: summary } = useSWR(`${MEM}/api/memory/agents/agent_demo/summary`, fetcher, { refreshInterval: 10000 });
   const [bundle, setBundle] = useState<any>(null);
+  const [bundleError, setBundleError] = useState<string | null>(null);
   async function loadContext() {
-    const response = await authFetch(`${MEM}/api/memory/context/load`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ agent_id: "agent_demo", agent_role: "coder", project_id: "proj_demo", budget_bytes: 65536 })
-    });
-    setBundle(await response.json());
+    // Mirror the SWR fetcher: treat HTTP errors as errors instead of
+    // rendering the error body as a context bundle (and never leave a
+    // rejected promise unhandled when memory-api is down).
+    setBundleError(null);
+    try {
+      setBundle(await authJson(`${MEM}/api/memory/context/load`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ agent_id: "agent_demo", agent_role: "coder", project_id: "proj_demo", budget_bytes: 65536 })
+      }));
+    } catch (err) {
+      setBundleError(err instanceof Error ? err.message : String(err));
+    }
   }
   return (
     <div style={{ padding: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
@@ -409,6 +417,7 @@ function Agents() {
         <StatusRow label="Pending rewrites" value={summary?.pending_rewrites ?? 0} />
         <div style={{ height: 12 }} />
         <Button onClick={loadContext}>Load context bundle</Button>
+        {bundleError && <div style={{ color: "#fca5a5", fontSize: 13, marginTop: 8 }}>Context load failed: {bundleError}. If auth is enabled, save HARNESS_OPERATOR_TOKEN in Settings first.</div>}
       </Panel>
       <Panel title="Latest Context Bundle">{bundle ? <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(bundle, null, 2)}</pre> : <div>No bundle loaded yet.</div>}</Panel>
     </div>
