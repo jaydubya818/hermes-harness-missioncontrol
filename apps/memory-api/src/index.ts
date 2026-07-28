@@ -85,7 +85,9 @@ async function countAgentPromotions(agentId: string) {
       if (scanned >= PROMOTION_SCAN_MAX_FILES) return count;
       scanned += 1;
       const content = await readText(join(projectsRoot, project, file));
-      if (content?.includes(`promoted_by: ${agentId}`)) count += 1;
+      // Line-anchored match: a bare includes() would credit agent_1 with
+      // promotions made by agent_10.
+      if (content?.split("\n").some((line) => line.trim() === `promoted_by: ${agentId}`)) count += 1;
     }
   }
   return count;

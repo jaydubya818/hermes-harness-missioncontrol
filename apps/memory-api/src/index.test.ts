@@ -62,8 +62,10 @@ describe("memory-api", () => {
     });
     expect(promoted.status).toBe(200);
 
-    // Promotions by other agents do not count toward this agent's summary.
+    // Promotions by other agents do not count toward this agent's summary,
+    // including agents whose id merely starts with this agent's id.
     writeFileSync(join(vault, "wiki", "projects", "proj_demo", "promoted-other.md"), "---\npromoted_by: agent_other\n---\n");
+    writeFileSync(join(vault, "wiki", "projects", "proj_demo", "promoted-prefix.md"), "---\npromoted_by: agent_demo2\n---\n");
 
     const after = await app.request("/api/memory/agents/agent_demo/summary");
     expect(((await after.json()) as { recent_promotions: number }).recent_promotions).toBe(1);
