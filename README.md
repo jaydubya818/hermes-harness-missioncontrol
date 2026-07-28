@@ -122,6 +122,7 @@ Operator surfaces:
 Worker/runtime:
 - isolated git worktree execution
 - constrained write scope for implement step
+- write targets that resolve outside the worktree are rejected even when `writable_paths` grants the whole repo
 - test/review/deploy step handling
 - deploy adapter abstraction: `auto | noop-canary | vercel | render`
 - timeout + budget enforcement
@@ -131,6 +132,8 @@ Eval / observability:
 - `GET /api/evals` supports `order=desc` for newest-first paging
 - eval lifecycle events: `eval.started`, `eval.completed`, `eval.failed`
 - canonical event taxonomy including SSE replay/live stream
+- non-JSON worker responses fail the dispatch with the worker's HTTP status instead of a JSON parse error
+- memory promotions validate frontmatter fields and attribute per-agent counts by exact `promoted_by` line
 
 ## Deferred
 
