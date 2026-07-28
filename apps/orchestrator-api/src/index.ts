@@ -1239,7 +1239,17 @@ async function fetchWorkerExecution(request: StepExecutionRequest): Promise<Work
     signal: AbortSignal.timeout((request.envelope.timeout_seconds + 60) * 1000),
     body: JSON.stringify(request)
   });
-  const payload = await response.json() as WorkerExecution & { error?: string; error_code?: string };
+  let payload: WorkerExecution & { error?: string; error_code?: string };
+  try {
+    payload = await response.json() as WorkerExecution & { error?: string; error_code?: string };
+  } catch {
+    // A crashed worker or intermediary (proxy 502 page, empty body) answers
+    // with non-JSON; surface the HTTP status instead of a bare JSON parse
+    // error and keep the status code for the dispatch response.
+    const error = new Error(`worker execution failed with status ${response.status} (non-JSON response)`) as Error & { statusCode?: number };
+    error.statusCode = response.ok ? 502 : response.status;
+    throw error;
+  }
   if (!response.ok) {
     const error = new Error(payload.summary || payload.error || `worker execution failed with status ${response.status}`) as Error & { workerExecution?: WorkerExecution; statusCode?: number; errorCode?: string };
     error.workerExecution = payload;

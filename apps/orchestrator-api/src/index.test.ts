@@ -231,6 +231,38 @@ describe("orchestrator-api", () => {
     expect(payload.error).toMatch(/escapes allowed root/);
   });
 
+  it("fails the run with the worker's HTTP status when the worker returns a non-JSON response", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/api/execute-step")) {
+        return {
+          ok: false,
+          status: 502,
+          json: async () => { throw new SyntaxError("Unexpected token '<'"); }
+        } as unknown as Response;
+      }
+      return jsonResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await loadApp();
+    const createMission = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Bad gateway", project_id: "proj_demo", workflow_id: "bugfix" })
+    });
+    const mission = await createMission.json() as { mission_id: string };
+
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const run = await startRun.json() as { run_id: string };
+
+    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    const payload = await execute.json() as { error?: string; run?: { status: string } };
+
+    expect(execute.status).toBe(502);
+    expect(payload.error).toMatch(/status 502/);
+    expect(payload.run?.status).toBe("failed");
+  });
+
   it("ingests worker step events into orchestrator event stream", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes("/api/execute-step")) {
