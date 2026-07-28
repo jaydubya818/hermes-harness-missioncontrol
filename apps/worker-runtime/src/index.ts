@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { mkdir, writeFile, access, rm, readFile, symlink, unlink, readdir } from "node:fs/promises";
-import { resolve, join, relative, dirname } from "node:path";
+import { resolve, join, relative, dirname, isAbsolute } from "node:path";
 import { execFile } from "node:child_process";
 import { timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
@@ -204,7 +204,22 @@ function enforceBudget(req: StepRequest, result: StepResult) {
 }
 
 function assertAllowedRepoWrite(workspace: WorkspaceContext, targetPath: string) {
-  const relPath = safeRelativePath(relative(workspace.repoWorkspace, targetPath));
+  const rel = relative(workspace.repoWorkspace, resolve(targetPath));
+  // A target that resolves outside the repo workspace must never be
+  // writable, even when writable_paths grants the whole repo via ".".
+  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) {
+    throw new WorkerExecutionError(`write path not allowed by execution envelope: ${targetPath}`, {
+      statusCode: 400,
+      eventType: "policy.violation",
+      payload: {
+        violation_kind: "write_path_outside_repo_workspace",
+        target_path: targetPath,
+        writable_paths: workspace.envelope.repo_scope.writable_paths,
+      },
+      started: true,
+    });
+  }
+  const relPath = safeRelativePath(rel);
   const allowed = workspace.envelope.repo_scope.writable_paths.some((allowedPath) => {
     if (allowedPath === ".") return true;
     const normalized = safeRelativePath(allowedPath);
@@ -982,4 +997,4 @@ if (!process.env.VITEST) {
   console.log(`worker-runtime listening on http://localhost:${port}`);
 }
 
-export { app, ensureWorkspace, detectTestCommand, bootstrapWorkspaceDependencies };
+export { app, ensureWorkspace, detectTestCommand, bootstrapWorkspaceDependencies, assertAllowedRepoWrite };

@@ -3,7 +3,7 @@ import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join, resolve } from "node:path";
-import { app, assertSafeRepoPath, cleanupRun, detectTestCommand, ensureWorkspace } from "./index.js";
+import { app, assertAllowedRepoWrite, assertSafeRepoPath, cleanupRun, detectTestCommand, ensureWorkspace } from "./index.js";
 
 // Keep in sync with the ALLOWED_REPO_ROOT default in vitest.config.ts.
 const allowedRepoRoot = resolve(process.env.ALLOWED_REPO_ROOT ?? "/Users/jaywest/projects");
@@ -131,6 +131,21 @@ describe("worker-runtime", () => {
     expect(response.status).toBe(400);
     expect(payload.summary).toMatch(/budget exceeded/i);
     expect(payload.step_events?.some((event) => event.type === "execution.budget_exceeded")).toBe(true);
+  });
+
+  it("rejects repo writes that resolve outside the workspace even when writable_paths grants the whole repo", () => {
+    const repoWorkspace = join(sandboxRoot, "repo");
+    const workspace = {
+      workdir: join(sandboxRoot, "out"),
+      repoWorkspace,
+      envelope: { repo_scope: { writable_paths: ["."] } }
+    } as unknown as Parameters<typeof assertAllowedRepoWrite>[0];
+
+    expect(() => assertAllowedRepoWrite(workspace, join(repoWorkspace, "src", "ok.ts"))).not.toThrow();
+    expect(() => assertAllowedRepoWrite(workspace, join(sandboxRoot, "outside.txt"))).toThrow(/write path not allowed/);
+    expect(() => assertAllowedRepoWrite(workspace, join(repoWorkspace, "..", "outside.txt"))).toThrow(/write path not allowed/);
+    // the workspace root itself is a directory, not a writable file target
+    expect(() => assertAllowedRepoWrite(workspace, repoWorkspace)).toThrow(/write path not allowed/);
   });
 
   it("rejects repo paths outside the allowed root", () => {
