@@ -69,6 +69,32 @@ describe("memory-api", () => {
     expect(((await after.json()) as { recent_promotions: number }).recent_promotions).toBe(1);
   });
 
+  it("rejects promote requests with injectable or missing frontmatter fields", async () => {
+    const vault = makeVault();
+    const app = await loadApp({ vaultRoot: vault });
+
+    const missingPromotedBy = await app.request("/api/memory/promote", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ item_id: "rewrite_1", target_path: "wiki/projects/proj_demo/promoted-x.md", promotion_kind: "standard" })
+    });
+    expect(missingPromotedBy.status).toBe(400);
+
+    const injectedPromotedBy = await app.request("/api/memory/promote", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ item_id: "rewrite_1", promoted_by: "agent_x\npromoted_by: agent_demo", target_path: "wiki/projects/proj_demo/promoted-x.md", promotion_kind: "standard" })
+    });
+    expect(injectedPromotedBy.status).toBe(400);
+
+    const badKind = await app.request("/api/memory/promote", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ item_id: "rewrite_1", promoted_by: "agent_demo", target_path: "wiki/projects/proj_demo/promoted-x.md", promotion_kind: "own\nthe\nfile" })
+    });
+    expect(badKind.status).toBe(400);
+  });
+
   it("rejects non-numeric budget_bytes instead of disabling the budget", async () => {
     const app = await loadApp();
     const res = await app.request("/api/memory/context/load", {

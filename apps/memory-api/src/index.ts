@@ -124,7 +124,16 @@ app.post("/api/memory/promote", async (c) => {
   const body = await parseJsonBody<PromoteLearningRequest>(c);
   if (!body) return c.json({ error: "invalid JSON body" }, 400);
   if (!body.item_id || !body.target_path || !body.promotion_kind) return c.json({ error: "item_id, target_path, promotion_kind required" }, 400);
-  if (!isSafeId(body.target_path)) return c.json({ error: "unsafe target_path" }, 400);
+  // item_id, promoted_by and promotion_kind are interpolated into the
+  // promoted file's frontmatter; a newline there injects arbitrary
+  // frontmatter lines, and a missing promoted_by writes "undefined" and
+  // breaks promotion attribution in agent summaries.
+  if (typeof body.item_id !== "string" || !isSafeId(body.item_id)) return c.json({ error: "unsafe item_id" }, 400);
+  if (typeof body.promoted_by !== "string" || !isSafeId(body.promoted_by)) return c.json({ error: "promoted_by must be a safe agent id" }, 400);
+  if (!["standard", "recipe", "project_note"].includes(body.promotion_kind)) {
+    return c.json({ error: "promotion_kind must be one of standard, recipe, project_note" }, 400);
+  }
+  if (typeof body.target_path !== "string" || !isSafeId(body.target_path)) return c.json({ error: "unsafe target_path" }, 400);
   const result = await promoteLearning(vaultRoot, body);
   return c.json(result);
 });
