@@ -98,8 +98,14 @@ export async function closeTask(vaultRoot: string, request: CloseTaskRequest): P
   const learnedPath = join(base, "learned.md");
   const rewritesPath = join(base, "rewrites.md");
 
+  // Consumers of these files parse them line-anchored (learned_count counts
+  // "- " lines, rewrite candidates split on "\n### ", task-log sections are
+  // "## " headings), so single-line fields must stay single-line even when a
+  // caller passes embedded newlines.
+  const inline = (value: string) => value.replace(/[\r\n]+/g, " ").trim();
+
   const stamp = `
-## ${new Date().toISOString()} ${request.step_id ?? "task"}
+## ${new Date().toISOString()} ${inline(request.step_id ?? "task")}
 ${request.summary}
 `;
 
@@ -111,7 +117,7 @@ ${request.summary}
 
   if ((request.gotchas ?? []).length > 0) {
     const learnedAppend = (request.gotchas ?? []).map((note) => `
-- ${note.title}: ${note.body}
+- ${inline(note.title)}: ${inline(note.body)}
 `).join("");
     pendingWrites.push({ path: learnedPath, content: `${await readText(learnedPath)}${learnedAppend}` });
     writes.push({ path: learnedPath, memory_class: "learned" });
@@ -119,7 +125,7 @@ ${request.summary}
 
   if ((request.rewrites ?? []).length > 0) {
     const rewritesAppend = (request.rewrites ?? []).map((rewrite) => `
-### ${rewrite.target}
+### ${inline(rewrite.target)}
 ${rewrite.content}
 `).join("");
     pendingWrites.push({ path: rewritesPath, content: `${await readText(rewritesPath)}${rewritesAppend}` });

@@ -72,6 +72,30 @@ describe("writeback", () => {
     expect(readFileSync(learnedPath, "utf8")).toBe("original learned\n");
   });
 
+  it("keeps line-anchored fields single-line when callers embed newlines", async () => {
+    const { closeTask } = await loadWritebackModule();
+    const root = mkdtempSync(join(tmpdir(), "writeback-inline-"));
+    await closeTask(root, {
+      agent_id: "agent_demo",
+      project_id: "proj_demo",
+      step_id: "step_x\n## fake section",
+      outcome: "success",
+      summary: "summary",
+      gotchas: [{ title: "multi\nline title", body: "body\n- fake learned entry" }],
+      rewrites: [{ target: "standards.md\n### fake-target", kind: "candidate_rewrite", content: "content" }]
+    });
+
+    const learned = readFileSync(join(root, "wiki", "agents", "agent_demo", "learned.md"), "utf8");
+    expect(learned).toContain("- multi line title: body - fake learned entry");
+    expect(learned.split("\n").filter((line) => line.startsWith("- "))).toHaveLength(1);
+
+    const rewrites = readFileSync(join(root, "wiki", "agents", "agent_demo", "rewrites.md"), "utf8");
+    expect(rewrites.split("\n").filter((line) => line.startsWith("### "))).toHaveLength(1);
+
+    const taskLog = readFileSync(join(root, "wiki", "agents", "agent_demo", "task-log.md"), "utf8");
+    expect(taskLog.split("\n").filter((line) => line.startsWith("## "))).toHaveLength(1);
+  });
+
   it("promotes learning to a target path", async () => {
     const { promoteLearning } = await loadWritebackModule();
     const root = mkdtempSync(join(tmpdir(), "promote-"));
