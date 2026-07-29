@@ -687,6 +687,7 @@ function Audit() {
             <option value="mission">mission</option>
             <option value="tool">tool</option>
             <option value="artifact">artifact</option>
+            <option value="eval">eval</option>
             <option value="policy">policy</option>
             <option value="execution">execution</option>
           </select>

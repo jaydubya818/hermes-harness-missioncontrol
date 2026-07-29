@@ -789,6 +789,9 @@ function buildAuditReadModel(query: Record<string, string | undefined> = {}) {
     "tool.completed": { kind: "tool", title: "Tool completed" },
     "tool.failed": { kind: "tool", title: "Tool failed" },
     "artifact.created": { kind: "artifact", title: "Artifact created" },
+    "eval.started": { kind: "eval", title: "Eval started" },
+    "eval.completed": { kind: "eval", title: "Eval completed" },
+    "eval.failed": { kind: "eval", title: "Eval failed" },
     "policy.violation": { kind: "policy", title: "Policy violation" },
     "execution.timeout": { kind: "execution", title: "Execution timeout" },
     "execution.budget_exceeded": { kind: "execution", title: "Execution budget exceeded" }

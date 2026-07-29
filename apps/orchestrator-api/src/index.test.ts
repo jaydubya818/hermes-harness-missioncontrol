@@ -1547,6 +1547,14 @@ describe("orchestrator-api", () => {
     const eventsPayload = await eventsResponse.json() as { events: Array<{ type: string; payload?: { eval_id?: string } }> };
     expect(eventsPayload.events.some((event) => event.type === "eval.started")).toBe(true);
     expect(eventsPayload.events.some((event) => event.type === "eval.completed" && event.payload?.eval_id === "eval_123")).toBe(true);
+
+    // Eval lifecycle events must land in the audit timeline under their own
+    // kind instead of the anonymous "event" fallback.
+    const auditResponse = await app.request("/api/read-models/audit?kind=eval");
+    const auditPayload = await auditResponse.json() as { timeline: Array<{ kind: string; title: string; event_type: string }> };
+    expect(auditPayload.timeline.length).toBeGreaterThan(0);
+    expect(auditPayload.timeline.every((item) => item.kind === "eval")).toBe(true);
+    expect(auditPayload.timeline.some((item) => item.title === "Eval completed")).toBe(true);
   });
 
   it("records eval.failed when eval persistence fails", async () => {
