@@ -603,16 +603,22 @@ async function bootstrapWorkspaceDependencies(repoWorkspace: string, sourceRepo:
 
   const targetNodeModules = join(repoWorkspace, "node_modules");
   if (packageManager === "pnpm") {
-    if (await exists(targetNodeModules)) {
-      try {
-        await unlink(targetNodeModules);
-      } catch {
-        // existing non-symlink directory is fine
+    // When the source repo is still at the cached commit and this workspace
+    // already has node_modules, a reinstall on every step execution is pure
+    // overhead; skip it.
+    const alreadyHydrated = cacheHit && (await exists(targetNodeModules));
+    if (!alreadyHydrated) {
+      if (await exists(targetNodeModules)) {
+        try {
+          await unlink(targetNodeModules);
+        } catch {
+          // existing non-symlink directory is fine
+        }
       }
-    }
-    const install = await runCmd("pnpm", ["install", "--frozen-lockfile"], repoWorkspace);
-    if (install.exitCode !== 0) {
-      throw new Error(`failed to bootstrap pnpm workspace: ${install.stderr || install.stdout}`);
+      const install = await runCmd("pnpm", ["install", "--frozen-lockfile"], repoWorkspace);
+      if (install.exitCode !== 0) {
+        throw new Error(`failed to bootstrap pnpm workspace: ${install.stderr || install.stdout}`);
+      }
     }
   } else {
     await mirrorWorkspaceNodeModules(sourceRepo, repoWorkspace);

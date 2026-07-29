@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { join, resolve } from "node:path";
-import { app, assertAllowedRepoWrite, assertSafeRepoPath, cleanupRun, detectTestCommand, ensureWorkspace } from "./index.js";
+import { dirname, join, resolve } from "node:path";
+import { app, assertAllowedRepoWrite, assertSafeRepoPath, bootstrapWorkspaceDependencies, cleanupRun, detectTestCommand, ensureWorkspace } from "./index.js";
 
 // Keep in sync with the ALLOWED_REPO_ROOT default in vitest.config.ts.
 const allowedRepoRoot = resolve(process.env.ALLOWED_REPO_ROOT ?? "/Users/jaywest/projects");
@@ -227,6 +227,34 @@ describe("worker-runtime", () => {
 
     const branches = await run("git", ["-C", repo, "branch", "--list", branchName]);
     expect(branches.stdout.trim()).toBe("");
+  });
+
+  it("skips pnpm reinstall when the workspace is already hydrated at the cached commit", async () => {
+    const run = promisify(execFile);
+    const sourceRepo = join(sandboxRoot, "pnpm-cache-repo");
+    await mkdir(sourceRepo, { recursive: true });
+    // A dependency the stub lockfile cannot satisfy: any real
+    // `pnpm install --frozen-lockfile` here fails fast, so this test only
+    // passes when the hydrated workspace short-circuits the install.
+    await writeFile(join(sourceRepo, "package.json"), JSON.stringify({ name: "cache-repo", dependencies: { "left-pad": "^1.3.0" } }), "utf8");
+    await writeFile(join(sourceRepo, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n", "utf8");
+    await run("git", ["-C", sourceRepo, "init", "-q"]);
+    await run("git", ["-C", sourceRepo, "add", "."]);
+    await run("git", ["-C", sourceRepo, "-c", "user.email=test@example.com", "-c", "user.name=test", "commit", "-q", "-m", "init"]);
+    const commit = (await run("git", ["-C", sourceRepo, "rev-parse", "HEAD"])).stdout.trim();
+
+    const workspace = join(sandboxRoot, "pnpm-cache-workspace");
+    await mkdir(join(workspace, "node_modules"), { recursive: true });
+    await writeFile(join(workspace, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n", "utf8");
+
+    const cacheFile = process.env.WORKSPACE_CACHE_FILE!;
+    const cacheKey = Buffer.from(sourceRepo).toString("base64url");
+    await mkdir(dirname(cacheFile), { recursive: true });
+    await writeFile(cacheFile, JSON.stringify({ [cacheKey]: { repo_path: sourceRepo, commit, hydrated_at: new Date().toISOString(), package_manager: "pnpm" } }), "utf8");
+
+    await expect(bootstrapWorkspaceDependencies(workspace, sourceRepo)).resolves.toMatchObject({ reused: true, commit });
+    // The pre-hydrated node_modules must survive (no unlink + reinstall).
+    await expect(access(join(workspace, "node_modules"))).resolves.toBeUndefined();
   });
 
   it("cleans up run directories even without git metadata", async () => {

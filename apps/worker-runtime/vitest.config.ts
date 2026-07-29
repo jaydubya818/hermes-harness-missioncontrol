@@ -9,6 +9,7 @@ export default defineConfig({
   test: {
     env: {
       ALLOWED_REPO_ROOT: process.env.ALLOWED_REPO_ROOT ?? join(tmpdir(), "hermes-worker-runtime-allowed"),
+      WORKSPACE_CACHE_FILE: process.env.WORKSPACE_CACHE_FILE ?? join(tmpdir(), "hermes-worker-runtime-cache.json"),
     },
   },
 });
