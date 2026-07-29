@@ -30,8 +30,14 @@ async function exists(path: string) {
 async function writeTextAtomically(path: string, content: string) {
   await mkdir(dirname(path), { recursive: true });
   const tmpPath = join(dirname(path), `.${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
-  await writeFile(tmpPath, content, "utf8");
-  await rename(tmpPath, path);
+  try {
+    await writeFile(tmpPath, content, "utf8");
+    await rename(tmpPath, path);
+  } catch (error) {
+    // Do not leave orphaned .tmp files in the vault when the write fails.
+    await rm(tmpPath, { force: true });
+    throw error;
+  }
 }
 
 type PendingWrite = { path: string; content: string };

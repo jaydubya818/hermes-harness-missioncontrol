@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadJsonFile, saveJsonFile } from "./index.js";
@@ -11,6 +11,17 @@ describe("state-store", () => {
     await saveJsonFile(file, { ok: true });
     const value = await loadJsonFile(file, { ok: false });
     expect(value.ok).toBe(true);
+  });
+
+  it("removes the temp file when the atomic save fails", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "state-store-"));
+    // Renaming a file over an existing directory fails, simulating a failed
+    // final rename step.
+    const target = join(dir, "state.json");
+    mkdirSync(target);
+
+    await expect(saveJsonFile(target, { ok: true })).rejects.toThrow();
+    expect(readdirSync(dir).filter((name) => name.endsWith(".tmp"))).toHaveLength(0);
   });
 
   it("returns fallback and warns when the state file is corrupt", async () => {

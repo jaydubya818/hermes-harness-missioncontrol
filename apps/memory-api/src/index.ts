@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { readdir, readFile, writeFile, mkdir, rename } from "node:fs/promises";
+import { readdir, readFile, writeFile, mkdir, rename, rm } from "node:fs/promises";
 import { timingSafeEqual } from "node:crypto";
 import { dirname, join, resolve, relative } from "node:path";
 import { loadContextBundle, closeTask, promoteLearning } from "@hermes-harness-with-missioncontrol/memory-runtime";
@@ -63,8 +63,14 @@ async function writeTextAtomically(path: string, content: string) {
   const dir = dirname(path);
   await mkdir(dir, { recursive: true });
   const tmp = join(dir, `.${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
-  await writeFile(tmp, content, "utf8");
-  await rename(tmp, path);
+  try {
+    await writeFile(tmp, content, "utf8");
+    await rename(tmp, path);
+  } catch (error) {
+    // Do not leave orphaned .tmp files in the wiki when the write fails.
+    await rm(tmp, { force: true });
+    throw error;
+  }
 }
 
 async function listProjectFiles(projectId: string) {
