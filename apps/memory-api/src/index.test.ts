@@ -198,6 +198,26 @@ describe("memory-api", () => {
     expect(badSeverity.status).toBe(400);
   });
 
+  it("rejects malformed close-task collections instead of crashing the writeback", async () => {
+    const app = await loadApp({ vaultRoot: makeVault() });
+    const base = { agent_id: "agent_demo", project_id: "proj_demo", outcome: "success", summary: "done" };
+    const post = (payload: unknown) => app.request("/api/memory/tasks/close", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    expect((await post({ ...base, outcome: "meh" })).status).toBe(400);
+    expect((await post({ ...base, step_id: "step\ninjected" })).status).toBe(400);
+    expect((await post({ ...base, gotchas: "boom" })).status).toBe(400);
+    expect((await post({ ...base, gotchas: [{ title: "t" }] })).status).toBe(400);
+    expect((await post({ ...base, rewrites: [{ target: 42, content: "c" }] })).status).toBe(400);
+
+    const ok = await post({ ...base, step_id: "step_1", gotchas: [{ title: "t", body: "b" }], rewrites: [{ target: "wiki/agents/agent_demo/hot.md", kind: "candidate_rewrite", content: "c" }] });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toMatchObject({ status: "ok" });
+  });
+
   it("rejects unsafe article slugs", async () => {
     const app = await loadApp();
     const res = await app.request("/api/memory/articles/..%2F..%2Fetc");

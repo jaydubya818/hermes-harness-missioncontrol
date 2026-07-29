@@ -116,6 +116,27 @@ app.post("/api/memory/tasks/close", async (c) => {
   if (!body) return c.json({ error: "invalid JSON body" }, 400);
   if (!body.agent_id || !body.project_id || !body.outcome || !body.summary) return c.json({ error: "agent_id, project_id, outcome, summary required" }, 400);
   if (!isSafeId(body.agent_id) || !isSafeId(body.project_id)) return c.json({ error: "unsafe id" }, 400);
+  if (!["success", "failure", "partial"].includes(body.outcome)) {
+    return c.json({ error: "outcome must be one of success, failure, partial" }, 400);
+  }
+  if (typeof body.summary !== "string") return c.json({ error: "summary must be a string" }, 400);
+  // step_id is interpolated into a task-log markdown heading; a newline there
+  // injects arbitrary headings into the agent's task log.
+  if (body.step_id !== undefined && (typeof body.step_id !== "string" || !isSafeId(body.step_id))) {
+    return c.json({ error: "unsafe step_id" }, 400);
+  }
+  // The writeback iterates these collections with .map; a non-array value (or
+  // non-string note fields) would crash the handler into a 500 mid-write.
+  for (const field of ["discoveries", "gotchas"] as const) {
+    const notes = body[field];
+    if (notes === undefined) continue;
+    if (!Array.isArray(notes) || notes.some((note) => !note || typeof note !== "object" || typeof note.title !== "string" || typeof note.body !== "string")) {
+      return c.json({ error: `${field} must be an array of { title, body } string pairs` }, 400);
+    }
+  }
+  if (body.rewrites !== undefined && (!Array.isArray(body.rewrites) || body.rewrites.some((rewrite) => !rewrite || typeof rewrite !== "object" || typeof rewrite.target !== "string" || typeof rewrite.content !== "string"))) {
+    return c.json({ error: "rewrites must be an array of { target, content } string pairs" }, 400);
+  }
   const result = await closeTask(vaultRoot, body);
   return c.json(result);
 });
