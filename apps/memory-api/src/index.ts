@@ -306,7 +306,9 @@ app.get("/api/memory/articles/:slug{.+}", async (c) => {
   try {
     const fullPath = safeWikiPath(...slug.split("/"));
     const content = await readText(fullPath);
-    if (!content) return c.json({ slug, content: "Not found" }, 404);
+    // readText yields null only when the file is unreadable; an existing but
+    // empty article must not 404.
+    if (content === null) return c.json({ slug, content: "Not found" }, 404);
     return c.json({ slug, content });
   } catch (error) {
     return c.json({ error: String(error) }, 400);

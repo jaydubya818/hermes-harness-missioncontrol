@@ -218,6 +218,19 @@ describe("memory-api", () => {
     expect(await ok.json()).toMatchObject({ status: "ok" });
   });
 
+  it("serves existing-but-empty articles instead of 404ing", async () => {
+    const vault = makeVault();
+    writeFileSync(join(vault, "wiki", "agents", "agent_demo", "hot.md"), "");
+    const app = await loadApp({ vaultRoot: vault });
+
+    const empty = await app.request("/api/memory/articles/agents/agent_demo/hot.md");
+    expect(empty.status).toBe(200);
+    expect(await empty.json()).toMatchObject({ content: "" });
+
+    const missing = await app.request("/api/memory/articles/agents/agent_demo/nope.md");
+    expect(missing.status).toBe(404);
+  });
+
   it("rejects unsafe article slugs", async () => {
     const app = await loadApp();
     const res = await app.request("/api/memory/articles/..%2F..%2Fetc");
