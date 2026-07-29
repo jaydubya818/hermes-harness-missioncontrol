@@ -126,6 +126,7 @@ Worker/runtime:
 - test/review/deploy step handling
 - deploy adapter abstraction: `auto | noop-canary | vercel | render`
 - timeout + budget enforcement
+- pnpm reinstall is skipped when the workspace is already hydrated at the cached source commit
 
 Eval / observability:
 - eval record persistence and summaries (including `total_approvals`)
@@ -134,6 +135,10 @@ Eval / observability:
 - canonical event taxonomy including SSE replay/live stream
 - non-JSON worker responses fail the dispatch with the worker's HTTP status instead of a JSON parse error
 - memory promotions validate frontmatter fields and attribute per-agent counts by exact `promoted_by` line
+- eval lifecycle events are classified under an `eval` audit-timeline kind (filterable in the console)
+- close-task writebacks validate outcome/step_id/note collections and keep line-anchored wiki fields single-line
+- memory search anchors result snippets at the first content match
+- atomic state/wiki writers clean up their temp files when a write fails
 
 ## Deferred
 
