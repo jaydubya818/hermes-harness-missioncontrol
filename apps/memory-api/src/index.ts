@@ -283,9 +283,13 @@ app.get("/api/memory/search", async (c) => {
     if (results.length >= SEARCH_MAX_RESULTS) break;
     const path = `wiki/${rel}`;
     const content = await readText(join(wikiRoot, rel));
-    if (content && (!query || content.toLowerCase().includes(query) || path.toLowerCase().includes(query))) {
-      results.push({ path, snippet: content.slice(0, 240) });
-    }
+    if (!content) continue;
+    const matchIndex = query ? content.toLowerCase().indexOf(query) : -1;
+    if (query && matchIndex === -1 && !path.toLowerCase().includes(query)) continue;
+    // Anchor the snippet at the first content match so the result shows why
+    // the file matched instead of always echoing its first 240 characters.
+    const start = matchIndex > 60 ? matchIndex - 60 : 0;
+    results.push({ path, snippet: content.slice(start, start + 240) });
   }
   return c.json({ query, results });
 });

@@ -174,6 +174,19 @@ describe("memory-api", () => {
     expect(payload.results[0]!.snippet).toContain("zebra-pattern");
   });
 
+  it("anchors search snippets at the first match instead of the file head", async () => {
+    const vault = makeVault();
+    const filler = "filler line\n".repeat(60);
+    writeFileSync(join(vault, "wiki", "projects", "proj_demo", "notes.md"), `${filler}the flux capacitor needs recalibrating\n`);
+    const app = await loadApp({ vaultRoot: vault });
+
+    const res = await app.request("/api/memory/search?q=flux%20capacitor");
+    const payload = await res.json() as { results: Array<{ path: string; snippet: string }> };
+    const hit = payload.results.find((item) => item.path.endsWith("notes.md"));
+    expect(hit).toBeDefined();
+    expect(hit!.snippet).toContain("flux capacitor");
+  });
+
   it("rejects bus publishes with non-string fields instead of crashing", async () => {
     const app = await loadApp({ vaultRoot: makeVault() });
     const badTitle = await app.request("/api/memory/bus/publish", {
