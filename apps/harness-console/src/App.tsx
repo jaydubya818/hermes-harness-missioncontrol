@@ -430,30 +430,40 @@ function Memory() {
   const { data: rewrites } = useSWR(`${MEM}/api/memory/agents/agent_demo/rewrite-candidates`, fetcher, { refreshInterval: 10000 });
   const [writeback, setWriteback] = useState<any>(null);
   const [promotion, setPromotion] = useState<any>(null);
+  const [memoryError, setMemoryError] = useState<string | null>(null);
   const [section, setSection] = useState("projects/proj_demo");
   const [selectedArticle, setSelectedArticle] = useState("projects/proj_demo/standards.md");
   const { data: articles } = useSWR(`${MEM}/api/memory/articles?section=${encodeURIComponent(section)}`, fetcher, { refreshInterval: 10000 });
   const { data: article } = useSWR(selectedArticle ? `${MEM}/api/memory/articles/${selectedArticle}` : null, fetcher, { refreshInterval: 10000 });
 
   async function closeTaskWriteback() {
-    const response = await authFetch(`${MEM}/api/memory/tasks/close`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        agent_id: "agent_demo",
-        project_id: "proj_demo",
-        mission_id: "mis_demo",
-        run_id: "run_demo",
-        step_id: "step_demo",
-        outcome: "success",
-        summary: "Recorded a successful bounded autonomy writeback from the console.",
-        discoveries: [{ title: "Bounded autonomy works better", body: "Keep the harness constrained to low-risk workflows first." }],
-        gotchas: [{ title: "Writeback path proven", body: "Console-triggered writeback successfully appended to memory runtime files." }],
-        rewrites: [{ target: "wiki/projects/proj_demo/standards.md", kind: "candidate_rewrite", content: "Add explicit note that promotions require review." }],
-        artifacts: [{ type: "console", uri: "ui://memory/writeback" }]
-      })
-    });
-    const data = await response.json();
+    // Match the SWR fetcher: surface HTTP errors instead of rendering the
+    // error body as a writeback result (and never leave the click handler's
+    // promise rejection unhandled when memory-api is down).
+    setMemoryError(null);
+    let data: any;
+    try {
+      data = await authJson(`${MEM}/api/memory/tasks/close`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          agent_id: "agent_demo",
+          project_id: "proj_demo",
+          mission_id: "mis_demo",
+          run_id: "run_demo",
+          step_id: "step_demo",
+          outcome: "success",
+          summary: "Recorded a successful bounded autonomy writeback from the console.",
+          discoveries: [{ title: "Bounded autonomy works better", body: "Keep the harness constrained to low-risk workflows first." }],
+          gotchas: [{ title: "Writeback path proven", body: "Console-triggered writeback successfully appended to memory runtime files." }],
+          rewrites: [{ target: "wiki/projects/proj_demo/standards.md", kind: "candidate_rewrite", content: "Add explicit note that promotions require review." }],
+          artifacts: [{ type: "console", uri: "ui://memory/writeback" }]
+        })
+      });
+    } catch (err) {
+      setMemoryError(err instanceof Error ? err.message : String(err));
+      return;
+    }
     setWriteback(data);
     mutate(`${MEM}/api/memory/agents/agent_demo/summary`);
     mutate(`${MEM}/api/memory/projects/proj_demo/summary`);
@@ -461,12 +471,16 @@ function Memory() {
   }
 
   async function promoteRewrite(item: any) {
-    const response = await authFetch(`${MEM}/api/memory/promote`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ item_id: item.id, promoted_by: "agent_demo", target_path: `wiki/projects/proj_demo/promoted-${item.id}.md`, promotion_kind: "standard" })
-    });
-    setPromotion(await response.json());
+    setMemoryError(null);
+    try {
+      setPromotion(await authJson(`${MEM}/api/memory/promote`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ item_id: item.id, promoted_by: "agent_demo", target_path: `wiki/projects/proj_demo/promoted-${item.id}.md`, promotion_kind: "standard" })
+      }));
+    } catch (err) {
+      setMemoryError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   return (
@@ -484,6 +498,7 @@ function Memory() {
         <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
           <Button onClick={closeTaskWriteback}>Run writeback</Button>
         </div>
+        {memoryError && <div style={{ color: "#fca5a5", fontSize: 13, marginBottom: 12 }}>Memory action failed: {memoryError}. If auth is enabled, save HARNESS_OPERATOR_TOKEN in Settings first.</div>}
         {writeback ? <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(writeback, null, 2)}</pre> : <div>No writeback executed yet.</div>}
         <div style={{ height: 12 }} />
         <div style={{ display: "grid", gap: 8 }}>
