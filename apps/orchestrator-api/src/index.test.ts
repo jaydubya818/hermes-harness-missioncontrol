@@ -1104,6 +1104,34 @@ describe("orchestrator-api", () => {
     expect(payload.timeline_summary.recent[0]).toMatchObject({ title: "Approval requested" });
   });
 
+  it("reports the true event total in detail read models when the timeline exceeds a page", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-timeline-total-"));
+    const stateFile = join(stateDir, "state.json");
+    const now = "2026-04-11T00:00:00.000Z";
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [{ mission_id: "mis_busy", title: "Busy", project_id: "proj_demo", workflow: "bugfix", status: "running", created_at: now, updated_at: now }],
+      runs: [],
+      approvals: [],
+      events: Array.from({ length: 120 }, (_, index) => ({
+        event_id: `evt_busy_${index}`,
+        type: "step.progress",
+        ts: `2026-04-11T00:00:${String(index % 60).padStart(2, "0")}.${String(index).padStart(3, "0")}Z`,
+        mission_id: "mis_busy",
+        payload: {}
+      })),
+      audit: []
+    }), "utf8");
+
+    const app = await loadApp(stateFile);
+    const detail = await (await app.request("/api/read-models/missions/mis_busy")).json() as { timeline_summary: { total_events: number } };
+
+    // The audit read model pages at 100 items; total_events must reflect the
+    // real count, not the page size.
+    expect(detail.timeline_summary.total_events).toBe(120);
+  });
+
   it("builds run detail read model with steps, approvals, artifacts, and timeline summaries", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
 

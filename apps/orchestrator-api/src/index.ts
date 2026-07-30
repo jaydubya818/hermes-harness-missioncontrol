@@ -836,7 +836,7 @@ function buildMissionDetailReadModel(missionId: string) {
 
   const runs = state.runs.filter((run) => run.mission_id === missionId);
   const approvals = state.approvals.filter((approval) => approval.mission_id === missionId);
-  const timeline = buildAuditReadModel({ mission_id: missionId }).timeline;
+  const { timeline, pagination: timelinePagination } = buildAuditReadModel({ mission_id: missionId });
   const totalArtifacts = runs.reduce((sum, run) => sum + run.steps.reduce((stepSum, step) => stepSum + step.artifacts.length, 0), 0);
   const activeRun = mission.active_run_id ? runs.find((run) => run.run_id === mission.active_run_id) : undefined;
 
@@ -865,7 +865,9 @@ function buildMissionDetailReadModel(missionId: string) {
       total_artifacts: totalArtifacts
     },
     timeline_summary: {
-      total_events: timeline.length,
+      // The timeline above is a page (default cap 100); pagination.total is
+      // the real event count for this scope.
+      total_events: timelinePagination.total,
       recent: timeline.slice(0, 10)
     }
   };
@@ -877,7 +879,7 @@ function buildRunDetailReadModel(runId: string) {
 
   const mission = state.missions.find((item) => item.mission_id === run.mission_id);
   const approvals = state.approvals.filter((approval) => approval.run_id === runId);
-  const timeline = buildAuditReadModel({ run_id: runId }).timeline;
+  const { timeline, pagination: timelinePagination } = buildAuditReadModel({ run_id: runId });
   const totalArtifacts = run.steps.reduce((sum, step) => sum + step.artifacts.length, 0);
 
   return {
@@ -915,7 +917,9 @@ function buildRunDetailReadModel(runId: string) {
       total_artifacts: totalArtifacts
     },
     timeline_summary: {
-      total_events: timeline.length,
+      // The timeline above is a page (default cap 100); pagination.total is
+      // the real event count for this scope.
+      total_events: timelinePagination.total,
       recent: timeline.slice(0, 10)
     }
   };
@@ -930,7 +934,7 @@ function buildStepDetailReadModel(runId: string, stepId: string) {
   if (!step) return null;
 
   const approval = step.approval_id ? state.approvals.find((item) => item.approval_id === step.approval_id) : undefined;
-  const timeline = buildAuditReadModel({ run_id: runId, step_id: stepId }).timeline;
+  const { timeline, pagination: timelinePagination } = buildAuditReadModel({ run_id: runId, step_id: stepId });
 
   return {
     mission: mission ? { mission_id: mission.mission_id, title: mission.title, status: mission.status } : null,
@@ -963,7 +967,9 @@ function buildStepDetailReadModel(runId: string, stepId: string) {
       outcome: step.state === "completed" ? "success" : step.state === "failed" ? "failure" : "pending"
     },
     timeline_summary: {
-      total_events: timeline.length,
+      // The timeline above is a page (default cap 100); pagination.total is
+      // the real event count for this scope.
+      total_events: timelinePagination.total,
       recent: timeline.slice(0, 10)
     }
   };
