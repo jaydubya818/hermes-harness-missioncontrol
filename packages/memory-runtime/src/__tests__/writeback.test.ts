@@ -31,6 +31,25 @@ describe("writeback", () => {
     expect(readFileSync(join(root, "wiki", "agents", "agent_demo", "learned.md"), "utf8")).toContain("g");
   });
 
+  it("keeps both appends when two writebacks for the same agent run concurrently", async () => {
+    const { closeTask } = await loadWritebackModule();
+    const root = mkdtempSync(join(tmpdir(), "writeback-concurrent-"));
+    const base = {
+      agent_id: "agent_demo",
+      project_id: "proj_demo",
+      outcome: "success"
+    } as const;
+
+    await Promise.all([
+      closeTask(root, { ...base, summary: "first concurrent writeback" }),
+      closeTask(root, { ...base, summary: "second concurrent writeback" })
+    ]);
+
+    const taskLog = readFileSync(join(root, "wiki", "agents", "agent_demo", "task-log.md"), "utf8");
+    expect(taskLog).toContain("first concurrent writeback");
+    expect(taskLog).toContain("second concurrent writeback");
+  });
+
   it("does not partially commit files when a later write fails", async () => {
     const root = mkdtempSync(join(tmpdir(), "writeback-atomic-"));
     const agentDir = join(root, "wiki", "agents", "agent_demo");

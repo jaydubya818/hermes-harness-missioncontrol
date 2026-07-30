@@ -96,7 +96,19 @@ async function commitTextBatchAtomically(writes: PendingWrite[]) {
   }
 }
 
-export async function closeTask(vaultRoot: string, request: CloseTaskRequest): Promise<CloseTaskResponse> {
+// closeTask appends via read-modify-write on shared files (task-log.md,
+// learned.md, rewrites.md). Two concurrent writebacks that both read before
+// either commits would silently drop one of the appends, so writebacks are
+// serialized through a module-level queue.
+let writebackQueue: Promise<unknown> = Promise.resolve();
+
+export function closeTask(vaultRoot: string, request: CloseTaskRequest): Promise<CloseTaskResponse> {
+  const task = writebackQueue.then(() => performCloseTask(vaultRoot, request));
+  writebackQueue = task.catch(() => undefined);
+  return task;
+}
+
+async function performCloseTask(vaultRoot: string, request: CloseTaskRequest): Promise<CloseTaskResponse> {
   const started = Date.now();
   const writes: CloseTaskResponse["writes"] = [];
   const base = safeVaultPath(join(vaultRoot, "wiki", "agents"), request.agent_id);
