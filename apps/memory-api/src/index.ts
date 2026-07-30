@@ -314,7 +314,9 @@ app.get("/api/memory/articles", async (c) => {
   if (section && !isSafeId(section)) return c.json({ error: "unsafe section" }, 400);
   try {
     const base = section ? safeWikiPath(...section.split("/")) : safeWikiPath();
-    const files = await listDir(base);
+    // Hide dotfiles (in-flight atomic-write temp files, editor droppings)
+    // from the docs browser, matching what search indexes.
+    const files = (await listDir(base)).filter((file) => !file.startsWith("."));
     return c.json({ section: section ?? "root", files });
   } catch (error) {
     return c.json({ error: String(error) }, 400);

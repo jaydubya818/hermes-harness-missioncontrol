@@ -161,6 +161,17 @@ describe("memory-api", () => {
     expect(bus).toContain("real title ## 2099-01-01");
   });
 
+  it("hides dotfiles from article listings", async () => {
+    const vaultRoot = makeVault();
+    writeFileSync(join(vaultRoot, "wiki", "projects", "proj_demo", ".12345-abc.tmp"), "partial write", "utf8");
+    const app = await loadApp({ vaultRoot });
+    const res = await app.request("/api/memory/articles?section=projects/proj_demo");
+    expect(res.status).toBe(200);
+    const payload = await res.json() as { files: string[] };
+    expect(payload.files).toContain("standards.md");
+    expect(payload.files.some((file) => file.startsWith("."))).toBe(false);
+  });
+
   it("rejects bus channels outside the contract union", async () => {
     const app = await loadApp({ vaultRoot: makeVault() });
     const res = await app.request("/api/memory/bus/publish", {
