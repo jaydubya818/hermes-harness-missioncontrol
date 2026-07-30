@@ -265,6 +265,7 @@ describe("memory-api", () => {
     expect((await post({ ...base, gotchas: "boom" })).status).toBe(400);
     expect((await post({ ...base, gotchas: [{ title: "t" }] })).status).toBe(400);
     expect((await post({ ...base, rewrites: [{ target: 42, content: "c" }] })).status).toBe(400);
+    expect((await post({ ...base, rewrites: [{ target: "wiki/agents/agent_demo/hot.md", kind: "yolo_rewrite", content: "c" }] })).status).toBe(400);
 
     const ok = await post({ ...base, step_id: "step_1", gotchas: [{ title: "t", body: "b" }], rewrites: [{ target: "wiki/agents/agent_demo/hot.md", kind: "candidate_rewrite", content: "c" }] });
     expect(ok.status).toBe(200);

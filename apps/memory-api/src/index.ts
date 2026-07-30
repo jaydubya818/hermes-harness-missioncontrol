@@ -143,6 +143,10 @@ app.post("/api/memory/tasks/close", async (c) => {
   if (body.rewrites !== undefined && (!Array.isArray(body.rewrites) || body.rewrites.some((rewrite) => !rewrite || typeof rewrite !== "object" || typeof rewrite.target !== "string" || typeof rewrite.content !== "string"))) {
     return c.json({ error: "rewrites must be an array of { target, content } string pairs" }, 400);
   }
+  // kind is a closed union in the RewriteProposal contract.
+  if (Array.isArray(body.rewrites) && body.rewrites.some((rewrite) => !["candidate_rewrite", "standard_update"].includes(rewrite.kind))) {
+    return c.json({ error: "rewrite kind must be one of candidate_rewrite, standard_update" }, 400);
+  }
   const result = await closeTask(vaultRoot, body);
   return c.json(result);
 });
