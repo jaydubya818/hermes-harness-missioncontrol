@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { access, mkdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { dirname, join, resolve } from "node:path";
@@ -255,6 +255,25 @@ describe("worker-runtime", () => {
     await expect(bootstrapWorkspaceDependencies(workspace, sourceRepo)).resolves.toMatchObject({ reused: true, commit });
     // The pre-hydrated node_modules must survive (no unlink + reinstall).
     await expect(access(join(workspace, "node_modules"))).resolves.toBeUndefined();
+  });
+
+  it("hydrates workspaces whose node_modules symlink is dangling instead of crashing", async () => {
+    const run = promisify(execFile);
+    const sourceRepo = join(sandboxRoot, "dangling-source-repo");
+    await mkdir(join(sourceRepo, "node_modules"), { recursive: true });
+    await writeFile(join(sourceRepo, "package.json"), JSON.stringify({ name: "dangling-repo" }), "utf8");
+    await run("git", ["-C", sourceRepo, "init", "-q"]);
+    await run("git", ["-C", sourceRepo, "add", "package.json"]);
+    await run("git", ["-C", sourceRepo, "-c", "user.email=test@example.com", "-c", "user.name=test", "commit", "-q", "-m", "init"]);
+
+    const workspace = join(sandboxRoot, "dangling-workspace");
+    await mkdir(workspace, { recursive: true });
+    // A symlink whose target no longer exists: access() reports it missing,
+    // but the directory entry is still there, so a blind symlink() throws
+    // EEXIST and aborts hydration.
+    await symlink(join(sandboxRoot, "no-such-target"), join(workspace, "node_modules"), "dir");
+
+    await expect(bootstrapWorkspaceDependencies(workspace, sourceRepo)).resolves.toMatchObject({ reused: false });
   });
 
   it("cleans up run directories even without git metadata", async () => {

@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { mkdir, writeFile, access, rm, readFile, symlink, unlink, readdir } from "node:fs/promises";
+import { mkdir, writeFile, access, rm, readFile, symlink, unlink, readdir, lstat } from "node:fs/promises";
 import { resolve, join, relative, dirname, isAbsolute } from "node:path";
 import { execFile } from "node:child_process";
 import { timingSafeEqual } from "node:crypto";
@@ -560,8 +560,20 @@ async function detectPackageManager(repoWorkspace: string) {
   return "npm";
 }
 
+async function entryExists(path: string): Promise<boolean> {
+  try {
+    // lstat (not access) so a dangling symlink still counts as present;
+    // access follows the link, reports it missing, and the symlink() below
+    // would then crash workspace hydration with EEXIST.
+    await lstat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function symlinkIfMissing(sourcePath: string, targetPath: string) {
-  if (!(await exists(sourcePath)) || await exists(targetPath)) return;
+  if (!(await exists(sourcePath)) || await entryExists(targetPath)) return;
   await mkdir(dirname(targetPath), { recursive: true });
   await symlink(sourcePath, targetPath, "dir");
 }
