@@ -181,6 +181,11 @@ app.post("/api/memory/bus/publish", async (c) => {
       return c.json({ error: "channel, agent_id, project_id, title, body must be non-empty strings" }, 400);
     }
   }
+  // Channel is a closed union in the PublishBusRequest contract; junk values
+  // would land in bus.md headings and break consumers filtering by channel.
+  if (!["discovery", "escalation", "handoff", "standard"].includes(body.channel)) {
+    return c.json({ error: "channel must be one of discovery, escalation, handoff, standard" }, 400);
+  }
   if (body.severity !== undefined && typeof body.severity !== "string") return c.json({ error: "severity must be a string" }, 400);
   if (body.tags !== undefined && (!Array.isArray(body.tags) || body.tags.some((tag) => typeof tag !== "string"))) {
     return c.json({ error: "tags must be an array of strings" }, 400);
