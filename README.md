@@ -107,6 +107,8 @@ Lifecycle / governance:
 - replay-safe event ingestion by `event_id`
 - duplicate artifact protection by `artifact_id`
 - orphan worktree cleanup endpoint + optional periodic sweeper
+- the persisted audit trail is restored on load, keeping audit ids stable across restarts
+- mission/run/step detail read models report true event totals (not the timeline page size)
 
 Operator surfaces:
 - overview read model
@@ -127,6 +129,7 @@ Worker/runtime:
 - deploy adapter abstraction: `auto | noop-canary | vercel | render`
 - timeout + budget enforcement
 - pnpm reinstall is skipped when the workspace is already hydrated at the cached source commit
+- workspace hydration tolerates dangling `node_modules` symlinks instead of crashing on EEXIST
 
 Eval / observability:
 - eval record persistence and summaries (including `total_approvals`)
@@ -139,6 +142,10 @@ Eval / observability:
 - close-task writebacks validate outcome/step_id/note collections and keep line-anchored wiki fields single-line
 - memory search anchors result snippets at the first content match
 - atomic state/wiki writers clean up their temp files when a write fails
+- concurrent close-task writebacks and bus publishes are serialized so appends are never lost
+- bus publishes validate the channel against the `PublishBusRequest` union
+- article listings hide dotfiles (in-flight atomic-write temp files)
+- console memory writeback/promote actions surface HTTP errors instead of rendering error bodies
 
 ## Deferred
 
