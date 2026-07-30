@@ -161,6 +161,24 @@ describe("memory-api", () => {
     expect(bus).toContain("real title ## 2099-01-01");
   });
 
+  it("keeps both bus entries when two publishes run concurrently", async () => {
+    const vaultRoot = makeVault();
+    const app = await loadApp({ vaultRoot });
+    const publish = (title: string) => app.request("/api/memory/bus/publish", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "discovery", agent_id: "agent_demo", project_id: "proj_demo", title, body: "body" })
+    });
+
+    const [first, second] = await Promise.all([publish("first concurrent entry"), publish("second concurrent entry")]);
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+
+    const bus = readFileSync(join(vaultRoot, "wiki", "projects", "proj_demo", "bus.md"), "utf8");
+    expect(bus).toContain("first concurrent entry");
+    expect(bus).toContain("second concurrent entry");
+  });
+
   it("finds memory for non-demo agents and projects via search", async () => {
     const root = makeVault();
     mkdirSync(join(root, "wiki", "projects", "proj_real"), { recursive: true });

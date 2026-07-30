@@ -167,6 +167,8 @@ app.post("/api/memory/promote", async (c) => {
   return c.json(result);
 });
 
+let busPublishQueue: Promise<unknown> = Promise.resolve();
+
 app.post("/api/memory/bus/publish", async (c) => {
   const authError = requireOperator(c);
   if (authError) return authError;
@@ -185,10 +187,16 @@ app.post("/api/memory/bus/publish", async (c) => {
   }
   if (!isSafeId(body.agent_id) || !isSafeId(body.project_id)) return c.json({ error: "unsafe id" }, 400);
   const busPath = safeWikiPath("projects", body.project_id, "bus.md");
-  const existing = (await readText(busPath)) ?? "";
   const inline = (value: string) => value.replace(/[\r\n]+/g, " ").trim();
   const entry = `\n## ${new Date().toISOString()} [${inline(body.channel)}] ${inline(body.title)}\nAgent: ${body.agent_id}\nSeverity: ${inline(body.severity ?? "n/a")}\nTags: ${(body.tags ?? []).map(inline).join(", ")}\n\n${body.body}\n`;
-  await writeTextAtomically(busPath, `${existing}${entry}`);
+  // Appending is read-modify-write; two concurrent publishes that both read
+  // before either commits would drop one entry, so appends are serialized.
+  const publish = busPublishQueue.then(async () => {
+    const existing = (await readText(busPath)) ?? "";
+    await writeTextAtomically(busPath, `${existing}${entry}`);
+  });
+  busPublishQueue = publish.catch(() => undefined);
+  await publish;
   return c.json({ ok: true, path: `wiki/projects/${body.project_id}/bus.md` }, 201);
 });
 
