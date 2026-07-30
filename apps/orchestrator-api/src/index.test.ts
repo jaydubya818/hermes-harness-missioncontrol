@@ -1815,6 +1815,29 @@ describe("orchestrator-api", () => {
     expect(persisted.processed_event_ids).toContain("evt_recent");
   });
 
+  it("restores the persisted audit trail with stable audit ids across restarts", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-audit-restore-"));
+    const stateFile = join(stateDir, "state.json");
+
+    const app = await loadApp(stateFile);
+    await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Audit trail", project_id: "proj_demo" })
+    });
+    const before = await (await app.request("/api/audit")).json() as { audit: Array<{ audit_id?: string; type?: string }> };
+    expect(before.audit.length).toBeGreaterThan(0);
+
+    const reloaded = await loadApp(stateFile);
+    await reloaded.request("/health");
+    const after = await (await reloaded.request("/api/audit")).json() as { audit: Array<{ audit_id?: string; type?: string }> };
+
+    // Replay must not regenerate audit ids or drop persisted entries.
+    expect(after.audit.map((entry) => entry.audit_id)).toEqual(before.audit.map((entry) => entry.audit_id));
+  });
+
   it("skips unrecognized persisted events instead of failing every request", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

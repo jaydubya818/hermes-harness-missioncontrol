@@ -431,6 +431,14 @@ async function ensureLoaded() {
     }
   }
 
+  // Replaying events above regenerates audit entries with fresh audit_ids
+  // and can only rebuild the retained event window (500 events), while the
+  // audit trail persists up to 1000 entries. Restore the persisted trail so
+  // audit ids stay stable and older entries survive restarts.
+  if (Array.isArray(loaded.audit) && loaded.audit.length > 0) {
+    state.audit.splice(0, state.audit.length, ...loaded.audit.slice(0, 1000));
+  }
+
   for (const mission of state.missions) {
     const activeRun = mission.active_run_id
       ? state.runs.find((run) => run.run_id === mission.active_run_id)
