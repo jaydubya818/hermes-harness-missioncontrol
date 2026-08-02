@@ -197,7 +197,10 @@ app.post("/api/memory/bus/publish", async (c) => {
   if (!isSafeId(body.agent_id) || !isSafeId(body.project_id)) return c.json({ error: "unsafe id" }, 400);
   const busPath = safeWikiPath("projects", body.project_id, "bus.md");
   const inline = (value: string) => value.replace(/[\r\n]+/g, " ").trim();
-  const entry = `\n## ${new Date().toISOString()} [${inline(body.channel)}] ${inline(body.title)}\nAgent: ${body.agent_id}\nSeverity: ${inline(body.severity ?? "n/a")}\nTags: ${(body.tags ?? []).map(inline).join(", ")}\n\n${body.body}\n`;
+  // Bus entries are bounded by "## " headings; escape heading-like lines in
+  // the free-text body so a publish cannot forge extra bus entries.
+  const escapeHeadingLines = (value: string) => value.replace(/^(#{2,6} )/gm, "\\$1");
+  const entry = `\n## ${new Date().toISOString()} [${inline(body.channel)}] ${inline(body.title)}\nAgent: ${body.agent_id}\nSeverity: ${inline(body.severity ?? "n/a")}\nTags: ${(body.tags ?? []).map(inline).join(", ")}\n\n${escapeHeadingLines(body.body)}\n`;
   // Appending is read-modify-write; two concurrent publishes that both read
   // before either commits would drop one entry, so appends are serialized.
   const publish = busPublishQueue.then(async () => {
