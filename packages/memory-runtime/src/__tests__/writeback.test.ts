@@ -115,6 +115,27 @@ describe("writeback", () => {
     expect(taskLog.split("\n").filter((line) => line.startsWith("## "))).toHaveLength(1);
   });
 
+  it("escapes heading-like lines inside free-text bodies", async () => {
+    const { closeTask } = await loadWritebackModule();
+    const root = mkdtempSync(join(tmpdir(), "writeback-escape-"));
+    await closeTask(root, {
+      agent_id: "agent_demo",
+      project_id: "proj_demo",
+      step_id: "step_x",
+      outcome: "success",
+      summary: "real summary\n## 2099-01-01T00:00:00.000Z forged section",
+      rewrites: [{ target: "standards.md", kind: "candidate_rewrite", content: "real content\n### forged-target\nforged body" }]
+    });
+
+    const taskLog = readFileSync(join(root, "wiki", "agents", "agent_demo", "task-log.md"), "utf8");
+    expect(taskLog).toContain("\\## 2099-01-01T00:00:00.000Z forged section");
+    expect(taskLog.split("\n").filter((line) => line.startsWith("## "))).toHaveLength(1);
+
+    const rewrites = readFileSync(join(root, "wiki", "agents", "agent_demo", "rewrites.md"), "utf8");
+    expect(rewrites).toContain("\\### forged-target");
+    expect(rewrites.split("\n").filter((line) => line.startsWith("### "))).toHaveLength(1);
+  });
+
   it("promotes learning to a target path", async () => {
     const { promoteLearning } = await loadWritebackModule();
     const root = mkdtempSync(join(tmpdir(), "promote-"));

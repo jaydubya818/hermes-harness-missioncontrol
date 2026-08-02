@@ -122,9 +122,15 @@ async function performCloseTask(vaultRoot: string, request: CloseTaskRequest): P
   // caller passes embedded newlines.
   const inline = (value: string) => value.replace(/[\r\n]+/g, " ").trim();
 
+  // Free-text bodies (summary, rewrite content) sit beneath those anchored
+  // headings; a body line that itself starts with a heading marker would
+  // forge extra task-log sections or rewrite candidates. Escape such lines
+  // so they render as literal text instead of entry boundaries.
+  const escapeHeadingLines = (value: string) => value.replace(/^(#{2,6} )/gm, "\\$1");
+
   const stamp = `
 ## ${new Date().toISOString()} ${inline(request.step_id ?? "task")}
-${request.summary}
+${escapeHeadingLines(request.summary)}
 `;
 
   const pendingWrites: PendingWrite[] = [];
@@ -144,7 +150,7 @@ ${request.summary}
   if ((request.rewrites ?? []).length > 0) {
     const rewritesAppend = (request.rewrites ?? []).map((rewrite) => `
 ### ${inline(rewrite.target)}
-${rewrite.content}
+${escapeHeadingLines(rewrite.content)}
 `).join("");
     pendingWrites.push({ path: rewritesPath, content: `${await readText(rewritesPath)}${rewritesAppend}` });
     writes.push({ path: rewritesPath, memory_class: "rewrite" });
