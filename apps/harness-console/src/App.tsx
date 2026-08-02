@@ -476,7 +476,10 @@ function Memory() {
       setPromotion(await authJson(`${MEM}/api/memory/promote`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ item_id: item.id, promoted_by: "agent_demo", target_path: `wiki/projects/proj_demo/promoted-${item.id}.md`, promotion_kind: "standard" })
+        // item.id is positional (rewrite_1, rewrite_2, ...), so reusing it as
+        // the filename would overwrite earlier promotions once the candidate
+        // list changes; suffix a timestamp to keep each promotion distinct.
+        body: JSON.stringify({ item_id: item.id, promoted_by: "agent_demo", target_path: `wiki/projects/proj_demo/promoted-${item.id}-${Date.now()}.md`, promotion_kind: "standard" })
       }));
     } catch (err) {
       setMemoryError(err instanceof Error ? err.message : String(err));
