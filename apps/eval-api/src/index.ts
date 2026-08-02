@@ -134,6 +134,12 @@ app.post("/api/evals", async (c) => {
       return c.json({ error: `${field} must be a non-negative finite number` }, 400);
     }
   }
+  // created_at is required by the EvalRecord contract and consumers sort and
+  // display it; accept only parseable date strings and stamp receipt time
+  // when the caller omits it.
+  if (body.created_at !== undefined && (typeof body.created_at !== "string" || Number.isNaN(Date.parse(body.created_at)))) {
+    return c.json({ error: "created_at must be a parseable date string when provided" }, 400);
+  }
   if (body.eval_id) {
     // Replayed submissions (orchestrator retries, network replays) must not
     // duplicate records; mirror the artifact_id dedupe behaviour.
@@ -142,7 +148,8 @@ app.post("/api/evals", async (c) => {
   }
   const record = {
     ...body,
-    eval_id: body.eval_id ?? `eval_${randomUUID().replace(/-/g, "").slice(0, 12)}`
+    eval_id: body.eval_id ?? `eval_${randomUUID().replace(/-/g, "").slice(0, 12)}`,
+    created_at: body.created_at ?? new Date().toISOString()
   } satisfies EvalRecord;
   records.push(record);
   await persist();

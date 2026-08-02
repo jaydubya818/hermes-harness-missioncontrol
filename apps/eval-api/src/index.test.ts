@@ -99,6 +99,27 @@ describe("eval-api", () => {
     expect(Number.isFinite(payload.summary.total_cost_usd)).toBe(true);
   });
 
+  it("validates created_at and stamps receipt time when it is omitted", async () => {
+    const app = await loadApp();
+
+    const badCreatedAt = await app.request("/api/evals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mission_id: "mis_demo", run_id: "run_a", outcome: "success", cost_usd: 0.1, created_at: "not-a-date" })
+    });
+    expect(badCreatedAt.status).toBe(400);
+
+    const omitted = await app.request("/api/evals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mission_id: "mis_demo", run_id: "run_a", outcome: "success", cost_usd: 0.1 })
+    });
+    expect(omitted.status).toBe(201);
+    const payload = await omitted.json() as { record: { created_at?: string } };
+    expect(typeof payload.record.created_at).toBe("string");
+    expect(Number.isNaN(Date.parse(payload.record.created_at!))).toBe(false);
+  });
+
   it("rejects non-string ids so records stay addressable by GET /api/evals/:id", async () => {
     const app = await loadApp();
     const numericEvalId = await app.request("/api/evals", {
