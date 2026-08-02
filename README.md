@@ -106,6 +106,7 @@ Lifecycle / governance:
 - approval normalization and authoritative `Step.approval_id`
 - replay-safe event ingestion by `event_id`
 - duplicate artifact protection by `artifact_id`
+- mission creation rejects workflow ids that are not in the workflow library
 - orphan worktree cleanup endpoint + optional periodic sweeper
 - the persisted audit trail is restored on load, keeping audit ids stable across restarts
 - mission/run/step detail read models report true event totals (not the timeline page size)
@@ -144,6 +145,9 @@ Eval / observability:
 - atomic state/wiki writers clean up their temp files when a write fails
 - concurrent close-task writebacks and bus publishes are serialized so appends are never lost
 - bus publishes validate the channel against the `PublishBusRequest` union
+- heading-like lines inside free-text bodies (task-log summaries, rewrite content, bus bodies) are escaped so callers cannot forge entry boundaries
+- eval submissions validate `created_at` and stamp receipt time when it is omitted
+- rewrite-candidate parsing is position-independent, and console promotions use unique target paths so earlier promotions are never overwritten
 - article listings hide dotfiles (in-flight atomic-write temp files)
 - console memory writeback/promote actions surface HTTP errors instead of rendering error bodies
 
