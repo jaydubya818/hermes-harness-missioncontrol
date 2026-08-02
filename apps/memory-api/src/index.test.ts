@@ -182,6 +182,22 @@ describe("memory-api", () => {
     expect(bus).toContain("more text");
   });
 
+  it("parses rewrite candidates even when the file starts with a heading", async () => {
+    const vaultRoot = makeVault();
+    writeFileSync(
+      join(vaultRoot, "wiki", "agents", "agent_demo", "rewrites.md"),
+      "### first-target\nfirst content\n\n### second-target\nsecond content\n",
+      "utf8"
+    );
+    const app = await loadApp({ vaultRoot });
+    const res = await app.request("/api/memory/agents/agent_demo/rewrite-candidates");
+    expect(res.status).toBe(200);
+    const payload = await res.json() as { items: Array<{ id: string; target: string; content: string }> };
+    expect(payload.items).toHaveLength(2);
+    expect(payload.items[0]).toMatchObject({ target: "first-target", content: "first content" });
+    expect(payload.items[1]).toMatchObject({ target: "second-target", content: "second content" });
+  });
+
   it("hides dotfiles from article listings", async () => {
     const vaultRoot = makeVault();
     writeFileSync(join(vaultRoot, "wiki", "projects", "proj_demo", ".12345-abc.tmp"), "partial write", "utf8");

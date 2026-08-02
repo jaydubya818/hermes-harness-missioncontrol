@@ -239,6 +239,10 @@ app.get("/api/memory/agents/:id/rewrite-candidates", async (c) => {
   const items = (rewrites ?? "")
     .split("\n### ")
     .map((chunk) => chunk.trim())
+    // When the file starts with a heading at position 0 (hand-edited files
+    // have no leading newline), the first chunk keeps its "### " prefix;
+    // strip it so the target parses consistently.
+    .map((chunk) => chunk.startsWith("### ") ? chunk.slice(4) : chunk)
     .filter(Boolean)
     .map((chunk, index) => {
       const [target, ...rest] = chunk.split("\n");
