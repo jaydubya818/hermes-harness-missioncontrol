@@ -4,7 +4,7 @@ import { cors } from "hono/cors";
 import { relative, resolve } from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import { readdir } from "node:fs/promises";
-import { attachArtifact, createWorkflowRun, getCurrentStep, startCurrentStep, advanceRun, markCurrentStepAwaitingApproval, markCurrentStepCompleted, markCurrentStepFailed, pauseCurrentStep, resumeCurrentStep, retryCurrentStep, cancelCurrentStep, syncRunState, type WorkflowArtifact, type WorkflowRun } from "@hermes-harness-with-missioncontrol/workflow-engine";
+import { attachArtifact, createWorkflowRun, getCurrentStep, startCurrentStep, advanceRun, markCurrentStepAwaitingApproval, markCurrentStepCompleted, markCurrentStepFailed, pauseCurrentStep, resumeCurrentStep, retryCurrentStep, cancelCurrentStep, syncRunState, WORKFLOW_LIBRARY, type WorkflowArtifact, type WorkflowRun } from "@hermes-harness-with-missioncontrol/workflow-engine";
 import { evaluateStepPolicy } from "@hermes-harness-with-missioncontrol/policy-engine";
 import { loadJsonFile, saveJsonFile } from "@hermes-harness-with-missioncontrol/state-store";
 import { makeId, type HarnessEvent } from "@hermes-harness-with-missioncontrol/shared-types";
@@ -1400,6 +1400,11 @@ app.post("/api/missions", async (c) => {
   if (!body) return c.json({ error: "invalid JSON body" }, 400);
   if (typeof body.title !== "string" || !body.title.trim()) return c.json({ error: "title required" }, 400);
   if (typeof body.project_id !== "string" || !body.project_id.startsWith("proj_")) return c.json({ error: "project_id must start with proj_" }, 400);
+  // createWorkflowRun silently falls back to the bugfix workflow for unknown
+  // ids, so a typo here would run the wrong workflow without any signal.
+  if (body.workflow_id !== undefined && (typeof body.workflow_id !== "string" || !(body.workflow_id in WORKFLOW_LIBRARY))) {
+    return c.json({ error: `workflow_id must be one of: ${Object.keys(WORKFLOW_LIBRARY).join(", ")}` }, 400);
+  }
   const now = new Date().toISOString();
   const mission: Mission = {
     mission_id: makeId("mis") as `mis_${string}`,

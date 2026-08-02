@@ -98,6 +98,15 @@ describe("orchestrator-api", () => {
     });
     expect(badProject.status).toBe(400);
 
+    // createWorkflowRun silently substitutes bugfix for unknown workflows,
+    // so an unrecognized workflow_id must be rejected at mission creation.
+    const badWorkflow = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Contracts", project_id: "proj_demo", workflow_id: "does_not_exist" })
+    });
+    expect(badWorkflow.status).toBe(400);
+
     const missions = await app.request("/api/missions");
     const missionsPayload = await missions.json() as { missions: unknown[] };
     expect(missionsPayload.missions).toHaveLength(0);
