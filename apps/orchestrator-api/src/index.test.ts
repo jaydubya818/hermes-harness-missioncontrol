@@ -1368,7 +1368,8 @@ describe("orchestrator-api", () => {
   });
 
   it("cancels run and resolves pending approval", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => { void input; return jsonResponse(); });
+    vi.stubGlobal("fetch", fetchMock);
 
     const stateDir = mkdtempSync(join(tmpdir(), "orch-cancel-run-"));
     const stateFile = join(stateDir, "state.json");
@@ -1387,6 +1388,12 @@ describe("orchestrator-api", () => {
     expect(payload.mission.status).toBe("cancelled");
     expect(payload.run.steps[0]).toMatchObject({ state: "cancelled" });
     expect(payload.approval).toMatchObject({ status: "rejected", resolved_by: "operator" });
+
+    // Cancel is terminal: the workspace is released and an eval is recorded,
+    // matching the fail/complete/approval-reject transitions.
+    const calls = fetchMock.mock.calls.map((call) => String(call[0]));
+    expect(calls.some((url) => url.includes("/api/cleanup-run"))).toBe(true);
+    expect(calls.some((url) => url.includes("/api/evals"))).toBe(true);
   });
 
   it("keeps approval pending when a stale approval response is rejected", async () => {

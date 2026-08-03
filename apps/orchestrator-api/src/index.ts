@@ -1654,6 +1654,10 @@ app.post("/api/runs/:id/cancel-step", async (c) => {
   updateMissionState(mission, "cancelled", "operator cancelled current step", { run_id: run.run_id, step_id: current.step_id, actor: "operator" });
   recordRunStatusEvent(run, { step_id: current.step_id, actor: "operator", execution_id: current.execution_id, summary: "operator cancelled current step" });
   recordEvent({ type: "step.cancelled", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: current.step_id as `step_${string}`, actor: "operator", execution_id: current.execution_id, payload: { control_action: "cancel_step" } as any });
+  // Cancel is terminal like fail/complete: record the eval and release the
+  // run's worktree/branch instead of leaving them for the orphan sweep.
+  await recordEval(run, state.approvals.filter((item) => item.run_id === run.run_id));
+  await cleanupExecutionWorkspace(run, mission, null);
   await persist();
   return c.json({ run, mission, approval });
 });
@@ -1673,6 +1677,10 @@ app.post("/api/runs/:id/cancel", async (c) => {
   updateMissionState(mission, "cancelled", "operator cancelled run", { run_id: run.run_id, step_id: current.step_id, actor: "operator" });
   recordRunStatusEvent(run, { step_id: current.step_id, actor: "operator", execution_id: current.execution_id, summary: "operator cancelled run" });
   recordEvent({ type: "step.cancelled", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: current.step_id as `step_${string}`, actor: "operator", execution_id: current.execution_id, payload: { control_action: "cancel_run" } as any });
+  // Cancel is terminal like fail/complete: record the eval and release the
+  // run's worktree/branch instead of leaving them for the orphan sweep.
+  await recordEval(run, state.approvals.filter((item) => item.run_id === run.run_id));
+  await cleanupExecutionWorkspace(run, mission, null);
   await persist();
   return c.json({ run, mission, approval });
 });
