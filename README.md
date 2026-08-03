@@ -107,6 +107,8 @@ Lifecycle / governance:
 - replay-safe event ingestion by `event_id`
 - duplicate artifact protection by `artifact_id`
 - mission creation rejects workflow ids that are not in the workflow library
+- worker results that land after an operator interrupt/cancel/retry are discarded instead of overriding the operator's decision
+- cancelled runs release their worktree/branch and record an eval, matching the other terminal transitions
 - orphan worktree cleanup endpoint + optional periodic sweeper
 - the persisted audit trail is restored on load, keeping audit ids stable across restarts
 - mission/run/step detail read models report true event totals (not the timeline page size)
@@ -121,6 +123,8 @@ Operator surfaces:
 - step detail
 - artifact read model with filters/pagination
 - console drill-down and live SSE event feed
+- console step/run lifecycle controls (interrupt, resume, retry, cancel step, cancel run)
+- docs browser lists wiki subdirectories separately and navigates into them
 
 Worker/runtime:
 - isolated git worktree execution
@@ -150,6 +154,7 @@ Eval / observability:
 - rewrite-candidate parsing is position-independent, and console promotions use unique target paths so earlier promotions are never overwritten
 - article listings hide dotfiles (in-flight atomic-write temp files)
 - console memory writeback/promote actions surface HTTP errors instead of rendering error bodies
+- ids are generated with crypto-strength randomness (colliding event ids were silently dropped by replay dedupe)
 
 ## Deferred
 
