@@ -1445,6 +1445,27 @@ app.post("/api/missions/:id/start", async (c) => {
   return c.json(run, 201);
 });
 
+// Operator controls (interrupt/cancel/retry) and approval decisions can land
+// while the worker call for a step is still in flight (up to the envelope
+// timeout). Applying the worker's result afterwards would silently override
+// the operator's decision -- e.g. mark a step the operator just paused or
+// cancelled as completed and advance the run. A dispatch is stale when the
+// run has moved past the dispatched step, the step left the running state,
+// or a retry re-issued it under a new execution id.
+function isDispatchStale(run: WorkflowRun, step: WorkflowRun["steps"][number], executionId: string) {
+  return getCurrentStep(run) !== step || step.state !== "running" || step.execution_id !== executionId;
+}
+
+async function discardStaleDispatch(run: WorkflowRun, step: WorkflowRun["steps"][number], executionId: string, execution: WorkerExecution | undefined, c: any) {
+  const summary = `worker result for ${step.step_id} discarded: run state changed during dispatch (step now ${step.state}${step.execution_id === executionId ? "" : ", execution superseded"})`;
+  for (const event of execution?.step_events ?? []) {
+    recordExternalEvent(event);
+  }
+  recordEvent({ type: "step.progress", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id as `step_${string}`, execution_id: executionId, payload: { message: summary, discarded_execution_id: executionId, step_state: step.state } as any });
+  await persist();
+  return c.json({ run, execution, error: summary }, 409);
+}
+
 app.post("/api/runs/:id/execute-current", async (c) => {
   const authError = requireOperator(c);
   if (authError) return authError;
@@ -1482,12 +1503,19 @@ app.post("/api/runs/:id/execute-current", async (c) => {
     execution = await fetchWorkerExecution(request);
   } catch (error) {
     const workerExecution = (error as Error & { workerExecution?: WorkerExecution }).workerExecution;
+    if (isDispatchStale(run, step, request.execution_id)) {
+      return discardStaleDispatch(run, step, request.execution_id, workerExecution, c);
+    }
     for (const event of workerExecution?.step_events ?? []) {
       recordExternalEvent(event);
     }
     const summary = String(error instanceof Error ? error.message : error);
     await failRun(run, step.step_id, summary, workerExecution ?? { execution_id: request.execution_id, summary, confidence: 0, success: false, artifacts: [] });
     return c.json({ run, error: summary, execution: workerExecution }, ((error as { statusCode?: number }).statusCode ?? 400) as 400);
+  }
+
+  if (isDispatchStale(run, step, request.execution_id)) {
+    return discardStaleDispatch(run, step, request.execution_id, execution, c);
   }
 
   for (let index = 0; index < execution.artifacts.length; index += 1) {

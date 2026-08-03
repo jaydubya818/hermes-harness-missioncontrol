@@ -1933,6 +1933,90 @@ describe("orchestrator-api", () => {
     expect(workerCalls).toHaveLength(1);
   });
 
+  it("discards a worker result that lands after the operator interrupted the step", async () => {
+    let releaseWorker: (() => void) | undefined;
+    const workerGate = new Promise<void>((resolve) => { releaseWorker = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/execute-step")) {
+        await workerGate;
+        return jsonResponse({ body: { success: true, summary: "planned", confidence: 0.95, artifacts: [{ type: "plan", uri: "file:///tmp/plan.md" }] } });
+      }
+      return jsonResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await loadApp();
+    const createMission = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Interrupt mid-dispatch", project_id: "proj_demo", workflow_id: "bugfix" })
+    });
+    const mission = await createMission.json() as { mission_id: string };
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const run = await startRun.json() as { run_id: string };
+
+    const executePromise = app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    // Let the dispatch reach the in-flight worker call before interrupting.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const interrupt = await app.request(`/api/runs/${run.run_id}/interrupt-step`, { method: "POST" });
+    expect(interrupt.status).toBe(200);
+
+    releaseWorker?.();
+    const execute = await executePromise;
+    const payload = await execute.json() as { run: { status: string; steps: Array<{ step_id: string; state: string }> }; error?: string };
+
+    expect(execute.status).toBe(409);
+    expect(payload.error).toMatch(/discarded/);
+    expect(payload.run.status).toBe("paused");
+    expect(payload.run.steps.find((step) => step.step_id === "plan")?.state).toBe("paused");
+
+    const events = await app.request("/api/events");
+    const eventsPayload = await events.json() as { events: Array<{ type: string; step_id?: string }> };
+    expect(eventsPayload.events.some((event) => event.type === "step.completed" && event.step_id === "plan")).toBe(false);
+  });
+
+  it("discards a worker result that lands after the operator cancelled the step", async () => {
+    let releaseWorker: (() => void) | undefined;
+    const workerGate = new Promise<void>((resolve) => { releaseWorker = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/execute-step")) {
+        await workerGate;
+        return jsonResponse({ body: { success: true, summary: "planned", confidence: 0.95, artifacts: [{ type: "plan", uri: "file:///tmp/plan.md" }] } });
+      }
+      return jsonResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await loadApp();
+    const createMission = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Cancel mid-dispatch", project_id: "proj_demo", workflow_id: "bugfix" })
+    });
+    const mission = await createMission.json() as { mission_id: string };
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const run = await startRun.json() as { run_id: string };
+
+    const executePromise = app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const cancel = await app.request(`/api/runs/${run.run_id}/cancel-step`, { method: "POST" });
+    expect(cancel.status).toBe(200);
+
+    releaseWorker?.();
+    const execute = await executePromise;
+    const payload = await execute.json() as { run: { status: string; steps: Array<{ step_id: string; state: string }> }; error?: string };
+
+    expect(execute.status).toBe(409);
+    expect(payload.run.status).toBe("cancelled");
+    expect(payload.run.steps.find((step) => step.step_id === "plan")?.state).toBe("cancelled");
+
+    const missions = await app.request("/api/missions");
+    const missionsPayload = await missions.json() as { missions: Array<{ mission_id: string; status: string }> };
+    expect(missionsPayload.missions.find((item) => item.mission_id === mission.mission_id)?.status).toBe("cancelled");
+  });
+
   it("resumes the SSE stream after the Last-Event-ID on reconnect", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
 
