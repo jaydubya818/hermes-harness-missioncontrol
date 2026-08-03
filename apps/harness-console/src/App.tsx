@@ -257,6 +257,16 @@ function Missions() {
     }, "Current step executed.");
   }
 
+  // interrupt-step / resume-step / retry-step / cancel-step / cancel all
+  // operate on the run's current step and share the same POST shape.
+  async function controlRun(runId: string, action: "interrupt-step" | "resume-step" | "retry-step" | "cancel-step" | "cancel", successMessage: string) {
+    await runAction(async () => {
+      await authJson(`${ORCH}/api/runs/${runId}/${action}`, { method: "POST" });
+      setSelectedRunId(runId);
+      await refreshAll();
+    }, successMessage);
+  }
+
   async function respondApproval(approvalId: string, decision: "approved" | "rejected") {
     await runAction(async () => {
       await authJson(`${ORCH}/api/approvals/${approvalId}/respond`, {
@@ -310,6 +320,7 @@ function Missions() {
           <div key={run.run_id} style={{ padding: 12, borderBottom: "1px solid #1e293b" }}>
             <StatusRow label={`${run.run_id} · ${run.workflow_id}`} value={run.status} />
             <div style={{ color: "#64748b", fontSize: 12, marginTop: 6 }}>{run.summary ?? ""}</div>
+            {!["completed", "failed", "cancelled"].includes(run.status) && <div style={{ marginTop: 8 }}><Button onClick={() => controlRun(run.run_id, "cancel", "Run cancelled.")} style={{ background: "#3f0d19" }}>Cancel run</Button></div>}
             <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
               {run.steps.map((step: any) => (
                 <div key={step.step_id} style={{ padding: 10, border: "1px solid #1e293b", borderRadius: 8 }}>
@@ -319,6 +330,12 @@ function Missions() {
                   {step.latest_artifact_uri && <div style={{ color: "#7dd3fc", fontSize: 12, marginTop: 6 }}>Latest artifact: {step.latest_artifact_uri}</div>}
                   <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
                     {step.state === "running" && <><Button onClick={() => executeCurrent(run.run_id)}>Execute current step</Button><Button onClick={() => completeStep(run.run_id, step.step_id)}>Mark step complete</Button></>}
+                    {step.step_id === run.current_step_id && <>
+                      {step.state === "running" && <Button onClick={() => controlRun(run.run_id, "interrupt-step", "Step interrupted.")}>Interrupt</Button>}
+                      {step.state === "paused" && <Button onClick={() => controlRun(run.run_id, "resume-step", "Step resumed.")}>Resume</Button>}
+                      {["paused", "failed", "blocked", "awaiting_approval", "cancelled"].includes(step.state) && <Button onClick={() => controlRun(run.run_id, "retry-step", "Step retried.")}>Retry</Button>}
+                      {!["completed", "failed", "cancelled"].includes(step.state) && <Button onClick={() => controlRun(run.run_id, "cancel-step", "Step cancelled.")} style={{ background: "#3f0d19" }}>Cancel step</Button>}
+                    </>}
                     <Button onClick={() => setSelectedRunId(run.run_id)} style={{ background: selectedRunId === run.run_id ? "#111827" : "transparent" }}>Inspect run</Button>
                     <Button onClick={() => setSelectedStep({ runId: run.run_id, stepId: step.step_id })} style={{ background: selectedStep?.runId === run.run_id && selectedStep?.stepId === step.step_id ? "#111827" : "transparent" }}>Inspect step</Button>
                   </div>
