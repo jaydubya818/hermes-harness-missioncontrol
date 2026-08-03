@@ -539,8 +539,12 @@ function Memory() {
             <Button onClick={() => mutate(`${MEM}/api/memory/articles?section=${encodeURIComponent(section)}`)}>Load</Button>
           </div>
           <div style={{ display: "grid", gap: 8 }}>
+            {section && <Button onClick={() => setSection(section.split("/").slice(0, -1).join("/"))} style={{ textAlign: "left", color: "#94a3b8" }}>../</Button>}
+            {(articles?.directories ?? []).map((dir: string) => (
+              <Button key={dir} onClick={() => setSection(section ? `${section}/${dir}` : dir)} style={{ textAlign: "left", color: "#7dd3fc" }}>{dir}/</Button>
+            ))}
             {(articles?.files ?? []).map((file: string) => (
-              <Button key={file} onClick={() => setSelectedArticle(`${section}/${file}`)} style={{ textAlign: "left" }}>{file}</Button>
+              <Button key={file} onClick={() => setSelectedArticle(section ? `${section}/${file}` : file)} style={{ textAlign: "left" }}>{file}</Button>
             ))}
           </div>
         </Panel>

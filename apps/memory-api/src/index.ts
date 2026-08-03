@@ -51,6 +51,14 @@ async function listDir(path: string) {
   }
 }
 
+async function listDirEntries(path: string) {
+  try {
+    return await readdir(path, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+}
+
 async function readText(path: string) {
   try {
     return await readFile(path, "utf8");
@@ -326,9 +334,15 @@ app.get("/api/memory/articles", async (c) => {
   try {
     const base = section ? safeWikiPath(...section.split("/")) : safeWikiPath();
     // Hide dotfiles (in-flight atomic-write temp files, editor droppings)
-    // from the docs browser, matching what search indexes.
-    const files = (await listDir(base)).filter((file) => !file.startsWith("."));
-    return c.json({ section: section ?? "root", files });
+    // from the docs browser, matching what search indexes. Subdirectories
+    // are listed separately: they are sections to descend into, not
+    // articles, and treating them as articles 404s in the docs browser.
+    const entries = (await listDirEntries(base)).filter((entry) => !entry.name.startsWith("."));
+    return c.json({
+      section: section ?? "root",
+      files: entries.filter((entry) => entry.isFile()).map((entry) => entry.name).sort(),
+      directories: entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort()
+    });
   } catch (error) {
     return c.json({ error: String(error) }, 400);
   }

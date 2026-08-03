@@ -209,6 +209,20 @@ describe("memory-api", () => {
     expect(payload.files.some((file) => file.startsWith("."))).toBe(false);
   });
 
+  it("lists subdirectories separately from article files", async () => {
+    const app = await loadApp({ vaultRoot: makeVault() });
+    const res = await app.request("/api/memory/articles?section=projects");
+    expect(res.status).toBe(200);
+    const payload = await res.json() as { files: string[]; directories: string[] };
+    expect(payload.directories).toContain("proj_demo");
+    expect(payload.files).not.toContain("proj_demo");
+
+    const leaf = await app.request("/api/memory/articles?section=projects/proj_demo");
+    const leafPayload = await leaf.json() as { files: string[]; directories: string[] };
+    expect(leafPayload.files).toContain("standards.md");
+    expect(leafPayload.directories).toEqual([]);
+  });
+
   it("rejects bus channels outside the contract union", async () => {
     const app = await loadApp({ vaultRoot: makeVault() });
     const res = await app.request("/api/memory/bus/publish", {
