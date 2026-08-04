@@ -274,7 +274,12 @@ function validateEnvelope(req: StepRequest) {
     }
   }
   if (!Number.isInteger(envelope.timeout_seconds) || envelope.timeout_seconds <= 0) throw new WorkerExecutionError("invalid execution envelope: timeout_seconds must be positive integer", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "invalid_timeout" } });
-  if (!envelope.resource_budget || envelope.resource_budget.max_artifacts <= 0 || envelope.resource_budget.max_output_bytes <= 0 || envelope.resource_budget.token_budget <= 0) {
+  // `undefined <= 0` and `NaN <= 0` are both false, so missing or
+  // non-numeric budget fields would pass a bare `<= 0` check and then
+  // silently disable every comparison in enforceBudget.
+  const isPositiveFinite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value > 0;
+  const budget = envelope.resource_budget as { max_artifacts?: unknown; max_output_bytes?: unknown; token_budget?: unknown } | undefined;
+  if (!budget || !isPositiveFinite(budget.max_artifacts) || !isPositiveFinite(budget.max_output_bytes) || !isPositiveFinite(budget.token_budget)) {
     throw new WorkerExecutionError("invalid execution envelope: resource_budget invalid", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "invalid_resource_budget" } });
   }
   if (!envelope.environment_classification) throw new WorkerExecutionError("invalid execution envelope: environment_classification required", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "missing_environment_classification" } });

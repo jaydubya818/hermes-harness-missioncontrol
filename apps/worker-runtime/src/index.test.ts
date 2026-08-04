@@ -133,6 +133,30 @@ describe("worker-runtime", () => {
     expect(payload.step_events?.some((event) => event.type === "policy.violation")).toBe(true);
   });
 
+  it("rejects non-numeric resource budgets that would disable budget enforcement", async () => {
+    for (const resource_budget of [
+      { token_budget: "lots", max_artifacts: 5, max_output_bytes: 1024 },
+      { token_budget: 1000, max_artifacts: Number.NaN, max_output_bytes: 1024 },
+      { token_budget: 1000, max_artifacts: 5 }
+    ]) {
+      const response = await app.request("/api/execute-step", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mission_id: "mis_contracts",
+          run_id: "run_contracts",
+          step_id: "step_plan",
+          execution_id: "exec_contracts",
+          kind: "plan",
+          envelope: buildEnvelope({ resource_budget })
+        })
+      });
+      const payload = await response.json() as { summary?: string };
+      expect(response.status).toBe(400);
+      expect(payload.summary).toMatch(/resource_budget invalid/i);
+    }
+  });
+
   it("emits execution.budget_exceeded when the result exceeds the resource budget", async () => {
     const response = await app.request("/api/execute-step", {
       method: "POST",
