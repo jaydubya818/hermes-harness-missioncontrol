@@ -387,7 +387,21 @@ async function parseJsonBody<T>(c: any): Promise<T | null> {
   }
 }
 
+let hydration: Promise<void> | null = null;
+
 async function ensureLoaded() {
+  if (initialized) return;
+  // Hydration is not reentrant: two concurrent first requests would both
+  // run the replay below, and the second one re-clears the dedupe set and
+  // re-broadcasts replayed events to any SSE subscriber registered in
+  // between. Run it once and share the in-flight promise.
+  hydration ??= hydrateState().finally(() => {
+    hydration = null;
+  });
+  await hydration;
+}
+
+async function hydrateState() {
   if (initialized) return;
   const loaded = await loadJsonFile<OrchestratorState>(stateFile, state);
   state.missions.splice(0, state.missions.length, ...(loaded.missions ?? []));

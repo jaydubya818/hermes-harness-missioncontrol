@@ -1098,6 +1098,34 @@ describe("orchestrator-api", () => {
     expect(payload.timeline[0]).toMatchObject({ title: "Approval resolved", occurred_at: "2026-04-11T00:02:00.000Z", run_id: "run_demo" });
   });
 
+  it("hydrates persisted state exactly once for concurrent first requests", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-concurrent-hydrate-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [],
+      runs: [],
+      approvals: [],
+      events: [
+        { event_id: "evt_a", type: "step.progress", ts: "2026-04-11T00:00:00.000Z", payload: {} },
+        { event_id: "evt_b", type: "step.progress", ts: "2026-04-11T00:00:01.000Z", payload: {} },
+        { event_id: "evt_c", type: "step.progress", ts: "2026-04-11T00:00:02.000Z", payload: {} }
+      ],
+      audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const [first, second] = await Promise.all([
+      app.request("/api/events"),
+      app.request("/api/events")
+    ]);
+    const firstPayload = await first.json() as { events: Array<{ event_id: string }> };
+    const secondPayload = await second.json() as { events: Array<{ event_id: string }> };
+    expect(firstPayload.events).toHaveLength(3);
+    expect(secondPayload.events).toHaveLength(3);
+  });
+
   it("builds mission detail read model with approval, artifact, and timeline summaries", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
 
