@@ -709,6 +709,15 @@ describe("orchestrator-api", () => {
 
     expect(response.status).toBe(400);
 
+    // A non-string actor used to throw at body.actor?.trim() and 500 after
+    // the decision had already validated.
+    const badActor = await app.request("/api/approvals/approval_demo/respond", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision: "approved", actor: 42 })
+    });
+    expect(badActor.status).toBe(400);
+
     const approvalsResponse = await app.request("/api/approvals");
     const approvalsPayload = await approvalsResponse.json() as { approvals: Array<{ approval_id: string; status: string }> };
     expect(approvalsPayload.approvals.find((item) => item.approval_id === "approval_demo")?.status).toBe("pending");

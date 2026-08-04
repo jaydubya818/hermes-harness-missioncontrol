@@ -1773,6 +1773,11 @@ app.post("/api/approvals/:id/respond", async (c) => {
   if (body.decision !== "approved" && body.decision !== "rejected") {
     return c.json({ error: "decision must be \"approved\" or \"rejected\"" }, 400);
   }
+  // body.actor?.trim() below throws on non-strings, turning a malformed
+  // payload into a 500 after the decision already validated.
+  if (body.actor !== undefined && typeof body.actor !== "string") {
+    return c.json({ error: "actor must be a string" }, 400);
+  }
   const run = state.runs.find((item) => item.run_id === approval.run_id);
   const mission = state.missions.find((item) => item.mission_id === approval.mission_id);
   if (!run || !mission) return c.json({ error: "run/mission missing" }, 404);
