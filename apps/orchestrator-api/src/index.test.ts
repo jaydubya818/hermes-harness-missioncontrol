@@ -98,6 +98,22 @@ describe("orchestrator-api", () => {
     });
     expect(badProject.status).toBe(400);
 
+    // repo_path/workspace_root feed resolve() at dispatch time, so
+    // non-string values must be rejected when the mission is created.
+    for (const body of [
+      { title: "Contracts", project_id: "proj_demo", repo_path: 42 },
+      { title: "Contracts", project_id: "proj_demo", workspace_root: ["nope"] },
+      { title: "Contracts", project_id: "proj_demo", objective: 7 },
+      { title: "Contracts", project_id: "proj_demo", repo_path: "   " }
+    ]) {
+      const badField = await app.request("/api/missions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      expect(badField.status).toBe(400);
+    }
+
     // createWorkflowRun silently substitutes bugfix for unknown workflows,
     // so an unrecognized workflow_id must be rejected at mission creation.
     const badWorkflow = await app.request("/api/missions", {

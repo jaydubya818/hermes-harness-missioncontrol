@@ -1405,6 +1405,16 @@ app.post("/api/missions", async (c) => {
   if (body.workflow_id !== undefined && (typeof body.workflow_id !== "string" || !(body.workflow_id in WORKFLOW_LIBRARY))) {
     return c.json({ error: `workflow_id must be one of: ${Object.keys(WORKFLOW_LIBRARY).join(", ")}` }, 400);
   }
+  // repo_path/workspace_root feed resolve() when the execution envelope is
+  // built, so a non-string here creates a mission doomed to fail its first
+  // dispatch with a TypeError-derived policy violation instead of a clear
+  // 400 at creation time.
+  for (const field of ["objective", "repo_path", "workspace_root", "policy_ref", "profile_ref"] as const) {
+    const value = body[field];
+    if (value !== undefined && (typeof value !== "string" || !value.trim())) {
+      return c.json({ error: `${field} must be a non-empty string when provided` }, 400);
+    }
+  }
   const now = new Date().toISOString();
   const mission: Mission = {
     mission_id: makeId("mis") as `mis_${string}`,
