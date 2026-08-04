@@ -157,6 +157,33 @@ describe("worker-runtime", () => {
     }
   });
 
+  it("reports policy violations for missing repo_scope or non-string envelope paths", async () => {
+    for (const overrides of [
+      { repo_scope: undefined },
+      { repo_scope: { writable_paths: ["."] } },
+      { repo_scope: { root_path: allowedRepoRoot, writable_paths: "." } },
+      { output_dir: 42 },
+      { worktree_path: null }
+    ]) {
+      const response = await app.request("/api/execute-step", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mission_id: "mis_contracts",
+          run_id: "run_contracts",
+          step_id: "step_plan",
+          execution_id: "exec_contracts",
+          kind: "plan",
+          envelope: buildEnvelope(overrides as Record<string, unknown>)
+        })
+      });
+      const payload = await response.json() as { summary?: string; step_events?: Array<{ type: string }> };
+      expect(response.status).toBe(400);
+      expect(payload.summary).toMatch(/invalid execution envelope/i);
+      expect(payload.step_events?.some((event) => event.type === "policy.violation")).toBe(true);
+    }
+  });
+
   it("emits execution.budget_exceeded when the result exceeds the resource budget", async () => {
     const response = await app.request("/api/execute-step", {
       method: "POST",

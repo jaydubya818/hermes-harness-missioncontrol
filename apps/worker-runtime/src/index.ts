@@ -283,6 +283,17 @@ function validateEnvelope(req: StepRequest) {
     throw new WorkerExecutionError("invalid execution envelope: resource_budget invalid", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "invalid_resource_budget" } });
   }
   if (!envelope.environment_classification) throw new WorkerExecutionError("invalid execution envelope: environment_classification required", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "missing_environment_classification" } });
+  // resolve() on a non-string and property access on a missing repo_scope
+  // both throw bare TypeErrors that surface as generic tool failures;
+  // report them as the policy violations they are.
+  for (const [field, value] of [["output_dir", envelope.output_dir], ["worktree_path", envelope.worktree_path], ["workspace_root", envelope.workspace_root]] as const) {
+    if (typeof value !== "string" || !value) {
+      throw new WorkerExecutionError(`invalid execution envelope: ${field} must be a non-empty string`, { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "invalid_envelope_path", field } });
+    }
+  }
+  if (!envelope.repo_scope || typeof envelope.repo_scope !== "object" || typeof envelope.repo_scope.root_path !== "string" || !envelope.repo_scope.root_path || !Array.isArray(envelope.repo_scope.writable_paths)) {
+    throw new WorkerExecutionError("invalid execution envelope: repo_scope with root_path and writable_paths required", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "invalid_repo_scope" } });
+  }
   const outputDir = resolve(envelope.output_dir);
   try {
     relativeWithin(runsRoot, outputDir);
