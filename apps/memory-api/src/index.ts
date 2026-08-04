@@ -14,7 +14,10 @@ const operatorToken = process.env.HARNESS_OPERATOR_TOKEN;
 app.use("*", cors());
 
 
-function isSafeId(value: string) {
+function isSafeId(value: unknown): value is string {
+  // The regex would coerce non-strings (isSafeId(5) tests "5"), letting a
+  // numeric agent_id/project_id through to path joins that then 500.
+  if (typeof value !== "string") return false;
   return /^[a-zA-Z0-9_\-./]+$/.test(value) && !value.includes("..") && !value.startsWith("/");
 }
 

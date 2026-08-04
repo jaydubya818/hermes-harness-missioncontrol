@@ -48,6 +48,23 @@ describe("memory-api", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects non-string ids instead of crashing into a 500", async () => {
+    const app = await loadApp({ vaultRoot: makeVault() });
+    const contextLoad = await app.request("/api/memory/context/load", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agent_id: 123, project_id: "proj_demo", budget_bytes: 1024 })
+    });
+    expect(contextLoad.status).toBe(400);
+
+    const closeTask = await app.request("/api/memory/tasks/close", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agent_id: "agent_demo", project_id: 42, outcome: "success", summary: "done" })
+    });
+    expect(closeTask.status).toBe(400);
+  });
+
   it("counts promotions attributed to the agent in its summary", async () => {
     const vault = makeVault();
     const app = await loadApp({ vaultRoot: vault });
