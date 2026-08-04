@@ -107,6 +107,9 @@ Lifecycle / governance:
 - replay-safe event ingestion by `event_id`
 - duplicate artifact protection by `artifact_id`
 - mission creation rejects workflow ids that are not in the workflow library
+- mission creation validates optional string fields (repo_path, workspace_root, objective, refs) so bad payloads fail at creation, not first dispatch
+- approval responses validate the actor field instead of 500-ing on non-strings
+- persisted state hydration is single-flight, so concurrent first requests cannot double-replay events into live streams
 - worker results that land after an operator interrupt/cancel/retry are discarded instead of overriding the operator's decision
 - cancelled runs release their worktree/branch and record an eval, matching the other terminal transitions
 - orphan worktree cleanup endpoint + optional periodic sweeper
@@ -133,6 +136,9 @@ Worker/runtime:
 - test/review/deploy step handling
 - deploy adapter abstraction: `auto | noop-canary | vercel | render`
 - timeout + budget enforcement
+- unknown step kinds are rejected instead of falling through to the deploy path
+- resource budgets must be finite positive numbers, so malformed budgets cannot silently disable enforcement
+- malformed repo_scope/envelope paths are reported as policy violations instead of bare TypeErrors
 - pnpm reinstall is skipped when the workspace is already hydrated at the cached source commit
 - workspace hydration tolerates dangling `node_modules` symlinks instead of crashing on EEXIST
 
@@ -153,6 +159,8 @@ Eval / observability:
 - eval submissions validate `created_at` and stamp receipt time when it is omitted
 - rewrite-candidate parsing is position-independent, and console promotions use unique target paths so earlier promotions are never overwritten
 - article listings hide dotfiles (in-flight atomic-write temp files)
+- memory ids must be strings (numeric ids no longer coerce into path joins that 500)
+- promotions refuse to overwrite an existing article (409) so promoted stubs can never clobber standards or task logs
 - console memory writeback/promote actions surface HTTP errors instead of rendering error bodies
 - ids are generated with crypto-strength randomness (colliding event ids were silently dropped by replay dedupe)
 
