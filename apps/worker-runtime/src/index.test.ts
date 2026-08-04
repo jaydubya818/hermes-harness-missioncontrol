@@ -93,6 +93,26 @@ describe("worker-runtime", () => {
     expect(missingRunId.status).toBe(400);
   });
 
+  it("rejects unknown step kinds instead of running the deploy path", async () => {
+    const response = await app.request("/api/execute-step", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mission_id: "mis_contracts",
+        run_id: "run_contracts",
+        step_id: "step_plan",
+        execution_id: "exec_contracts",
+        kind: "provision",
+        envelope: buildEnvelope({ allowed_actions: ["deploy"] })
+      })
+    });
+
+    const payload = await response.json() as { summary?: string; step_events?: Array<{ type: string; payload?: { violation_kind?: string } }> };
+    expect(response.status).toBe(400);
+    expect(payload.summary).toMatch(/unknown step kind/i);
+    expect(payload.step_events?.some((event) => event.type === "policy.violation" && event.payload?.violation_kind === "unknown_step_kind")).toBe(true);
+  });
+
   it("rejects invalid execution envelopes", async () => {
     const response = await app.request("/api/execute-step", {
       method: "POST",

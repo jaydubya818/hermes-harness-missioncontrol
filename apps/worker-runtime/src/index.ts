@@ -239,6 +239,8 @@ function assertAllowedRepoWrite(workspace: WorkspaceContext, targetPath: string)
   }
 }
 
+const STEP_KINDS = ["plan", "implement", "test", "review", "deploy"] as const;
+
 function validateEnvelope(req: StepRequest) {
   const envelope = req.envelope;
   if (!req.mission_id || !req.run_id || !req.step_id || !req.execution_id) {
@@ -246,6 +248,16 @@ function validateEnvelope(req: StepRequest) {
       statusCode: 400,
       eventType: "policy.violation",
       payload: { violation_kind: "missing_execution_identifiers" },
+    });
+  }
+  // actionForKind/toolNameForKind and the execute() dispatcher all fall
+  // through to the deploy path for unrecognized kinds, so an unknown kind
+  // must be rejected here instead of silently running a deploy step.
+  if (!STEP_KINDS.includes(req.kind as (typeof STEP_KINDS)[number])) {
+    throw new WorkerExecutionError(`invalid step request: unknown step kind ${String(req.kind)}`, {
+      statusCode: 400,
+      eventType: "policy.violation",
+      payload: { violation_kind: "unknown_step_kind", step_kind: req.kind },
     });
   }
   if (!envelope) throw new WorkerExecutionError("invalid execution envelope: envelope missing", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "missing_envelope" } });
