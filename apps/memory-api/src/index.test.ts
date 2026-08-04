@@ -88,6 +88,18 @@ describe("memory-api", () => {
     expect(((await after.json()) as { recent_promotions: number }).recent_promotions).toBe(1);
   });
 
+  it("refuses to overwrite an existing article on promote", async () => {
+    const vault = makeVault();
+    const app = await loadApp({ vaultRoot: vault });
+    const res = await app.request("/api/memory/promote", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ item_id: "rewrite_1", promoted_by: "agent_demo", target_path: "wiki/projects/proj_demo/standards.md", promotion_kind: "standard" })
+    });
+    expect(res.status).toBe(409);
+    expect(readFileSync(join(vault, "wiki", "projects", "proj_demo", "standards.md"), "utf8")).toBe("standards body");
+  });
+
   it("rejects promote requests with injectable or missing frontmatter fields", async () => {
     const vault = makeVault();
     const app = await loadApp({ vaultRoot: vault });

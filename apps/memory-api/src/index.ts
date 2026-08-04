@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { readdir, readFile, writeFile, mkdir, rename, rm } from "node:fs/promises";
+import { access, readdir, readFile, writeFile, mkdir, rename, rm } from "node:fs/promises";
 import { timingSafeEqual } from "node:crypto";
 import { dirname, join, resolve, relative } from "node:path";
 import { loadContextBundle, closeTask, promoteLearning } from "@hermes-harness-with-missioncontrol/memory-runtime";
@@ -178,6 +178,15 @@ app.post("/api/memory/promote", async (c) => {
     return c.json({ error: "promotion_kind must be one of standard, recipe, project_note" }, 400);
   }
   if (typeof body.target_path !== "string" || !isSafeId(body.target_path)) return c.json({ error: "unsafe target_path" }, 400);
+  // promoteLearning replaces the whole target file, so a promote aimed at an
+  // existing article (standards.md, another promotion, an agent's task log)
+  // would destroy its content. Promotions only ever create new artifacts.
+  try {
+    await access(resolve(join(vaultRoot, body.target_path)));
+    return c.json({ error: "target_path already exists; promotions must not overwrite existing articles" }, 409);
+  } catch {
+    // target does not exist: safe to create
+  }
   const result = await promoteLearning(vaultRoot, body);
   return c.json(result);
 });
