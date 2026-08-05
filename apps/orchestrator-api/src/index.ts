@@ -1486,6 +1486,14 @@ async function discardStaleDispatch(run: WorkflowRun, step: WorkflowRun["steps"]
     recordExternalEvent(event);
   }
   recordEvent({ type: "step.progress", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id as `step_${string}`, execution_id: executionId, payload: { message: summary, discarded_execution_id: executionId, step_state: step.state } as any });
+  // The discarded execution is dead. If the paused step still carries its id
+  // (i.e. it was not already superseded by a retry), clear it so a later
+  // resume + execute-current mints a fresh execution id: reusing the dead id
+  // would make the new execution's worker events collide with the event_ids
+  // recorded above and be silently dropped by replay dedupe.
+  if (step.execution_id === executionId && step.state === "paused") {
+    step.execution_id = undefined;
+  }
   await persist();
   return c.json({ run, execution, error: summary }, 409);
 }

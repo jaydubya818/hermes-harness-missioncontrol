@@ -2036,6 +2036,72 @@ describe("orchestrator-api", () => {
     expect(eventsPayload.events.some((event) => event.type === "step.completed" && event.step_id === "plan")).toBe(false);
   });
 
+  it("mints a fresh execution id for the re-dispatch after a discarded interrupt", async () => {
+    let releaseWorker: (() => void) | undefined;
+    const workerGate = new Promise<void>((resolve) => { releaseWorker = resolve; });
+    const executionIds: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/execute-step")) {
+        const request = JSON.parse(String(init?.body ?? "{}")) as { mission_id: string; run_id: string; step_id: string; execution_id: string };
+        executionIds.push(request.execution_id);
+        const stepEvent = {
+          schema_version: "v1",
+          event_id: `${request.execution_id}_1`,
+          sequence: 1,
+          timestamp: new Date().toISOString(),
+          source: "hermes",
+          type: "tool.started",
+          mission_id: request.mission_id,
+          run_id: request.run_id,
+          step_id: request.step_id,
+          execution_id: request.execution_id,
+          payload: { tool_name: "workspace.plan" }
+        };
+        if (executionIds.length === 1) {
+          await workerGate;
+          return jsonResponse({ body: { success: true, summary: "planned (stale)", confidence: 0.95, artifacts: [], step_events: [stepEvent] } });
+        }
+        return jsonResponse({ body: { success: true, summary: "planned", confidence: 0.95, artifacts: [{ type: "plan", uri: "file:///tmp/plan.md" }], step_events: [stepEvent] } });
+      }
+      return jsonResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await loadApp();
+    const createMission = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Fresh id after discard", project_id: "proj_demo", workflow_id: "bugfix" })
+    });
+    const mission = await createMission.json() as { mission_id: string };
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const run = await startRun.json() as { run_id: string };
+
+    const executePromise = app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await app.request(`/api/runs/${run.run_id}/interrupt-step`, { method: "POST" });
+    releaseWorker?.();
+    const discarded = await executePromise;
+    expect(discarded.status).toBe(409);
+
+    const resume = await app.request(`/api/runs/${run.run_id}/resume-step`, { method: "POST" });
+    expect(resume.status).toBe(200);
+
+    const second = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    expect(second.status).toBe(200);
+
+    // The discarded execution's events were already recorded; reusing its id
+    // would make the re-dispatched execution's events (same `${id}_N`
+    // event_ids) vanish into replay dedupe.
+    expect(executionIds).toHaveLength(2);
+    expect(executionIds[1]).not.toBe(executionIds[0]);
+
+    const events = await app.request("/api/events");
+    const eventsPayload = await events.json() as { events: Array<{ type: string; execution_id?: string }> };
+    expect(eventsPayload.events.some((event) => event.type === "tool.started" && event.execution_id === executionIds[1])).toBe(true);
+  });
+
   it("discards a worker result that lands after the operator cancelled the step", async () => {
     let releaseWorker: (() => void) | undefined;
     const workerGate = new Promise<void>((resolve) => { releaseWorker = resolve; });
