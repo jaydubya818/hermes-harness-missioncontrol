@@ -14,7 +14,7 @@
     "generate": "pnpm run generate:ts && pnpm run generate:py"
   },
   "devDependencies": {
-    "openapi-typescript": "^7.10.1",
-    "vitest": "^3.2.4"
+    "openapi-typescript": "^7.13.0",
+    "vitest": "^3.2.7"
   }
 }
