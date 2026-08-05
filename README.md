@@ -141,6 +141,8 @@ Worker/runtime:
 - malformed repo_scope/envelope paths are reported as policy violations instead of bare TypeErrors
 - pnpm reinstall is skipped when the workspace is already hydrated at the cached source commit
 - workspace hydration tolerates dangling `node_modules` symlinks instead of crashing on EEXIST
+- failure event streams emit exactly one `tool.failed` per failure (generic errors no longer duplicate it)
+- `branch_name` is validated before it reaches `git worktree add -B` / `git branch -D` (flag-like or non-string names fail as policy violations)
 
 Eval / observability:
 - eval record persistence and summaries (including `total_approvals`)
@@ -160,7 +162,7 @@ Eval / observability:
 - rewrite-candidate parsing is position-independent, and console promotions use unique target paths so earlier promotions are never overwritten
 - article listings hide dotfiles (in-flight atomic-write temp files)
 - memory ids must be strings (numeric ids no longer coerce into path joins that 500)
-- promotions refuse to overwrite an existing article (409) so promoted stubs can never clobber standards or task logs
+- promotions refuse to overwrite an existing article (409) so promoted stubs can never clobber standards or task logs; the guard is serialized, so concurrent promotes to the same target cannot race past it
 - console memory writeback/promote actions surface HTTP errors instead of rendering error bodies
 - ids are generated with crypto-strength randomness (colliding event ids were silently dropped by replay dedupe)
 
@@ -188,6 +190,7 @@ Replay / idempotency
 - unrecognized persisted events are skipped (with a warning) on load instead of turning every request into a 500
 - eval submissions carrying an `eval_id` are deduplicated by eval-api; malformed scoring fields are rejected with a 400
 - retry clears prior blockers and execution IDs safely
+- a discarded stale dispatch clears the dead execution id from the paused step, so the post-resume re-dispatch mints a fresh id instead of colliding with already-recorded event/artifact ids
 - concurrent `execute-current` dispatches for the same run are rejected with a 409 while one is in flight
 - `GET /api/events/stream` resumes from `Last-Event-ID` (header or `last_event_id` query param) on reconnect, falling back to `last`-count replay when the id has been evicted
 
