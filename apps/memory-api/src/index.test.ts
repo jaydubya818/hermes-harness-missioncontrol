@@ -100,6 +100,22 @@ describe("memory-api", () => {
     expect(readFileSync(join(vault, "wiki", "projects", "proj_demo", "standards.md"), "utf8")).toBe("standards body");
   });
 
+  it("lets only one of two concurrent promotes to the same target win", async () => {
+    const vault = makeVault();
+    const app = await loadApp({ vaultRoot: vault });
+
+    const request = () => app.request("/api/memory/promote", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ item_id: "rewrite_1", promoted_by: "agent_demo", target_path: "wiki/projects/proj_demo/promoted-race.md", promotion_kind: "standard" })
+    });
+
+    const [first, second] = await Promise.all([request(), request()]);
+    expect([first.status, second.status].sort((a, b) => a - b)).toEqual([200, 409]);
+    const content = readFileSync(join(vault, "wiki", "projects", "proj_demo", "promoted-race.md"), "utf8");
+    expect(content).toContain("promoted_by: agent_demo");
+  });
+
   it("rejects promote requests with injectable or missing frontmatter fields", async () => {
     const vault = makeVault();
     const app = await loadApp({ vaultRoot: vault });

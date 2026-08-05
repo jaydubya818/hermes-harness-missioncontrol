@@ -181,17 +181,27 @@ app.post("/api/memory/promote", async (c) => {
   // promoteLearning replaces the whole target file, so a promote aimed at an
   // existing article (standards.md, another promotion, an agent's task log)
   // would destroy its content. Promotions only ever create new artifacts.
-  try {
-    await access(resolve(join(vaultRoot, body.target_path)));
-    return c.json({ error: "target_path already exists; promotions must not overwrite existing articles" }, 409);
-  } catch {
-    // target does not exist: safe to create
-  }
-  const result = await promoteLearning(vaultRoot, body);
+  // The existence check and the write run inside a serialized queue: two
+  // concurrent promotes to the same target would otherwise both pass the
+  // check before either writes, and the loser would silently overwrite the
+  // winner.
+  const promote = promotionQueue.then(async () => {
+    try {
+      await access(resolve(join(vaultRoot, body.target_path)));
+      return null;
+    } catch {
+      // target does not exist: safe to create
+    }
+    return promoteLearning(vaultRoot, body);
+  });
+  promotionQueue = promote.catch(() => undefined);
+  const result = await promote;
+  if (result === null) return c.json({ error: "target_path already exists; promotions must not overwrite existing articles" }, 409);
   return c.json(result);
 });
 
 let busPublishQueue: Promise<unknown> = Promise.resolve();
+let promotionQueue: Promise<unknown> = Promise.resolve();
 
 app.post("/api/memory/bus/publish", async (c) => {
   const authError = requireOperator(c);
