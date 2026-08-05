@@ -467,7 +467,10 @@ function buildFailureEvents(req: StepRequest, error: WorkerExecutionError): Even
     sequence += 1;
   }
 
-  if (error.eventType) {
+  // Generic errors are wrapped with { started: true, eventType: "tool.failed" }
+  // by the execute-step catch handler; emitting the eventType event again
+  // would duplicate the tool.failed already pushed for `started` above.
+  if (error.eventType && !(error.started && error.eventType === "tool.failed")) {
     events.push({
       ...base,
       event_id: `${req.execution_id}_${sequence}`,

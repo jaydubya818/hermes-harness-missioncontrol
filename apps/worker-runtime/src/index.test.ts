@@ -356,6 +356,39 @@ describe("worker-runtime", () => {
     await expect(cleanupRun(runId)).resolves.toMatchObject({ ok: true });
   });
 
+  it("emits a single tool.failed event for generic execution errors", async () => {
+    const runId = "run_generic_fail";
+    const outputDir = join(process.cwd(), "../../data/worker-runs", runId, "step_plan");
+    // A regular file where the output directory should go makes workspace
+    // setup throw a plain Error (not a WorkerExecutionError), exercising the
+    // generic wrap path in the execute-step catch handler.
+    await mkdir(dirname(outputDir), { recursive: true });
+    await writeFile(outputDir, "not a directory", "utf8");
+    try {
+      const response = await app.request("/api/execute-step", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mission_id: "mis_generic",
+          run_id: runId,
+          step_id: "step_plan",
+          execution_id: "exec_generic",
+          kind: "plan",
+          envelope: buildEnvelope({ output_dir: outputDir })
+        })
+      });
+
+      const payload = await response.json() as { success?: boolean; step_events?: Array<{ type: string }> };
+      expect(response.status).toBe(400);
+      expect(payload.success).toBe(false);
+      const toolFailedEvents = payload.step_events?.filter((event) => event.type === "tool.failed") ?? [];
+      expect(toolFailedEvents).toHaveLength(1);
+      expect(payload.step_events?.[payload.step_events.length - 1]).toMatchObject({ type: "step.failed" });
+    } finally {
+      await rm(join(process.cwd(), "../../data/worker-runs", runId), { recursive: true, force: true });
+    }
+  });
+
   it("removes the run output root only when remove_outputs is requested", async () => {
     const runId = "run_cleanup_outputs";
     const outputRoot = join(process.cwd(), "../../data/worker-runs", runId);
