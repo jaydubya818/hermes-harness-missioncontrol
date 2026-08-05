@@ -389,6 +389,28 @@ describe("worker-runtime", () => {
     }
   });
 
+  it("rejects flag-like branch names before any git command runs", async () => {
+    for (const branch_name of ["-D", "  ", 42]) {
+      const response = await app.request("/api/execute-step", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mission_id: "mis_branch",
+          run_id: "run_branch",
+          step_id: "step_plan",
+          execution_id: "exec_branch",
+          kind: "plan",
+          branch_name,
+          envelope: buildEnvelope()
+        })
+      });
+      const payload = await response.json() as { summary?: string; step_events?: Array<{ type: string; payload?: { violation_kind?: string } }> };
+      expect(response.status).toBe(400);
+      expect(payload.summary).toMatch(/branch_name/i);
+      expect(payload.step_events?.some((event) => event.type === "policy.violation" && event.payload?.violation_kind === "invalid_branch_name")).toBe(true);
+    }
+  });
+
   it("removes the run output root only when remove_outputs is requested", async () => {
     const runId = "run_cleanup_outputs";
     const outputRoot = join(process.cwd(), "../../data/worker-runs", runId);

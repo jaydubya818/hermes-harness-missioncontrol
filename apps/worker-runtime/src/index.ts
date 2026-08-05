@@ -326,6 +326,13 @@ function validateEnvelope(req: StepRequest) {
       throw new WorkerExecutionError("invalid execution envelope: writable path escapes repo scope", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "writable_path_outside_repo_scope", writable_path: writablePath } });
     }
   }
+  // branch_name feeds `git worktree add -B <branch>` and later
+  // `git branch -D <branch>`; mirror cleanupRun's guard so a flag-like or
+  // non-string branch name fails as a policy violation up front instead of
+  // surfacing as a confusing git error mid-workspace-setup.
+  if (req.branch_name !== undefined && (typeof req.branch_name !== "string" || !req.branch_name.trim() || req.branch_name.startsWith("-"))) {
+    throw new WorkerExecutionError("invalid step request: branch_name must be a non-empty string that does not start with '-'", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "invalid_branch_name", branch_name: req.branch_name } });
+  }
   if (req.repo_path) {
     const repoPath = resolve(req.repo_path);
     try {
