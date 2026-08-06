@@ -3,6 +3,18 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+// Lets individual tests intercept loadJsonFile (e.g. to hold hydration
+// in-flight); everything else passes through to the real state-store.
+const stateStoreOverride: { loadJsonFile?: (path: string, fallback: unknown) => Promise<unknown> } = {};
+vi.mock("@hermes-harness-with-missioncontrol/state-store", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@hermes-harness-with-missioncontrol/state-store")>();
+  return {
+    ...actual,
+    loadJsonFile: (path: string, fallback: unknown) =>
+      (stateStoreOverride.loadJsonFile ?? actual.loadJsonFile)(path, fallback),
+  };
+});
+
 async function loadApp(stateFile?: string) {
   vi.resetModules();
   process.env.VITEST = "1";
@@ -17,6 +29,7 @@ describe("eval-api", () => {
     delete process.env.EVAL_STATE_FILE;
     delete process.env.HARNESS_OPERATOR_TOKEN;
     delete process.env.CORS_ALLOWED_ORIGINS;
+    delete stateStoreOverride.loadJsonFile;
     process.env.VITEST = "1";
   });
 
@@ -274,6 +287,35 @@ describe("eval-api", () => {
     const payload = await listing.json() as { summary: { total_runs: number; average_confidence: number } };
     expect(payload.summary.total_runs).toBe(1);
     expect(payload.summary.average_confidence).toBe(0.9);
+  });
+
+
+  it("hydrates state exactly once across concurrent first requests", async () => {
+    let loadCalls = 0;
+    let releaseLoad: (value: unknown) => void = () => undefined;
+    stateStoreOverride.loadJsonFile = () => {
+      loadCalls += 1;
+      return new Promise((resolve) => { releaseLoad = resolve; });
+    };
+    const app = await loadApp();
+
+    const first = app.request("/health");
+    const second = app.request("/api/evals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mission_id: "mis_race", run_id: "run_race", outcome: "success", cost_usd: 0.1 })
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    releaseLoad([{ eval_id: "eval_seed", mission_id: "mis_seed", run_id: "run_seed", outcome: "success", cost_usd: 0.2, approval_count: 0, artifact_count: 0, created_at: "2026-08-01T00:00:00.000Z" }]);
+
+    expect((await first).status).toBe(200);
+    expect((await second).status).toBe(201);
+    expect(loadCalls).toBe(1);
+
+    delete stateStoreOverride.loadJsonFile;
+    const listing = await app.request("/api/evals");
+    const payload = await listing.json() as { pagination: { total: number } };
+    expect(payload.pagination.total).toBe(2);
   });
 
   it("only reflects allowlisted origins in CORS headers", async () => {
