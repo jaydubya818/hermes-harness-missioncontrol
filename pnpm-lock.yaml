@@ -27,11 +27,11 @@ importers:
         specifier: workspace:*
         version: link:../../packages/state-store
       '@hono/node-server':
-        specifier: ^1.19.17
-        version: 1.19.17(hono@4.12.33)
+        specifier: ^2.0.12
+        version: 2.0.12(hono@4.12.34)
       hono:
-        specifier: ^4.12.33
-        version: 4.12.33
+        specifier: ^4.12.34
+        version: 4.12.34
     devDependencies:
       tsx:
         specifier: ^4.23.1
@@ -77,11 +77,11 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shared-types
       '@hono/node-server':
-        specifier: ^1.19.17
-        version: 1.19.17(hono@4.12.33)
+        specifier: ^2.0.12
+        version: 2.0.12(hono@4.12.34)
       hono:
-        specifier: ^4.12.33
-        version: 4.12.33
+        specifier: ^4.12.34
+        version: 4.12.34
     devDependencies:
       tsx:
         specifier: ^4.23.1
@@ -111,11 +111,11 @@ importers:
         specifier: workspace:*
         version: link:../../packages/workflow-engine
       '@hono/node-server':
-        specifier: ^1.19.17
-        version: 1.19.17(hono@4.12.33)
+        specifier: ^2.0.12
+        version: 2.0.12(hono@4.12.34)
       hono:
-        specifier: ^4.12.33
-        version: 4.12.33
+        specifier: ^4.12.34
+        version: 4.12.34
     devDependencies:
       tsx:
         specifier: ^4.23.1
@@ -133,11 +133,11 @@ importers:
         specifier: workspace:*
         version: link:../../packages/state-store
       '@hono/node-server':
-        specifier: ^1.19.17
-        version: 1.19.17(hono@4.12.33)
+        specifier: ^2.0.12
+        version: 2.0.12(hono@4.12.34)
       hono:
-        specifier: ^4.12.33
-        version: 4.12.33
+        specifier: ^4.12.34
+        version: 4.12.34
     devDependencies:
       tsx:
         specifier: ^4.23.1
@@ -438,9 +438,9 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@hono/node-server@1.19.17':
-    resolution: {integrity: sha512-dSneS5qhiauZWGDCeK4o695Xd9nUNjviSZCMQrj10eetr8Uln1ucn6bbphOM6UynAMMtNIzZNSpL9vnASJwrPQ==}
-    engines: {node: '>=18.14.1'}
+  '@hono/node-server@2.0.12':
+    resolution: {integrity: sha512-eWpQYr67tqJLeaSUl0Q+TquuYfUdTibpOJlUMV2FfUP7+KqCC5TufnwnlXL6mobZBJbGAYRd7ZvEBDCbLInjhg==}
+    engines: {node: '>=20'}
     peerDependencies:
       hono: ^4
 
@@ -803,8 +803,8 @@ packages:
     resolution: {integrity: sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg==}
     engines: {node: '>=6.9.0'}
 
-  hono@4.12.33:
-    resolution: {integrity: sha512-+SwvkaiJtxsiPjhy9LivY/1m7UsNqCJetM1BrZl9A5DkQhlbHQDU730mMiDPWjnoCYOM8Chf3WrCJw27kNTPFQ==}
+  hono@4.12.34:
+    resolution: {integrity: sha512-GqXJqY/xJkJmuloTrnV1ZEXG3fqte+VjkUqoRNZXcrUidiUOP4fMSIHHY4tsqZBK++kVyWmt/AAfSUuy57/eSA==}
     engines: {node: '>=16.9.0'}
 
   https-proxy-agent@7.0.6:
@@ -1291,9 +1291,9 @@ snapshots:
   '@esbuild/win32-x64@0.28.1':
     optional: true
 
-  '@hono/node-server@1.19.17(hono@4.12.33)':
+  '@hono/node-server@2.0.12(hono@4.12.34)':
     dependencies:
-      hono: 4.12.33
+      hono: 4.12.34
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
@@ -1621,7 +1621,7 @@ snapshots:
 
   gensync@1.0.0-beta.2: {}
 
-  hono@4.12.33: {}
+  hono@4.12.34: {}
 
   https-proxy-agent@7.0.6(supports-color@10.2.2):
     dependencies:
