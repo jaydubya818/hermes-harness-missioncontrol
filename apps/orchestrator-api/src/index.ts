@@ -1852,8 +1852,12 @@ app.post("/api/approvals/:id/respond", async (c) => {
 
 if (!process.env.VITEST) {
   const port = Number(process.env.PORT ?? 4302);
-  serve({ fetch: app.fetch, port });
-  console.log(`orchestrator-api listening on http://localhost:${port}`);
+  // @hono/node-server binds 0.0.0.0 when no hostname is given, silently
+  // exposing this operator-trust API to the local network. Default to
+  // loopback; set HOST explicitly to opt into wider exposure.
+  const hostname = process.env.HOST ?? "127.0.0.1";
+  serve({ fetch: app.fetch, port, hostname });
+  console.log(`orchestrator-api listening on http://${hostname}:${port}`);
   if (Number.isFinite(orphanSweepIntervalMs) && orphanSweepIntervalMs > 0) {
     const timer = setInterval(() => {
       void ensureLoaded()
