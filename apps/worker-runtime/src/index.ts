@@ -6,6 +6,7 @@ import { resolve, join, relative, dirname, isAbsolute } from "node:path";
 import { execFile } from "node:child_process";
 import { timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { loadJsonFile, saveJsonFile } from "@hermes-harness-with-missioncontrol/state-store";
 import { EventSource, type EventEnvelope, type ExecutionEnvelope, type StepExecutionRequest } from "@hermes-harness-with-missioncontrol/contracts";
 
@@ -559,9 +560,14 @@ async function exists(path: string): Promise<boolean> {
 // does not kill the child).
 const DEFAULT_CMD_TIMEOUT_MS = 10 * 60 * 1000;
 
+// Carries the per-execution abort signal into every runCmd call without
+// threading a parameter through the whole plan/implement/test/deploy stack.
+const executionAbort = new AsyncLocalStorage<AbortSignal>();
+
 async function runCmd(cmd: string, args: string[], cwd: string, timeoutMs = DEFAULT_CMD_TIMEOUT_MS): Promise<CommandResult> {
   try {
-    const { stdout, stderr } = await execFileAsync(cmd, args, { cwd, maxBuffer: 1024 * 1024 * 25, timeout: timeoutMs, killSignal: "SIGKILL" });
+    const signal = executionAbort.getStore();
+    const { stdout, stderr } = await execFileAsync(cmd, args, { cwd, maxBuffer: 1024 * 1024 * 25, timeout: timeoutMs, killSignal: "SIGKILL", signal });
     return { stdout, stderr, exitCode: 0 };
   } catch (error: any) {
     return {
@@ -1001,16 +1007,28 @@ app.post("/api/execute-step", async (c) => {
       return deploy(workspace);
     };
     let timeoutTimer: NodeJS.Timeout | undefined;
+    // The race only rejects the HTTP response; without the abort signal the
+    // losing execute() branch keeps its child processes (installs, tests,
+    // deploy planning) running for up to DEFAULT_CMD_TIMEOUT_MS, mutating a
+    // worktree the orchestrator has already failed and cleaned up.
+    const abortController = new AbortController();
     try {
+      const executing = executionAbort.run(abortController.signal, execute);
+      // If the timeout wins the race, the losing branch still settles later;
+      // mark its rejection as handled so it cannot crash the process.
+      executing.catch(() => undefined);
       result = await Promise.race([
-        execute(),
+        executing,
         new Promise<StepResult>((_, reject) => {
-          timeoutTimer = setTimeout(() => reject(new WorkerExecutionError(`step execution timed out after ${envelope.timeout_seconds}s`, {
-            statusCode: 408,
-            eventType: "execution.timeout",
-            payload: { timeout_seconds: envelope.timeout_seconds },
-            started: true,
-          })), envelope.timeout_seconds * 1000);
+          timeoutTimer = setTimeout(() => {
+            abortController.abort();
+            reject(new WorkerExecutionError(`step execution timed out after ${envelope.timeout_seconds}s`, {
+              statusCode: 408,
+              eventType: "execution.timeout",
+              payload: { timeout_seconds: envelope.timeout_seconds },
+              started: true,
+            }));
+          }, envelope.timeout_seconds * 1000);
         })
       ]);
     } finally {
