@@ -21,7 +21,21 @@ const OPTIONAL_NUMERIC_FIELDS = ["approval_count", "artifact_count", "duration_m
 const records: EvalRecord[] = [];
 let initialized = false;
 
+let hydration: Promise<void> | null = null;
+
 async function ensureLoaded() {
+  if (initialized) return;
+  // Hydration is not reentrant: two concurrent first requests would both
+  // splice the records array, and the second replay would drop any record
+  // a POST appended in between. Run it once and share the in-flight
+  // promise (same guard orchestrator-api uses).
+  hydration ??= hydrateState().finally(() => {
+    hydration = null;
+  });
+  await hydration;
+}
+
+async function hydrateState() {
   if (initialized) return;
   const loaded = await loadJsonFile<EvalRecord[]>(stateFile, []);
   // loadJsonFile only guards against unparseable JSON; a valid JSON value of
