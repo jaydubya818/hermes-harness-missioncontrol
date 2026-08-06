@@ -143,6 +143,7 @@ Worker/runtime:
 - workspace hydration tolerates dangling `node_modules` symlinks instead of crashing on EEXIST
 - failure event streams emit exactly one `tool.failed` per failure (generic errors no longer duplicate it)
 - `branch_name` is validated before it reaches `git worktree add -B` / `git branch -D` (flag-like or non-string names fail as policy violations)
+- envelope timeouts abort in-flight child commands (installs, git ops, deploy planning) instead of letting them keep mutating the worktree after the step already failed
 
 Eval / observability:
 - eval record persistence and summaries (including `total_approvals`)
@@ -165,6 +166,12 @@ Eval / observability:
 - promotions refuse to overwrite an existing article (409) so promoted stubs can never clobber standards or task logs; the guard is serialized, so concurrent promotes to the same target cannot race past it
 - console memory writeback/promote actions surface HTTP errors instead of rendering error bodies
 - ids are generated with crypto-strength randomness (colliding event ids were silently dropped by replay dedupe)
+- eval-api first-request state hydration is single-flight, matching the orchestrator-api guard
+
+Network / service posture:
+- all four APIs bind to loopback by default (`HOST` opts into wider exposure); @hono/node-server would otherwise listen on `0.0.0.0`
+- CORS is an explicit origin allowlist (`CORS_ALLOWED_ORIGINS`) instead of a wildcard, closing the drive-by-localhost window
+- `pnpm audit --prod` is clean (hono 4.12.34, @hono/node-server 2.x)
 
 ## Deferred
 
@@ -236,6 +243,8 @@ Operator/read models:
 
 Most important env vars:
 - `HARNESS_OPERATOR_TOKEN` — bearer token guarding all mutating APIs and all read endpoints (orchestrator, eval, memory) except `/health`; the SSE event stream also accepts it as a `token` query parameter since `EventSource` cannot send headers; also used by console auth fallback flow
+- `HOST` — bind address for each API service (default `127.0.0.1`; set explicitly, e.g. `0.0.0.0`, to expose a service beyond the machine)
+- `CORS_ALLOWED_ORIGINS` — comma-separated origin allowlist for cross-origin API access (default `http://localhost:5173,http://127.0.0.1:5173`, the console dev origins; the console normally uses the Vite proxy and needs no CORS)
 - `SSE_HEARTBEAT_MS` — keep-alive comment cadence on `GET /api/events/stream` (default 25000, 0 disables)
 - `VITE_OPERATOR_TOKEN` — console-side default token for local dev
 - `HARNESS_VAULT_ROOT` — memory-api vault root; default `vault/agentic-kb`
