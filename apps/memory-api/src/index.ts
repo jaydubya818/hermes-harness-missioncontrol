@@ -11,7 +11,13 @@ const app = new Hono();
 const vaultRoot = process.env.HARNESS_VAULT_ROOT ?? resolve(process.cwd(), "../../vault/agentic-kb");
 const operatorToken = process.env.HARNESS_OPERATOR_TOKEN;
 
-app.use("*", cors());
+// The console talks to these APIs via the Vite dev proxy (same-origin), so
+// cross-origin access is only needed when the console is pointed directly at
+// an API URL. A wildcard here would let any web page a local browser visits
+// call these endpoints; allow only the console dev origins unless overridden.
+const corsOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? "http://localhost:5173,http://127.0.0.1:5173")
+  .split(",").map((origin) => origin.trim()).filter(Boolean);
+app.use("*", cors({ origin: corsOrigins }));
 
 
 function isSafeId(value: unknown): value is string {

@@ -10,7 +10,13 @@ const app = new Hono();
 const stateFile = process.env.EVAL_STATE_FILE ?? resolve(process.cwd(), "../../data/eval-state.json");
 const operatorToken = process.env.HARNESS_OPERATOR_TOKEN;
 
-app.use("*", cors());
+// The console talks to these APIs via the Vite dev proxy (same-origin), so
+// cross-origin access is only needed when the console is pointed directly at
+// an API URL. A wildcard here would let any web page a local browser visits
+// call these endpoints; allow only the console dev origins unless overridden.
+const corsOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? "http://localhost:5173,http://127.0.0.1:5173")
+  .split(",").map((origin) => origin.trim()).filter(Boolean);
+app.use("*", cors({ origin: corsOrigins }));
 const OPTIONAL_NUMERIC_FIELDS = ["approval_count", "artifact_count", "duration_ms", "confidence", "efficiency_score", "risk_score"] as const;
 const records: EvalRecord[] = [];
 let initialized = false;

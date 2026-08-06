@@ -16,6 +16,7 @@ describe("eval-api", () => {
     vi.restoreAllMocks();
     delete process.env.EVAL_STATE_FILE;
     delete process.env.HARNESS_OPERATOR_TOKEN;
+    delete process.env.CORS_ALLOWED_ORIGINS;
     process.env.VITEST = "1";
   });
 
@@ -273,5 +274,26 @@ describe("eval-api", () => {
     const payload = await listing.json() as { summary: { total_runs: number; average_confidence: number } };
     expect(payload.summary.total_runs).toBe(1);
     expect(payload.summary.average_confidence).toBe(0.9);
+  });
+
+  it("only reflects allowlisted origins in CORS headers", async () => {
+    const app = await loadApp();
+
+    const allowed = await app.request("/health", { headers: { origin: "http://localhost:5173" } });
+    expect(allowed.headers.get("access-control-allow-origin")).toBe("http://localhost:5173");
+
+    const denied = await app.request("/health", { headers: { origin: "https://evil.example" } });
+    expect(denied.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("honours CORS_ALLOWED_ORIGINS overrides", async () => {
+    process.env.CORS_ALLOWED_ORIGINS = "https://console.internal.example";
+    const app = await loadApp();
+
+    const custom = await app.request("/health", { headers: { origin: "https://console.internal.example" } });
+    expect(custom.headers.get("access-control-allow-origin")).toBe("https://console.internal.example");
+
+    const defaultDev = await app.request("/health", { headers: { origin: "http://localhost:5173" } });
+    expect(defaultDev.headers.get("access-control-allow-origin")).toBeNull();
   });
 });
