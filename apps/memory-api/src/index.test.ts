@@ -88,6 +88,25 @@ describe("memory-api", () => {
     expect(((await after.json()) as { recent_promotions: number }).recent_promotions).toBe(1);
   });
 
+  it("counts only entry-anchored lines in learned_count and pending_rewrites", async () => {
+    const vault = makeVault();
+    // Frontmatter delimiters and horizontal rules start with "-" but are not
+    // learned entries; "####" sub-headings are not rewrite candidates (the
+    // candidates parser splits on "\n### " only).
+    writeFileSync(join(vault, "wiki", "agents", "agent_demo", "learned.md"), "---\ntitle: learned\n---\n- one\n- two\n");
+    writeFileSync(join(vault, "wiki", "agents", "agent_demo", "rewrites.md"), "### wiki/projects/proj_demo/standards.md\nbody\n#### detail\n### wiki/projects/proj_demo/recipes.md\nbody\n");
+    const app = await loadApp({ vaultRoot: vault });
+
+    const summary = await app.request("/api/memory/agents/agent_demo/summary");
+    const body = (await summary.json()) as { learned_count: number; pending_rewrites: number };
+    expect(body.learned_count).toBe(2);
+    expect(body.pending_rewrites).toBe(2);
+
+    // pending_rewrites agrees with what the candidates endpoint actually parses.
+    const candidates = await app.request("/api/memory/agents/agent_demo/rewrite-candidates");
+    expect(((await candidates.json()) as { items: unknown[] }).items).toHaveLength(2);
+  });
+
   it("refuses to overwrite an existing article on promote", async () => {
     const vault = makeVault();
     const app = await loadApp({ vaultRoot: vault });

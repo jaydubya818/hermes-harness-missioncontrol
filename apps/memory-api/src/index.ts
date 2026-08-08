@@ -260,8 +260,12 @@ app.get("/api/memory/agents/:id/summary", async (c) => {
     profile_path: `wiki/agents/${agentId}/profile.md`,
     hot_path: `wiki/agents/${agentId}/hot.md`,
     working_path: `wiki/agents/${agentId}/task-log.md`,
-    learned_count: learned ? learned.split("\n").filter((line) => line.trim().startsWith("-")).length : 0,
-    pending_rewrites: rewrites ? rewrites.split("\n").filter((line) => line.trim().startsWith("###")).length : 0,
+    // Anchor on "- " / "### " entry markers: a bare startsWith("-") also
+    // counts frontmatter/horizontal-rule "---" lines, and startsWith("###")
+    // counts "####" sub-headings that the rewrite-candidates parser (which
+    // splits on "\n### ") does not treat as candidates.
+    learned_count: learned ? learned.split("\n").filter((line) => line.trim().startsWith("- ")).length : 0,
+    pending_rewrites: rewrites ? rewrites.split("\n").filter((line) => /^### /.test(line.trim())).length : 0,
     recent_promotions: await countAgentPromotions(agentId)
   });
 });
