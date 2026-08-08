@@ -106,11 +106,13 @@ Lifecycle / governance:
 - approval normalization and authoritative `Step.approval_id`
 - replay-safe event ingestion by `event_id`
 - duplicate artifact protection by `artifact_id`
+- manual artifact attachment validates artifact_id/uri/content/metadata types so bad payloads cannot poison dedupe or read models
 - mission creation rejects workflow ids that are not in the workflow library
 - mission creation validates optional string fields (repo_path, workspace_root, objective, refs) so bad payloads fail at creation, not first dispatch
 - approval responses validate the actor field instead of 500-ing on non-strings
 - persisted state hydration is single-flight, so concurrent first requests cannot double-replay events into live streams
 - worker results that land after an operator interrupt/cancel/retry are discarded instead of overriding the operator's decision
+- operator interrupt/cancel/retry also signal the worker to abort the in-flight execution's child commands (best-effort; the stale-dispatch guard stays authoritative)
 - cancelled runs release their worktree/branch and record an eval, matching the other terminal transitions
 - orphan worktree cleanup endpoint + optional periodic sweeper
 - the persisted audit trail is restored on load, keeping audit ids stable across restarts
@@ -144,6 +146,8 @@ Worker/runtime:
 - failure event streams emit exactly one `tool.failed` per failure (generic errors no longer duplicate it)
 - `branch_name` is validated before it reaches `git worktree add -B` / `git branch -D` (flag-like or non-string names fail as policy violations)
 - envelope timeouts abort in-flight child commands (installs, git ops, deploy planning) instead of letting them keep mutating the worktree after the step already failed
+- workspace setup (worktree creation, dependency bootstrap) runs inside the same timeout/abort scope, so a hung bootstrap install fails the step at the envelope timeout too
+- `POST /api/abort-execution` aborts a live execution by `execution_id`; duplicate dispatches for a still-running execution id are rejected
 
 Eval / observability:
 - eval record persistence and summaries (including `total_approvals`)
