@@ -29,6 +29,9 @@ Make MissionControl credible under restart, replay, duplicate delivery, and repe
 - cancel-step rejects terminal step states
 - cancel-run rejects terminal run states
 - duplicate operator calls therefore do not mutate state twice
+- interrupt/cancel/retry signal the worker abort endpoint (best-effort) so an
+  in-flight execution stops its child commands instead of running to the
+  envelope timeout; the stale-dispatch guard stays authoritative
 
 ### Artifact creation
 - workflow-engine attach path dedupes by `artifact_id`
@@ -39,6 +42,10 @@ Make MissionControl credible under restart, replay, duplicate delivery, and repe
 
 ### Worker result replay
 - MissionControl reuses an existing `step.execution_id` when redispatching a still-running step after restart
+- if that execution is genuinely still in flight on the worker, the worker
+  rejects the duplicate dispatch with `409 execution already in flight`
+  rather than running two executions against one worktree; the operator can
+  abort the live execution or retry (which mints a fresh execution id)
 - duplicate worker step events are dropped by `event_id`
 - duplicate artifacts from replay are dropped by `artifact_id`
 
