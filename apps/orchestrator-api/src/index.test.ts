@@ -1993,6 +1993,78 @@ describe("orchestrator-api", () => {
     expect(workerCalls).toHaveLength(1);
   });
 
+  it("signals the worker to abort the in-flight execution when the operator interrupts", async () => {
+    let releaseWorker: (() => void) | undefined;
+    const workerGate = new Promise<void>((resolve) => { releaseWorker = resolve; });
+    let dispatchedExecutionId: string | undefined;
+    const abortCalls: Array<{ execution_id?: string; reason?: string }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/execute-step")) {
+        dispatchedExecutionId = (JSON.parse(String(init?.body ?? "{}")) as { execution_id?: string }).execution_id;
+        await workerGate;
+        return jsonResponse({ body: { success: true, summary: "planned", confidence: 0.95, artifacts: [] } });
+      }
+      if (url.includes("/api/abort-execution")) {
+        abortCalls.push(JSON.parse(String(init?.body ?? "{}")) as { execution_id?: string; reason?: string });
+        return jsonResponse({ body: { ok: true } });
+      }
+      return jsonResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await loadApp();
+    const createMission = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Abort in-flight execution", project_id: "proj_demo", workflow_id: "bugfix" })
+    });
+    const mission = await createMission.json() as { mission_id: string };
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const run = await startRun.json() as { run_id: string };
+
+    const executePromise = app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const interrupt = await app.request(`/api/runs/${run.run_id}/interrupt-step`, { method: "POST" });
+    expect(interrupt.status).toBe(200);
+
+    // The interrupt must reach the worker's abort endpoint with the
+    // dispatched execution id so its child commands stop, instead of only
+    // discarding the result after the worker finishes on its own.
+    expect(abortCalls).toHaveLength(1);
+    expect(abortCalls[0]).toMatchObject({ execution_id: dispatchedExecutionId, reason: "operator interrupted current step" });
+
+    releaseWorker?.();
+    const execute = await executePromise;
+    expect(execute.status).toBe(409);
+  });
+
+  it("does not call the worker abort endpoint when no execution is in flight", async () => {
+    const abortCalls: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/abort-execution")) abortCalls.push(url);
+      return jsonResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await loadApp();
+    const createMission = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "No abort without execution", project_id: "proj_demo", workflow_id: "bugfix" })
+    });
+    const mission = await createMission.json() as { mission_id: string };
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const run = await startRun.json() as { run_id: string };
+
+    // The step is running (started at mission start) but was never
+    // dispatched, so it has no execution id to abort.
+    const interrupt = await app.request(`/api/runs/${run.run_id}/interrupt-step`, { method: "POST" });
+    expect(interrupt.status).toBe(200);
+    expect(abortCalls).toHaveLength(0);
+  });
+
   it("discards a worker result that lands after the operator interrupted the step", async () => {
     let releaseWorker: (() => void) | undefined;
     const workerGate = new Promise<void>((resolve) => { releaseWorker = resolve; });

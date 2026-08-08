@@ -1237,6 +1237,26 @@ async function cleanupExecutionWorkspace(run: WorkflowRun, mission?: Mission, ex
   }
 }
 
+// Best-effort: tell the worker to abort an in-flight execution's child
+// commands when the operator interrupts/cancels/retries the step. Without
+// this the worker keeps mutating the worktree until the envelope timeout,
+// and the result is only discarded after the fact. 404 (already settled)
+// and transport failures are fine -- the stale-dispatch guard remains the
+// authoritative protection.
+async function requestWorkerAbort(executionId: string | undefined, reason: string) {
+  if (!executionId) return;
+  try {
+    await fetch(`${workerApi}/api/abort-execution`, {
+      method: "POST",
+      headers: authHeaders(),
+      signal: AbortSignal.timeout(SIDECAR_TIMEOUT_MS),
+      body: JSON.stringify({ execution_id: executionId, reason })
+    });
+  } catch (err) {
+    console.error("[orchestrator] requestWorkerAbort failed (worker-api unavailable):", err instanceof Error ? err.message : err);
+  }
+}
+
 function rejectPendingApprovalForCurrentStep(run: WorkflowRun, actor = "operator") {
   const current = getCurrentStep(run);
   if (!current?.approval_id) return undefined;
@@ -1631,7 +1651,9 @@ app.post("/api/runs/:id/interrupt-step", async (c) => {
   const mission = getMissionForRun(run);
   const current = getCurrentStep(run);
   if (!current || current.state !== "running") return c.json({ error: "current step not running" }, 409);
+  const interruptedExecutionId = current.execution_id;
   pauseCurrentStep(run, "operator interrupted current step");
+  await requestWorkerAbort(interruptedExecutionId, "operator interrupted current step");
   updateMissionState(mission, "paused", "operator interrupted current step", { run_id: run.run_id, step_id: current.step_id, actor: "operator" });
   recordRunStatusEvent(run, { step_id: current.step_id, actor: "operator", execution_id: current.execution_id, summary: "operator interrupted current step" });
   recordEvent({ type: "step.paused", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: current.step_id as `step_${string}`, actor: "operator", execution_id: current.execution_id, payload: { control_action: "interrupt", reason: "operator interrupted current step" } as any });
@@ -1671,6 +1693,7 @@ app.post("/api/runs/:id/retry-step", async (c) => {
   const approval = rejectPendingApprovalForCurrentStep(run, "operator");
   const previousExecutionId = current.execution_id;
   retryCurrentStep(run, "operator retried current step");
+  await requestWorkerAbort(previousExecutionId, "operator retried current step");
   updateMissionState(mission, "running", "operator retried current step", { run_id: run.run_id, step_id: current.step_id, actor: "operator" });
   recordRunStatusEvent(run, { step_id: current.step_id, actor: "operator", summary: "operator retried current step" });
   recordEvent({ type: "step.retried", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: current.step_id as `step_${string}`, actor: "operator", execution_id: previousExecutionId, payload: { previous_execution_id: previousExecutionId } as any });
@@ -1688,7 +1711,9 @@ app.post("/api/runs/:id/cancel-step", async (c) => {
   const current = getCurrentStep(run);
   if (!current || ["completed", "failed", "cancelled"].includes(current.state)) return c.json({ error: "current step not cancellable" }, 409);
   const approval = rejectPendingApprovalForCurrentStep(run);
+  const cancelledExecutionId = current.execution_id;
   cancelCurrentStep(run, "operator cancelled current step");
+  await requestWorkerAbort(cancelledExecutionId, "operator cancelled current step");
   updateMissionState(mission, "cancelled", "operator cancelled current step", { run_id: run.run_id, step_id: current.step_id, actor: "operator" });
   recordRunStatusEvent(run, { step_id: current.step_id, actor: "operator", execution_id: current.execution_id, summary: "operator cancelled current step" });
   recordEvent({ type: "step.cancelled", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: current.step_id as `step_${string}`, actor: "operator", execution_id: current.execution_id, payload: { control_action: "cancel_step" } as any });
@@ -1711,7 +1736,9 @@ app.post("/api/runs/:id/cancel", async (c) => {
   const current = getCurrentStep(run);
   if (!current) return c.json({ error: "no current step" }, 400);
   const approval = rejectPendingApprovalForCurrentStep(run);
+  const cancelledExecutionId = current.execution_id;
   cancelCurrentStep(run, "operator cancelled run");
+  await requestWorkerAbort(cancelledExecutionId, "operator cancelled run");
   updateMissionState(mission, "cancelled", "operator cancelled run", { run_id: run.run_id, step_id: current.step_id, actor: "operator" });
   recordRunStatusEvent(run, { step_id: current.step_id, actor: "operator", execution_id: current.execution_id, summary: "operator cancelled run" });
   recordEvent({ type: "step.cancelled", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: current.step_id as `step_${string}`, actor: "operator", execution_id: current.execution_id, payload: { control_action: "cancel_run" } as any });
