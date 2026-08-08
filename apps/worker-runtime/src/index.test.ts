@@ -347,6 +347,57 @@ describe("worker-runtime", () => {
     await expect(bootstrapWorkspaceDependencies(workspace, sourceRepo)).resolves.toMatchObject({ reused: false });
   });
 
+  it("aborts workspace bootstrap when the envelope timeout fires", { timeout: 20_000 }, async () => {
+    const run = promisify(execFile);
+    const runId = "run_slow_bootstrap";
+    const repo = join(sandboxRoot, "slow-bootstrap-repo");
+    await mkdir(repo, { recursive: true });
+    await writeFile(join(repo, "package.json"), JSON.stringify({ name: "slow-repo" }), "utf8");
+    await writeFile(join(repo, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n", "utf8");
+    await run("git", ["-C", repo, "init", "-q"]);
+    await run("git", ["-C", repo, "add", "."]);
+    await run("git", ["-C", repo, "-c", "user.email=test@example.com", "-c", "user.name=test", "commit", "-q", "-m", "init"]);
+
+    // A pnpm that hangs far longer than the envelope allows. Workspace
+    // bootstrap runs it during dependency hydration; unless setup executes
+    // inside the timeout/abort scope, this request blocks for the full
+    // sleep instead of failing at timeout_seconds.
+    const binDir = join(sandboxRoot, "slow-bin");
+    await mkdir(binDir, { recursive: true });
+    await writeFile(join(binDir, "pnpm"), "#!/bin/sh\nsleep 120\n", { mode: 0o755 });
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${binDir}:${originalPath}`;
+    const worktree = join(process.cwd(), "../../data/worktrees", runId);
+    try {
+      const response = await app.request("/api/execute-step", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mission_id: "mis_slow_bootstrap",
+          run_id: runId,
+          step_id: "step_plan",
+          execution_id: "exec_slow_bootstrap",
+          kind: "plan",
+          repo_path: repo,
+          envelope: buildEnvelope({
+            timeout_seconds: 1,
+            worktree_path: worktree,
+            output_dir: join(process.cwd(), "../../data/worker-runs", runId, "step_plan"),
+            repo_scope: { root_path: repo, writable_paths: [] }
+          })
+        })
+      });
+
+      const payload = await response.json() as { summary?: string; error_code?: string };
+      expect(response.status).toBe(408);
+      expect(payload.error_code).toBe("execution.timeout");
+      expect(payload.summary).toMatch(/timed out/i);
+    } finally {
+      process.env.PATH = originalPath;
+      await rm(worktree, { recursive: true, force: true });
+    }
+  });
+
   it("cleans up run directories even without git metadata", async () => {
     const runId = "run_cleanup";
     const target = join(process.cwd(), "../../data/worktrees", runId);

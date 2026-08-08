@@ -997,9 +997,15 @@ app.post("/api/execute-step", async (c) => {
   if (!body) return c.json({ error: "invalid JSON body" }, 400);
   try {
     const envelope = validateEnvelope(body);
-    const workspace = await ensureWorkspace(body, envelope);
+    let workspace: WorkspaceContext | undefined;
     let result: StepResult;
     const execute = async () => {
+      // Workspace setup spawns git worktree and dependency bootstrap
+      // commands that can run for minutes on their own; running it inside
+      // the abort scope keeps the whole request (setup + step body) bounded
+      // by the envelope timeout instead of only the step body, and lets the
+      // timeout kill an in-flight bootstrap install.
+      workspace = await ensureWorkspace(body, envelope);
       if (body.kind === "plan") return createPlan(workspace);
       if (body.kind === "implement") return createImplementation(workspace, body);
       if (body.kind === "test") return runTests(workspace);
@@ -1038,7 +1044,9 @@ app.post("/api/execute-step", async (c) => {
     }
     enforceBudget(body, result);
     const step_events = buildStepEvents(body, result);
-    return c.json({ run_id: body.run_id, mission_id: body.mission_id, execution_id: body.execution_id, step_id: body.step_id, ...workspace, ...result, step_events });
+    // The race only resolves after `execute` succeeded, and `execute`
+    // assigns workspace before returning.
+    return c.json({ run_id: body.run_id, mission_id: body.mission_id, execution_id: body.execution_id, step_id: body.step_id, ...workspace!, ...result, step_events });
   } catch (error) {
     const workerError = error instanceof WorkerExecutionError
       ? error
