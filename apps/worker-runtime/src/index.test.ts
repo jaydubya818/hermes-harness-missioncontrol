@@ -449,6 +449,49 @@ describe("worker-runtime", () => {
     expect(again.status).toBe(404);
   });
 
+  it("rejects a duplicate dispatch for a still-running execution id", { timeout: 20_000 }, async () => {
+    const repo = join(sandboxRoot, "duplicate-dispatch-repo");
+    await mkdir(repo, { recursive: true });
+    await writeFile(join(repo, "package.json"), JSON.stringify({ name: "duplicate", scripts: { test: "sleep 60" } }), "utf8");
+
+    const request = () => app.request("/api/execute-step", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mission_id: "mis_duplicate",
+        run_id: "run_duplicate",
+        step_id: "step_test",
+        execution_id: "exec_duplicate",
+        kind: "test",
+        repo_path: repo,
+        envelope: buildEnvelope({
+          timeout_seconds: 60,
+          allowed_actions: ["run_tests"],
+          worktree_path: join(process.cwd(), "../../data/worktrees/run_duplicate"),
+          output_dir: join(process.cwd(), "../../data/worker-runs/run_duplicate/step_test"),
+          repo_scope: { root_path: repo, writable_paths: [] }
+        })
+      })
+    });
+
+    const firstPromise = request();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    // A second dispatch reusing the live execution id would orphan the
+    // first registration and run two executions against one worktree.
+    const second = await request();
+    expect(second.status).toBe(409);
+    expect(((await second.json()) as { error?: string }).error).toMatch(/already in flight/);
+
+    const abort = await app.request("/api/abort-execution", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ execution_id: "exec_duplicate" })
+    });
+    expect(abort.status).toBe(200);
+    expect((await firstPromise).status).toBe(409);
+  });
+
   it("returns 404 for aborts targeting unknown executions and 400 for bad payloads", async () => {
     const unknown = await app.request("/api/abort-execution", {
       method: "POST",
