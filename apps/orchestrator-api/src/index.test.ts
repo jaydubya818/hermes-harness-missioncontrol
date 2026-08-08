@@ -1601,6 +1601,23 @@ describe("orchestrator-api", () => {
     });
     expect(missingType.status).toBe(400);
 
+    // Non-string artifact_id/uri and non-object metadata poison idempotent
+    // re-attachment and read-model consumers; they must 400, not attach.
+    for (const invalid of [
+      { step_id: "plan", type: "plan", artifact_id: 42 },
+      { step_id: "plan", type: "plan", artifact_id: "  " },
+      { step_id: "plan", type: "plan", uri: 42 },
+      { step_id: "plan", type: "plan", content: { nested: true } },
+      { step_id: "plan", type: "plan", metadata: ["not", "an", "object"] }
+    ]) {
+      const response = await app.request("/api/runs/run_demo/artifacts", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(invalid)
+      });
+      expect(response.status).toBe(400);
+    }
+
     const eventsResponse = await app.request("/api/events");
     const eventsPayload = await eventsResponse.json() as { events: Array<{ type: string }> };
     expect(eventsPayload.events.filter((event) => event.type === "artifact.created")).toHaveLength(0);

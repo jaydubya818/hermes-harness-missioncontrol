@@ -1761,6 +1761,21 @@ app.post("/api/runs/:id/artifacts", async (c) => {
   const step = run.steps.find((item) => item.step_id === body.step_id);
   if (!step) return c.json({ error: "step not found" }, 404);
   if (typeof body.type !== "string" || !body.type.trim()) return c.json({ error: "type required" }, 400);
+  // artifact_id keys idempotent re-attachment and read-model lookups; uri
+  // and content land in read models and events. Non-string values here
+  // would poison dedupe (every retry attaches a fresh copy) or crash
+  // consumers that expect strings.
+  if (body.artifact_id !== undefined && (typeof body.artifact_id !== "string" || !body.artifact_id.trim())) {
+    return c.json({ error: "artifact_id must be a non-empty string when provided" }, 400);
+  }
+  for (const field of ["uri", "content"] as const) {
+    if (body[field] !== undefined && typeof body[field] !== "string") {
+      return c.json({ error: `${field} must be a string when provided` }, 400);
+    }
+  }
+  if (body.metadata !== undefined && (typeof body.metadata !== "object" || body.metadata === null || Array.isArray(body.metadata))) {
+    return c.json({ error: "metadata must be an object when provided" }, 400);
+  }
   const existing = step.artifacts.find((item) => item.artifact_id === body.artifact_id);
   if (existing) return c.json(existing);
   const artifact = { artifact_id: body.artifact_id ?? makeId("art"), type: body.type, kind: body.type, label: body.type, uri: body.uri ?? `artifact://${run.run_id}/${body.step_id}/${body.type}`, content: body.content, metadata: body.metadata, created_at: new Date().toISOString() };
