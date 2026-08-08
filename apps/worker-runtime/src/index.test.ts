@@ -398,6 +398,73 @@ describe("worker-runtime", () => {
     }
   });
 
+  it("aborts an in-flight execution when the abort endpoint is called", { timeout: 20_000 }, async () => {
+    const repo = join(sandboxRoot, "abortable-repo");
+    await mkdir(repo, { recursive: true });
+    // Non-git repo is fine for test steps; the test script hangs far longer
+    // than the abort should take to settle the request.
+    await writeFile(join(repo, "package.json"), JSON.stringify({ name: "abortable", scripts: { test: "sleep 60" } }), "utf8");
+
+    const responsePromise = app.request("/api/execute-step", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mission_id: "mis_abort",
+        run_id: "run_abort",
+        step_id: "step_test",
+        execution_id: "exec_abort",
+        kind: "test",
+        repo_path: repo,
+        envelope: buildEnvelope({
+          timeout_seconds: 60,
+          allowed_actions: ["run_tests"],
+          worktree_path: join(process.cwd(), "../../data/worktrees/run_abort"),
+          output_dir: join(process.cwd(), "../../data/worker-runs/run_abort/step_test"),
+          repo_scope: { root_path: repo, writable_paths: [] }
+        })
+      })
+    });
+    // Let the dispatch register and start its test command.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const abort = await app.request("/api/abort-execution", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ execution_id: "exec_abort", reason: "operator interrupted current step" })
+    });
+    expect(abort.status).toBe(200);
+
+    const response = await responsePromise;
+    const payload = await response.json() as { summary?: string; step_events?: Array<{ type: string }> };
+    expect(response.status).toBe(409);
+    expect(payload.summary).toMatch(/aborted by operator: operator interrupted current step/);
+    expect(payload.step_events?.some((event) => event.type === "step.failed")).toBe(true);
+
+    // Settled executions are unregistered: a second abort finds nothing.
+    const again = await app.request("/api/abort-execution", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ execution_id: "exec_abort" })
+    });
+    expect(again.status).toBe(404);
+  });
+
+  it("returns 404 for aborts targeting unknown executions and 400 for bad payloads", async () => {
+    const unknown = await app.request("/api/abort-execution", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ execution_id: "exec_never_dispatched" })
+    });
+    expect(unknown.status).toBe(404);
+
+    const missingId = await app.request("/api/abort-execution", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reason: "no id" })
+    });
+    expect(missingId.status).toBe(400);
+  });
+
   it("cleans up run directories even without git metadata", async () => {
     const runId = "run_cleanup";
     const target = join(process.cwd(), "../../data/worktrees", runId);

@@ -990,6 +990,11 @@ app.use("*", cors({ origin: corsOrigins }));
 
 app.get("/health", (c) => c.json({ ok: true, service: "worker-runtime", allowed_repo_root: allowedRepoRoot }));
 
+// In-flight executions by execution_id so operator controls (interrupt,
+// cancel) can abort a running step's child commands instead of letting them
+// mutate the worktree until the envelope timeout fires.
+const liveExecutions = new Map<string, { abort: (reason: string) => void }>();
+
 app.post("/api/execute-step", async (c) => {
   const authError = requireOperator(c);
   if (authError) return authError;
@@ -1018,6 +1023,29 @@ app.post("/api/execute-step", async (c) => {
     // deploy planning) running for up to DEFAULT_CMD_TIMEOUT_MS, mutating a
     // worktree the orchestrator has already failed and cleaned up.
     const abortController = new AbortController();
+    // A second dispatch for a still-running execution id would orphan the
+    // first registration and leave that execution unabortable.
+    if (liveExecutions.has(body.execution_id)) {
+      return c.json({ error: `execution ${body.execution_id} already in flight` }, 409);
+    }
+    let rejectOperatorAbort: ((error: Error) => void) | undefined;
+    const operatorAborted = new Promise<StepResult>((_, reject) => {
+      rejectOperatorAbort = reject;
+    });
+    // If the abort lands after the race settled, this rejection has no
+    // listener; mark it handled so it cannot crash the process.
+    operatorAborted.catch(() => undefined);
+    liveExecutions.set(body.execution_id, {
+      abort: (reason: string) => {
+        abortController.abort();
+        rejectOperatorAbort?.(new WorkerExecutionError(`execution aborted by operator: ${reason}`, {
+          statusCode: 409,
+          eventType: "tool.failed",
+          payload: { abort_reason: reason },
+          started: true,
+        }));
+      },
+    });
     try {
       const executing = executionAbort.run(abortController.signal, execute);
       // If the timeout wins the race, the losing branch still settles later;
@@ -1025,6 +1053,7 @@ app.post("/api/execute-step", async (c) => {
       executing.catch(() => undefined);
       result = await Promise.race([
         executing,
+        operatorAborted,
         new Promise<StepResult>((_, reject) => {
           timeoutTimer = setTimeout(() => {
             abortController.abort();
@@ -1041,6 +1070,7 @@ app.post("/api/execute-step", async (c) => {
       // Without this, every request leaks a live timer for the full envelope
       // timeout (up to 15 minutes) even after the step finishes.
       clearTimeout(timeoutTimer);
+      liveExecutions.delete(body.execution_id);
     }
     enforceBudget(body, result);
     const step_events = buildStepEvents(body, result);
@@ -1077,6 +1107,24 @@ app.post("/api/cleanup-run", async (c) => {
   } catch (error) {
     return c.json({ error: String(error instanceof Error ? error.message : error) }, 400);
   }
+});
+
+app.post("/api/abort-execution", async (c) => {
+  const authError = requireOperator(c);
+  if (authError) return authError;
+  const body = await parseJsonBody<{ execution_id: string; reason?: string }>(c);
+  if (!body || typeof body.execution_id !== "string" || !body.execution_id) {
+    return c.json({ error: "invalid JSON body: execution_id required" }, 400);
+  }
+  if (body.reason !== undefined && typeof body.reason !== "string") {
+    return c.json({ error: "reason must be a string" }, 400);
+  }
+  const entry = liveExecutions.get(body.execution_id);
+  // Already settled (or never dispatched here): nothing to abort. 404 lets
+  // the orchestrator treat this as best-effort without special casing.
+  if (!entry) return c.json({ error: "execution not found or already settled" }, 404);
+  entry.abort(body.reason?.trim() || "operator requested abort");
+  return c.json({ ok: true, execution_id: body.execution_id });
 });
 
 if (!process.env.VITEST) {
