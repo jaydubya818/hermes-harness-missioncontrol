@@ -6,3 +6,10 @@ packages:
 # than 3 days ago (in minutes), giving the registry time to catch and unpublish
 # compromised releases before they can land here on install/update.
 minimumReleaseAge: 4320
+
+# Force patched versions of vulnerable transitive dev dependencies:
+# - js-yaml <4.3.1 (GHSA-5p4m-2wfm-xmqj, prototype pollution) via openapi-typescript
+# - nanoid <3.3.17 (GHSA-2v37-7h3g-55p8, infinite loop) via vite>postcss
+overrides:
+  "js-yaml@>=4.0.0 <4.3.1": ">=4.3.1"
+  "nanoid@<3.3.17": ">=3.3.17"
