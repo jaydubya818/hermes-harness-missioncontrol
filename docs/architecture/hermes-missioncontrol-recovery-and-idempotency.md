@@ -28,6 +28,10 @@ Make MissionControl credible under restart, replay, duplicate delivery, and repe
 - retry requires retryable step states only
 - cancel-step rejects terminal step states
 - cancel-run rejects terminal run states
+- manual step-complete requires the current step `running`: completing an
+  awaiting-approval step would mint a second pending approval and orphan the
+  first in the operator queue, and completing a paused/cancelled step would
+  bypass resume/retry (or resurrect a terminal run through the policy gate)
 - duplicate operator calls therefore do not mutate state twice
 - interrupt/cancel/retry signal the worker abort endpoint (best-effort) so an
   in-flight execution stops its child commands instead of running to the
@@ -100,6 +104,9 @@ Protected transitions:
 
 ## Cleanup semantics
 Implemented now:
+- workspace bootstrap-cache updates are serialized through a queue, so
+  concurrent step executions cannot lose each other's cache entries (a lost
+  entry silently forced a full dependency reinstall on that repo's next step)
 - MissionControl calls worker cleanup after completion, rejection, and failure
 - worker cleanup removes worktree and branch when possible
 - orchestrator exposes `POST /api/maintenance/sweep-orphans` for manual orphan pruning
