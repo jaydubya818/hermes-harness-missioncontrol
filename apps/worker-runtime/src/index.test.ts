@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { access, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { dirname, join, resolve } from "node:path";
@@ -331,6 +331,33 @@ describe("worker-runtime", () => {
     await expect(bootstrapWorkspaceDependencies(workspace, sourceRepo)).resolves.toMatchObject({ reused: true, commit });
     // The pre-hydrated node_modules must survive (no unlink + reinstall).
     await expect(access(join(workspace, "node_modules"))).resolves.toBeUndefined();
+  });
+
+  it("keeps both cache entries when two workspaces bootstrap concurrently", async () => {
+    const run = promisify(execFile);
+    const repos: string[] = [];
+    const workspaces: string[] = [];
+    for (const name of ["concurrent-repo-a", "concurrent-repo-b"]) {
+      const repo = join(sandboxRoot, name);
+      await mkdir(repo, { recursive: true });
+      await writeFile(join(repo, "package.json"), JSON.stringify({ name }), "utf8");
+      await run("git", ["-C", repo, "init", "-q"]);
+      await run("git", ["-C", repo, "add", "package.json"]);
+      await run("git", ["-C", repo, "-c", "user.email=test@example.com", "-c", "user.name=test", "commit", "-q", "-m", "init"]);
+      const workspace = join(sandboxRoot, `${name}-workspace`);
+      await mkdir(workspace, { recursive: true });
+      repos.push(repo);
+      workspaces.push(workspace);
+    }
+
+    // Both bootstraps read-modify-write the shared cache file; without the
+    // serialized update queue the later write could drop the earlier entry.
+    await Promise.all(repos.map((repo, index) => bootstrapWorkspaceDependencies(workspaces[index]!, repo)));
+
+    const cache = JSON.parse(await readFile(process.env.WORKSPACE_CACHE_FILE!, "utf8")) as Record<string, { repo_path: string }>;
+    for (const repo of repos) {
+      expect(cache[Buffer.from(repo).toString("base64url")]).toMatchObject({ repo_path: repo });
+    }
   });
 
   it("hydrates workspaces whose node_modules symlink is dangling instead of crashing", async () => {

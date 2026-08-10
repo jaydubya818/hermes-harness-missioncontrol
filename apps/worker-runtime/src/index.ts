@@ -582,8 +582,21 @@ async function readCache(): Promise<BootstrapCache> {
   return loadJsonFile<BootstrapCache>(cacheFile, {});
 }
 
-async function writeCache(cache: BootstrapCache) {
-  await saveJsonFile(cacheFile, cache);
+// The bootstrap cache is a shared read-modify-write JSON file. Two
+// concurrent step executions that both read before either writes would
+// silently drop one repo's entry (and force a full reinstall on its next
+// step), so updates are serialized through a module-level queue like every
+// other read-modify-write state file in this repo.
+let cacheUpdateQueue: Promise<unknown> = Promise.resolve();
+
+function updateCacheEntry(cacheKey: string, entry: BootstrapCacheEntry): Promise<void> {
+  const update = cacheUpdateQueue.then(async () => {
+    const cache = await readCache();
+    cache[cacheKey] = entry;
+    await saveJsonFile(cacheFile, cache);
+  });
+  cacheUpdateQueue = update.catch(() => undefined);
+  return update;
 }
 
 async function assertGitRepo(path: string) {
@@ -652,9 +665,8 @@ async function mirrorBuildArtifacts(sourceRepo: string, repoWorkspace: string) {
 async function bootstrapWorkspaceDependencies(repoWorkspace: string, sourceRepo: string) {
   const packageManager = await detectPackageManager(repoWorkspace);
   const commit = await currentCommit(sourceRepo);
-  const cache = await readCache();
   const cacheKey = cacheKeyForRepo(sourceRepo);
-  const cached = cache[cacheKey];
+  const cached = (await readCache())[cacheKey];
   const cacheHit = cached?.commit === commit;
 
   const targetNodeModules = join(repoWorkspace, "node_modules");
@@ -683,8 +695,7 @@ async function bootstrapWorkspaceDependencies(repoWorkspace: string, sourceRepo:
   await mirrorBuildArtifacts(sourceRepo, repoWorkspace);
 
   const hydrated_at = new Date().toISOString();
-  cache[cacheKey] = { repo_path: sourceRepo, commit, hydrated_at, package_manager: packageManager };
-  await writeCache(cache);
+  await updateCacheEntry(cacheKey, { repo_path: sourceRepo, commit, hydrated_at, package_manager: packageManager });
 
   return {
     cache_key: cacheKey,
