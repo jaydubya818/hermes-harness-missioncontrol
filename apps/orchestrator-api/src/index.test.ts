@@ -1657,6 +1657,32 @@ describe("orchestrator-api", () => {
     expect(payload.events[0]?.event_id).toBe("evt_dup");
   });
 
+  it("rejects artifact attachment to terminal runs", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-artifact-terminal-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [{ mission_id: "mis_demo", title: "Done", objective: "Done", project_id: "proj_demo", workflow: "bugfix", status: "cancelled", active_run_id: "run_demo", summary: "operator cancelled run", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z" }],
+      runs: [{ run_id: "run_demo", mission_id: "mis_demo", workflow_id: "bugfix", status: "cancelled", current_step_index: 0, current_step_id: "plan", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z", steps: [{ step_id: "plan", title: "Plan fix", kind: "plan", risk: "low", approval_mode: "on_policy_trigger", state: "cancelled", artifacts: [], started_at: "2026-04-11T00:00:00.000Z", completed_at: "2026-04-11T00:01:00.000Z" }] }],
+      approvals: [],
+      events: [],
+      audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const response = await app.request("/api/runs/run_demo/artifacts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ step_id: "plan", type: "diff", content: "late artifact" })
+    });
+    expect(response.status).toBe(409);
+
+    const runsResponse = await app.request("/api/runs");
+    const runsPayload = await runsResponse.json() as { runs: Array<{ steps: Array<{ artifacts: unknown[] }> }> };
+    expect(runsPayload.runs[0]?.steps[0]?.artifacts).toHaveLength(0);
+  });
+
   it("treats artifact creation as idempotent when artifact_id repeats", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
 

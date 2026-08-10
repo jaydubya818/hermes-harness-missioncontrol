@@ -1762,6 +1762,10 @@ app.post("/api/runs/:id/artifacts", async (c) => {
   await ensureLoaded();
   const run = state.runs.find((item) => item.run_id === c.req.param("id"));
   if (!run) return c.json({ error: "run not found" }, 404);
+  // Terminal runs are read-only history everywhere else (not cancellable,
+  // not executable); attaching artifacts after the fact would mutate the
+  // recorded outcome and fire artifact.created events on a closed run.
+  if (isTerminalRun(run)) return c.json({ error: "run is terminal; artifacts cannot be attached" }, 409);
   const body = await parseJsonBody<{ step_id: string; type: string; artifact_id?: string; content?: string; uri?: string; metadata?: Record<string, unknown> }>(c);
   if (!body) return c.json({ error: "invalid JSON body" }, 400);
   const step = run.steps.find((item) => item.step_id === body.step_id);
