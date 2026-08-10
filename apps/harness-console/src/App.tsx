@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import useSWR, { mutate } from "swr";
 import { CapacityBar, CostCard, Panel, Sparkline, StatusRow } from "@hermes-harness-with-missioncontrol/ui-kit";
 import { CommandPalette } from "./CommandPalette.js";
+import { readApiResponse, withQuery } from "./api.js";
 
 const tabs = ["Overview", "Missions", "Agents", "Memory", "Code", "Audit", "Settings"] as const;
 type Tab = (typeof tabs)[number];
@@ -24,15 +25,6 @@ function authFetch(url: string, init: RequestInit = {}) {
   });
 }
 
-async function readApiResponse(response: Response) {
-  const text = await response.text();
-  try {
-    return text ? JSON.parse(text) : null;
-  } catch {
-    return text;
-  }
-}
-
 async function authJson(url: string, init: RequestInit = {}) {
   const response = await authFetch(url, init);
   const body = await readApiResponse(response);
@@ -46,15 +38,6 @@ async function authJson(url: string, init: RequestInit = {}) {
 // Throw on HTTP errors so SWR keeps `data` undefined (panels render their
 // empty states) instead of treating an error body like a read model.
 const fetcher = (url: string) => authJson(url);
-
-function withQuery(url: string, params: Record<string, string | undefined>) {
-  const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value) search.set(key, value);
-  }
-  const suffix = search.toString();
-  return suffix ? `${url}?${suffix}` : url;
-}
 
 const LIVE_EVENT_TYPES = [
   "mission.created",
