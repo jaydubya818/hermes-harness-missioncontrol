@@ -92,6 +92,18 @@ const LIVE_EVENT_TYPES = [
   "execution.budget_exceeded"
 ] as const;
 
+// Filter inputs rebuild the stream URL on every keystroke; without a debounce
+// each keystroke tears down the SSE connection, drops the buffered events, and
+// reconnects mid-word (five reconnects to type "mis_x").
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [value, delayMs]);
+  return debounced;
+}
+
 function useLiveEventStream(url: string) {
   const [status, setStatus] = useState<"connecting" | "open" | "error">("connecting");
   const [events, setEvents] = useState<any[]>([]);
@@ -696,7 +708,7 @@ function Audit() {
     // accepts the operator token as a query parameter instead.
     token: getOperatorToken() || undefined
   });
-  const { status: liveStatus, events: liveEvents } = useLiveEventStream(liveUrl);
+  const { status: liveStatus, events: liveEvents } = useLiveEventStream(useDebouncedValue(liveUrl, 400));
   return (
     <div style={{ padding: 16, display: "grid", gap: 16 }}>
       <Panel title="Filters">
