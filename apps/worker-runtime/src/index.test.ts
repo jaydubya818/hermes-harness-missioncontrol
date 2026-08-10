@@ -3,7 +3,7 @@ import { access, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { dirname, join, resolve } from "node:path";
-import { app, assertAllowedRepoWrite, assertSafeRepoPath, bootstrapWorkspaceDependencies, cleanupRun, detectTestCommand, ensureWorkspace } from "./index.js";
+import { app, assertAllowedRepoWrite, assertSafeRepoPath, bootstrapWorkspaceDependencies, cleanupRun, detectTestCommand, ensureWorkspace, parseChangedFiles } from "./index.js";
 
 // Keep in sync with the ALLOWED_REPO_ROOT default in vitest.config.ts.
 const allowedRepoRoot = resolve(process.env.ALLOWED_REPO_ROOT ?? "/Users/jaywest/projects");
@@ -221,6 +221,11 @@ describe("worker-runtime", () => {
 
   it("rejects repo paths outside the allowed root", () => {
     expect(() => assertSafeRepoPath(join(allowedRepoRoot, "..", "not-allowed"))).toThrow(/allowed root/);
+  });
+
+  it("parses changed files from git status without mangling uppercase or renamed paths", () => {
+    const parsed = parseChangedFiles('?? README.md\n M Makefile\nA  src/app.ts\nR  old.ts -> new.ts\n?? "has space.txt"\n');
+    expect(parsed).toEqual(["README.md", "Makefile", "src/app.ts", "new.ts", "has space.txt"]);
   });
 
   it("detects pnpm test commands from package metadata", async () => {

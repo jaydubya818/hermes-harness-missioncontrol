@@ -867,16 +867,30 @@ async function runTests(workspace: WorkspaceContext) {
   } satisfies StepResult;
 }
 
+// `git status --short` lines are fixed-column "XY path" (or "XY orig -> dest"
+// for renames), so slice the two status columns off instead of stripping a
+// leading character class: `[A-Z? ]+` also eats capital letters that belong
+// to the filename itself (README.md -> ".md", LICENSE -> dropped entirely)
+// and leaves renames pointing at the old path.
+function parseChangedFiles(statusOutput: string) {
+  return statusOutput
+    .split("\n")
+    .filter((line) => line.trim())
+    .map((line) => {
+      const path = line.slice(3);
+      const target = path.includes(" -> ") ? path.slice(path.indexOf(" -> ") + 4) : path;
+      // git quotes paths containing spaces or special characters
+      const unquoted = target.startsWith('"') && target.endsWith('"') ? target.slice(1, -1) : target;
+      return unquoted.trim();
+    })
+    .filter(Boolean);
+}
+
 async function review(workspace: WorkspaceContext) {
   const diff = await runCmd("git", ["diff", "--unified=0"], workspace.repoWorkspace);
   const stat = await runCmd("git", ["diff", "--stat"], workspace.repoWorkspace);
   const names = await runCmd("git", ["status", "--short"], workspace.repoWorkspace);
-  const changedFiles = (names.stdout || "")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => line.replace(/^[A-Z? ]+/, "").trim())
-    .filter(Boolean);
+  const changedFiles = parseChangedFiles(names.stdout || "");
   const content = `Review for ${workspace.repoWorkspace}\n\nChanged files:\n${changedFiles.join("\n") || "(none)"}\n\nDiff stat:\n${(stat.stdout || stat.stderr || "No diff").trim()}\n\nPatch preview:\n${(diff.stdout || diff.stderr || "No diff").trim()}\n\nGit status:\n${(names.stdout || names.stderr || "clean").trim()}\n`;
   const artifactPath = join(workspace.workdir, "review.md");
   await writeFile(artifactPath, content, "utf8");
@@ -1137,4 +1151,4 @@ if (!process.env.VITEST) {
   console.log(`worker-runtime listening on http://${hostname}:${port}`);
 }
 
-export { app, ensureWorkspace, detectTestCommand, bootstrapWorkspaceDependencies, assertAllowedRepoWrite };
+export { app, ensureWorkspace, detectTestCommand, bootstrapWorkspaceDependencies, assertAllowedRepoWrite, parseChangedFiles };
