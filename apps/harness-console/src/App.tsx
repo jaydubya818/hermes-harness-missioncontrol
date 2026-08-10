@@ -786,7 +786,7 @@ function Settings() {
         <StatusRow label="Eval endpoint" value={EVAL} />
         <div style={{ height: 16 }} />
         <div style={{ color: "#94a3b8", marginBottom: 8 }}>Operator bearer token</div>
-        <input value={token} onChange={(event) => setToken(event.target.value)} placeholder="optional HARNESS_OPERATOR_TOKEN" style={{ width: "100%", borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+        <input type="password" autoComplete="off" value={token} onChange={(event) => setToken(event.target.value)} placeholder="optional HARNESS_OPERATOR_TOKEN" style={{ width: "100%", borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
         <div style={{ height: 8 }} />
         <Button onClick={saveToken}>Save token</Button>
       </Panel>
