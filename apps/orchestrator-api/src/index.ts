@@ -9,7 +9,7 @@ import { evaluateStepPolicy } from "@hermes-harness-with-missioncontrol/policy-e
 import { loadJsonFile, saveJsonFile } from "@hermes-harness-with-missioncontrol/state-store";
 import { makeId, type HarnessEvent } from "@hermes-harness-with-missioncontrol/shared-types";
 import { scoreRun, type EvalRecord } from "@hermes-harness-with-missioncontrol/eval-core";
-import { FinalOutcome, StepKind, type ApprovalRequest, type ApprovalResult, type ArtifactRef, type ExecutionEnvelope, type StepExecutionRequest, type TaskExecutionResult } from "@hermes-harness-with-missioncontrol/contracts";
+import { FinalOutcome, type ApprovalRequest, type ApprovalResult, type ArtifactRef, type ExecutionEnvelope, type StepExecutionRequest, type TaskExecutionResult } from "@hermes-harness-with-missioncontrol/contracts";
 
 const app = new Hono();
 const stateFile = process.env.ORCHESTRATOR_STATE_FILE ?? resolve(process.cwd(), "../../data/orchestrator-state.json");
@@ -97,6 +97,12 @@ function toTaskExecutionResult(run: WorkflowRun, stepId: string, execution: Work
     .flatMap((artifact) => Array.isArray(artifact.metadata?.changed_files) ? artifact.metadata.changed_files : [])
     .filter((value): value is string => typeof value === "string");
 
+  // Recommend the run's actual next step: a hardcoded "test" recommended
+  // re-running tests after the test/review steps and recommended a next step
+  // even when the workflow just finished on its last step.
+  const stepIndex = run.steps.findIndex((step) => step.step_id === stepId);
+  const nextStepKind = stepIndex === -1 ? undefined : run.steps[stepIndex + 1]?.kind;
+
   return {
     execution_id: execution.execution_id ?? makeId("exec"),
     mission_id: run.mission_id,
@@ -108,7 +114,7 @@ function toTaskExecutionResult(run: WorkflowRun, stepId: string, execution: Work
     changed_files: changedFiles,
     issues: execution.success ? [] : [execution.summary],
     approval_needed: approvalNeeded,
-    recommended_next_step: approvalNeeded ? undefined : StepKind.Test,
+    recommended_next_step: approvalNeeded ? undefined : nextStepKind,
     confidence: execution.confidence,
   };
 }

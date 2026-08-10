@@ -220,6 +220,7 @@ describe("orchestrator-api", () => {
         final_outcome: string;
         artifacts: Array<{ kind: string; label: string }>;
         changed_files: string[];
+        recommended_next_step?: string;
       };
     };
 
@@ -229,6 +230,9 @@ describe("orchestrator-api", () => {
     expect(payload.execution_result?.final_outcome).toBe("success");
     expect(payload.execution_result?.artifacts[0]).toMatchObject({ kind: "diff", label: "diff" });
     expect(payload.execution_result?.changed_files).toContain("apps/orchestrator-api/src/index.ts");
+    // The executed step was "plan"; the bugfix workflow's next step is
+    // "implement", not a hardcoded "test".
+    expect(payload.execution_result?.recommended_next_step).toBe("implement");
   });
 
   it("rejects repo paths outside the allowed root even when they embed it as a substring", async () => {
