@@ -1800,6 +1800,16 @@ app.post("/api/runs/:id/steps/:stepId/complete", async (c) => {
   const step = run.steps.find((item) => item.step_id === c.req.param("stepId"));
   const current = getCurrentStep(run);
   if (!step || !current || current.step_id !== c.req.param("stepId")) return c.json({ error: "step is not current runnable step" }, 409);
+  // Only a running step is manually completable. Completing an
+  // awaiting-approval step would re-run the policy gate below and mint a
+  // second pending approval while the first sits in the operator queue
+  // forever (any respond hits the staleness guard); completing a paused or
+  // cancelled step would bypass resume/retry, and on a terminal run the
+  // policy gate could still push a fresh approval and flip the mission back
+  // to awaiting_approval.
+  if (current.state !== "running") {
+    return c.json({ error: `current step is ${current.state}, not running; respond to its approval or use resume/retry instead` }, 409);
+  }
   const policy = evaluateStepPolicy({ kind: step.kind, risk: step.risk, artifactCount: step.artifacts.length, workerConfidence: 0.5 });
   if (!policy.allowed) {
     recordEvent({ type: "policy.violation", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id as `step_${string}`, payload: { reason: policy.reason, violation_kind: "policy_engine_block" } as any });

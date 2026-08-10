@@ -502,6 +502,120 @@ describe("orchestrator-api", () => {
     expect(eventsPayload.events.some((event) => event.type === "approval.requested" && event.payload?.approval_id === payload.approval.approval_id)).toBe(true);
   });
 
+  it("rejects manual step-complete while the step awaits approval instead of minting a duplicate approval", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-complete-awaiting-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [{
+        mission_id: "mis_demo",
+        title: "Approval flow",
+        objective: "Approval flow",
+        project_id: "proj_demo",
+        workflow: "bugfix",
+        status: "awaiting_approval",
+        active_run_id: "run_demo",
+        summary: "high-risk action requires approval",
+        created_at: "2026-04-11T00:00:00.000Z",
+        updated_at: "2026-04-11T00:00:00.000Z"
+      }],
+      runs: [{
+        run_id: "run_demo",
+        mission_id: "mis_demo",
+        workflow_id: "bugfix",
+        status: "awaiting_approval",
+        current_step_index: 4,
+        current_step_id: "deploy",
+        approval_id: "approval_demo",
+        created_at: "2026-04-11T00:00:00.000Z",
+        updated_at: "2026-04-11T00:00:00.000Z",
+        steps: [
+          { step_id: "plan", title: "Plan fix", kind: "plan", risk: "low", approval_mode: "on_policy_trigger", state: "completed", artifacts: [], completed_at: "2026-04-11T00:00:00.000Z" },
+          { step_id: "implement", title: "Implement patch", kind: "implement", risk: "medium", approval_mode: "on_policy_trigger", state: "completed", artifacts: [], completed_at: "2026-04-11T00:00:00.000Z" },
+          { step_id: "test", title: "Run tests", kind: "test", risk: "low", approval_mode: "on_policy_trigger", state: "completed", artifacts: [], completed_at: "2026-04-11T00:00:00.000Z" },
+          { step_id: "review", title: "Review diff", kind: "review", risk: "medium", approval_mode: "on_policy_trigger", state: "completed", artifacts: [{ artifact_id: "art_review", kind: "diff", label: "diff", uri: "file:///tmp/review.diff" }], completed_at: "2026-04-11T00:00:00.000Z" },
+          { step_id: "deploy", title: "Canary deploy", kind: "deploy", risk: "high", approval_mode: "on_policy_trigger", state: "awaiting_approval", approval_id: "approval_demo", artifacts: [], started_at: "2026-04-11T00:00:00.000Z", blocked_reason: "high-risk action requires approval" }
+        ]
+      }],
+      approvals: [{ approval_id: "approval_demo", mission_id: "mis_demo", run_id: "run_demo", step_id: "deploy", status: "pending", reason: "high-risk action requires approval", requested_at: "2026-04-11T00:00:00.000Z" }],
+      events: [],
+      audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const response = await app.request("/api/runs/run_demo/steps/deploy/complete", { method: "POST" });
+    expect(response.status).toBe(409);
+    const payload = await response.json() as { error: string };
+    expect(payload.error).toMatch(/awaiting_approval/);
+
+    // The original approval must remain the only (still pending) approval.
+    const approvalsResponse = await app.request("/api/approvals");
+    const approvalsPayload = await approvalsResponse.json() as { approvals: Array<{ approval_id: string; status: string }> };
+    expect(approvalsPayload.approvals).toHaveLength(1);
+    expect(approvalsPayload.approvals[0]).toMatchObject({ approval_id: "approval_demo", status: "pending" });
+
+    // Responding to that approval still works (it was not superseded).
+    const respond = await app.request("/api/approvals/approval_demo/respond", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision: "approved" })
+    });
+    expect(respond.status).toBe(200);
+  });
+
+  it("rejects manual step-complete for a cancelled step instead of resurrecting the run through the policy gate", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-complete-cancelled-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [{
+        mission_id: "mis_demo",
+        title: "Cancelled",
+        objective: "Cancelled",
+        project_id: "proj_demo",
+        workflow: "bugfix",
+        status: "cancelled",
+        active_run_id: "run_demo",
+        summary: "operator cancelled run",
+        created_at: "2026-04-11T00:00:00.000Z",
+        updated_at: "2026-04-11T00:00:00.000Z"
+      }],
+      runs: [{
+        run_id: "run_demo",
+        mission_id: "mis_demo",
+        workflow_id: "bugfix",
+        status: "cancelled",
+        current_step_index: 0,
+        current_step_id: "plan",
+        created_at: "2026-04-11T00:00:00.000Z",
+        updated_at: "2026-04-11T00:00:00.000Z",
+        steps: [
+          { step_id: "plan", title: "Plan fix", kind: "plan", risk: "low", approval_mode: "on_policy_trigger", state: "cancelled", artifacts: [], started_at: "2026-04-11T00:00:00.000Z", completed_at: "2026-04-11T00:01:00.000Z" },
+          { step_id: "implement", title: "Implement patch", kind: "implement", risk: "medium", approval_mode: "on_policy_trigger", state: "pending", artifacts: [] },
+          { step_id: "test", title: "Run tests", kind: "test", risk: "low", approval_mode: "on_policy_trigger", state: "pending", artifacts: [] },
+          { step_id: "review", title: "Review diff", kind: "review", risk: "medium", approval_mode: "on_policy_trigger", state: "pending", artifacts: [] },
+          { step_id: "deploy", title: "Canary deploy", kind: "deploy", risk: "high", approval_mode: "on_policy_trigger", state: "pending", artifacts: [] }
+        ]
+      }],
+      approvals: [],
+      events: [],
+      audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const response = await app.request("/api/runs/run_demo/steps/plan/complete", { method: "POST" });
+    expect(response.status).toBe(409);
+
+    // No approval minted, mission still cancelled.
+    const approvalsResponse = await app.request("/api/approvals");
+    expect((await approvalsResponse.json() as { approvals: unknown[] }).approvals).toHaveLength(0);
+    const missionsResponse = await app.request("/api/missions");
+    const missionsPayload = await missionsResponse.json() as { missions: Array<{ status: string }> };
+    expect(missionsPayload.missions[0]?.status).toBe("cancelled");
+  });
+
   it("records approval.resolved for approved decisions and clears active run approval visibility", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
 
