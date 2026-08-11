@@ -168,6 +168,9 @@ function Missions() {
   const { data: approvalsView } = useSWR(`${ORCH}/api/read-models/approvals`, fetcher, { refreshInterval: 3000 });
   const [title, setTitle] = useState("Fix duplicate webhook jobs");
   const [repoPath, setRepoPath] = useState("/Users/jaywest/projects/Hermes-harness-with-missioncontrol");
+  const [workflowId, setWorkflowId] = useState("bugfix");
+  const { data: workflows } = useSWR(`${ORCH}/api/read-models/workflows`, fetcher);
+  const workflowOptions: string[] = (workflows?.workflows ?? []).map((workflow: any) => workflow.workflow_id);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedMissionId, setSelectedMissionId] = useState<string | null>(null);
@@ -225,7 +228,7 @@ function Missions() {
       await authJson(`${ORCH}/api/missions`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title, project_id: "proj_demo", workflow_id: "bugfix", repo_path: repoPath })
+        body: JSON.stringify({ title, project_id: "proj_demo", workflow_id: workflowId, repo_path: repoPath })
       });
       await refreshAll();
     }, "Mission created.");
@@ -282,6 +285,9 @@ function Missions() {
         <div style={{ display: "grid", gap: 12 }}>
           <input value={title} onChange={(event) => setTitle(event.target.value)} style={{ flex: 1, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
           <input value={repoPath} onChange={(event) => setRepoPath(event.target.value)} style={{ flex: 1, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+          <select value={workflowId} onChange={(event) => setWorkflowId(event.target.value)} style={{ borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }}>
+            {(workflowOptions.length ? workflowOptions : ["bugfix"]).map((id) => <option key={id} value={id}>{id}</option>)}
+          </select>
           <Button onClick={createMission}>Create</Button>
           {message && <div style={{ color: "#86efac", fontSize: 13 }}>{message}</div>}
           {error && <div style={{ color: "#fca5a5", fontSize: 13 }}>Action failed: {error}. If auth is enabled, save HARNESS_OPERATOR_TOKEN in Settings first.</div>}
