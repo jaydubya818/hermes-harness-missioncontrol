@@ -1426,6 +1426,19 @@ app.get("/api/read-models/runs/:runId/steps/:stepId", async (c) => {
   if (!payload) return c.json({ error: "step not found" }, 404);
   return c.json(payload);
 });
+// The workflow catalog: mission creation validates workflow_id against
+// this library, so operators (and the console's mission form) need a way to
+// discover the valid ids and what each workflow runs.
+app.get("/api/read-models/workflows", async (c) => {
+  const authError = requireOperator(c);
+  if (authError) return authError;
+  return c.json({
+    workflows: Object.entries(WORKFLOW_LIBRARY).map(([workflow_id, steps]) => ({
+      workflow_id,
+      steps: steps.map((step) => ({ id: step.id, title: step.title, kind: step.kind, risk: step.risk }))
+    }))
+  });
+});
 app.get("/api/read-models/artifacts", async (c) => { const authError = requireOperator(c); if (authError) return authError; await ensureLoaded(); return c.json(buildArtifactsReadModel(c.req.query())); });
 app.get("/api/read-models/approvals", async (c) => { const authError = requireOperator(c); if (authError) return authError; await ensureLoaded(); return c.json(buildApprovalsReadModel(c.req.query())); });
 app.get("/api/read-models/approval-history", async (c) => { const authError = requireOperator(c); if (authError) return authError; await ensureLoaded(); return c.json(buildApprovalHistoryReadModel(c.req.query())); });

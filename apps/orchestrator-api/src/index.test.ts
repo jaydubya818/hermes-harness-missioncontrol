@@ -152,12 +152,27 @@ describe("orchestrator-api", () => {
     expect(payload.error).toBe("invalid JSON body");
   });
 
+  it("lists the workflow library with per-step metadata", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+    const app = await loadApp();
+
+    const response = await app.request("/api/read-models/workflows");
+    expect(response.status).toBe(200);
+    const payload = await response.json() as { workflows: Array<{ workflow_id: string; steps: Array<{ id: string; kind: string; risk: string }> }> };
+    const ids = payload.workflows.map((workflow) => workflow.workflow_id);
+    expect(ids).toContain("bugfix");
+    expect(ids).toContain("dependency_upgrade");
+    const bugfix = payload.workflows.find((workflow) => workflow.workflow_id === "bugfix")!;
+    expect(bugfix.steps.map((step) => step.id)).toEqual(["plan", "implement", "test", "review", "deploy"]);
+    expect(bugfix.steps[4]).toMatchObject({ kind: "deploy", risk: "high" });
+  });
+
   it("requires the operator token on read endpoints when configured", async () => {
     process.env.HARNESS_OPERATOR_TOKEN = "secret-token";
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
     const app = await loadApp();
 
-    for (const path of ["/api/missions", "/api/runs", "/api/approvals", "/api/events", "/api/audit", "/api/read-models/overview", "/api/read-models/missions", "/api/read-models/artifacts", "/api/read-models/approvals", "/api/read-models/approval-history", "/api/read-models/audit"]) {
+    for (const path of ["/api/missions", "/api/runs", "/api/approvals", "/api/events", "/api/audit", "/api/read-models/overview", "/api/read-models/missions", "/api/read-models/workflows", "/api/read-models/artifacts", "/api/read-models/approvals", "/api/read-models/approval-history", "/api/read-models/audit"]) {
       const denied = await app.request(path);
       expect(denied.status, path).toBe(401);
       const allowed = await app.request(path, { headers: { authorization: "Bearer secret-token" } });
