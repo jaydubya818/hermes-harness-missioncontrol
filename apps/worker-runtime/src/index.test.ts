@@ -275,7 +275,7 @@ describe("worker-runtime", () => {
     const response = await app.request("/api/cleanup-run", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ run_id: "run_evil", source_repo: join(allowedRepoRoot, "..", "some-other-repo"), branch_name: "main" })
+      body: JSON.stringify({ run_id: "run_evil", source_repo: join(allowedRepoRoot, "..", "some-other-repo"), branch_name: "hermes/run_evil" })
     });
 
     expect(response.status).toBe(400);
@@ -297,6 +297,17 @@ describe("worker-runtime", () => {
       body: JSON.stringify({ run_id: "run_cleanup", source_repo: allowedRepoRoot, branch_name: "-D" })
     });
     expect(badBranch.status).toBe(400);
+
+    // Branch deletion is namespaced: cleanup must never delete a branch the
+    // worker did not create (e.g. main).
+    const foreignBranch = await app.request("/api/cleanup-run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ run_id: "run_cleanup", source_repo: allowedRepoRoot, branch_name: "main" })
+    });
+    expect(foreignBranch.status).toBe(400);
+    const payload = await foreignBranch.json() as { error?: string };
+    expect(payload.error).toMatch(/hermes\//);
   });
 
   it("deletes the stale run branch even when the worktree directory is already gone", async () => {
@@ -599,8 +610,8 @@ describe("worker-runtime", () => {
     }
   });
 
-  it("rejects flag-like branch names before any git command runs", async () => {
-    for (const branch_name of ["-D", "  ", 42]) {
+  it("rejects flag-like or non-hermes branch names before any git command runs", async () => {
+    for (const branch_name of ["-D", "  ", 42, "main"]) {
       const response = await app.request("/api/execute-step", {
         method: "POST",
         headers: { "content-type": "application/json" },

@@ -330,9 +330,12 @@ function validateEnvelope(req: StepRequest) {
   // branch_name feeds `git worktree add -B <branch>` and later
   // `git branch -D <branch>`; mirror cleanupRun's guard so a flag-like or
   // non-string branch name fails as a policy violation up front instead of
-  // surfacing as a confusing git error mid-workspace-setup.
-  if (req.branch_name !== undefined && (typeof req.branch_name !== "string" || !req.branch_name.trim() || req.branch_name.startsWith("-"))) {
-    throw new WorkerExecutionError("invalid step request: branch_name must be a non-empty string that does not start with '-'", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "invalid_branch_name", branch_name: req.branch_name } });
+  // surfacing as a confusing git error mid-workspace-setup. It must also
+  // stay inside the hermes/ run-branch namespace: `-B` force-resets an
+  // existing branch to HEAD, so a stray name like "main" would move a real
+  // branch pointer in the operator's source repo.
+  if (req.branch_name !== undefined && (typeof req.branch_name !== "string" || !req.branch_name.trim() || req.branch_name.startsWith("-") || !req.branch_name.startsWith("hermes/"))) {
+    throw new WorkerExecutionError("invalid step request: branch_name must be a non-empty hermes/-prefixed branch that does not start with '-'", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "invalid_branch_name", branch_name: req.branch_name } });
   }
   if (req.repo_path) {
     const repoPath = resolve(req.repo_path);
@@ -987,8 +990,11 @@ async function deploy(workspace: WorkspaceContext) {
 
 export async function cleanupRun(runId: string, sourceRepo?: string, branchName?: string, removeOutputs = false) {
   assertSafeSegment(runId);
-  if (branchName !== undefined && (typeof branchName !== "string" || !branchName.trim() || branchName.startsWith("-"))) {
-    throw new Error("invalid branch name");
+  // Cleanup only ever deletes run branches this worker created; refusing
+  // names outside the hermes/ namespace keeps a buggy or malicious cleanup
+  // call from running `git branch -D main` on the operator's source repo.
+  if (branchName !== undefined && (typeof branchName !== "string" || !branchName.trim() || branchName.startsWith("-") || !branchName.startsWith("hermes/"))) {
+    throw new Error("invalid branch name: cleanup only deletes hermes/ run branches");
   }
   const repo = sourceRepo ? assertSafeRepoPath(sourceRepo) : undefined;
   const target = join(worktreesRoot, runId);
