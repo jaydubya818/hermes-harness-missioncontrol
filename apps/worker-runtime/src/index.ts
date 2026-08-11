@@ -564,10 +564,22 @@ const DEFAULT_CMD_TIMEOUT_MS = 10 * 60 * 1000;
 // threading a parameter through the whole plan/implement/test/deploy stack.
 const executionAbort = new AsyncLocalStorage<AbortSignal>();
 
+// Spawned commands include repo-controlled scripts (the target repo's own
+// test/install scripts). Inheriting the worker's environment would hand
+// those scripts the operator bearer token, letting sandboxed code call the
+// loopback control-plane APIs with full operator privileges.
+const SECRET_ENV_KEYS = ["HARNESS_OPERATOR_TOKEN", "VITE_OPERATOR_TOKEN"];
+
+export function sanitizedChildEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const copy: NodeJS.ProcessEnv = { ...env };
+  for (const key of SECRET_ENV_KEYS) delete copy[key];
+  return copy;
+}
+
 async function runCmd(cmd: string, args: string[], cwd: string, timeoutMs = DEFAULT_CMD_TIMEOUT_MS): Promise<CommandResult> {
   try {
     const signal = executionAbort.getStore();
-    const { stdout, stderr } = await execFileAsync(cmd, args, { cwd, maxBuffer: 1024 * 1024 * 25, timeout: timeoutMs, killSignal: "SIGKILL", signal });
+    const { stdout, stderr } = await execFileAsync(cmd, args, { cwd, env: sanitizedChildEnv(), maxBuffer: 1024 * 1024 * 25, timeout: timeoutMs, killSignal: "SIGKILL", signal });
     return { stdout, stderr, exitCode: 0 };
   } catch (error: any) {
     return {

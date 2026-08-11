@@ -3,7 +3,7 @@ import { access, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promise
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { dirname, join, resolve } from "node:path";
-import { app, assertAllowedRepoWrite, assertSafeRepoPath, bootstrapWorkspaceDependencies, cleanupRun, detectTestCommand, ensureWorkspace, parseChangedFiles } from "./index.js";
+import { app, assertAllowedRepoWrite, assertSafeRepoPath, bootstrapWorkspaceDependencies, cleanupRun, detectTestCommand, ensureWorkspace, parseChangedFiles, sanitizedChildEnv } from "./index.js";
 
 // Keep in sync with the ALLOWED_REPO_ROOT default in vitest.config.ts.
 const allowedRepoRoot = resolve(process.env.ALLOWED_REPO_ROOT ?? "/Users/jaywest/projects");
@@ -217,6 +217,23 @@ describe("worker-runtime", () => {
     expect(() => assertAllowedRepoWrite(workspace, join(repoWorkspace, "..", "outside.txt"))).toThrow(/write path not allowed/);
     // the workspace root itself is a directory, not a writable file target
     expect(() => assertAllowedRepoWrite(workspace, repoWorkspace)).toThrow(/write path not allowed/);
+  });
+
+  it("strips operator credentials from spawned command environments", () => {
+    const env = sanitizedChildEnv({
+      PATH: "/usr/bin",
+      HARNESS_OPERATOR_TOKEN: "prod-secret",
+      VITE_OPERATOR_TOKEN: "prod-secret",
+      UNRELATED: "keep-me",
+    });
+    expect(env.HARNESS_OPERATOR_TOKEN).toBeUndefined();
+    expect(env.VITE_OPERATOR_TOKEN).toBeUndefined();
+    expect(env.PATH).toBe("/usr/bin");
+    expect(env.UNRELATED).toBe("keep-me");
+    // The default source must not be mutated.
+    const before = process.env.HARNESS_OPERATOR_TOKEN;
+    sanitizedChildEnv();
+    expect(process.env.HARNESS_OPERATOR_TOKEN).toBe(before);
   });
 
   it("rejects repo paths outside the allowed root", () => {
