@@ -190,6 +190,8 @@ Governed execution envelope
 - MissionControl computes the boundary first
 - worker validates again before doing anything
 - no permissive fallback
+- spawned repo commands (installs, test scripts, deploy planning) run with operator credentials stripped from their environment, so repo-controlled scripts cannot replay `HARNESS_OPERATOR_TOKEN` against the loopback APIs
+- run branches are namespaced under `hermes/`; the worker refuses to create, force-reset, or delete branches outside that namespace
 
 Authoritative read models
 - UI should consume read models, not stitch raw event payloads
@@ -211,7 +213,7 @@ Sidecar call bounds
 
 Cleanup
 - terminal runs trigger worker cleanup
-- run branches and worktree bookkeeping are pruned even when the worktree directory is already gone
+- run branches and worktree bookkeeping are pruned even when the worktree directory is already gone (deletion is restricted to `hermes/` run branches)
 - `POST /api/maintenance/sweep-orphans` prunes orphaned worktree/output roots
 - `ORPHAN_SWEEP_INTERVAL_MS` enables periodic sweep outside normal request flow
 
@@ -233,6 +235,7 @@ Lifecycle:
 
 Operator/read models:
 - `GET /api/read-models/overview`
+- `GET /api/read-models/workflows`
 - `GET /api/read-models/missions`
 - `GET /api/read-models/missions/:id`
 - `GET /api/read-models/runs/:id`
