@@ -10,6 +10,10 @@ import {
   retryCurrentStep,
   cancelCurrentStep,
   markCurrentStepBlocked,
+  attachArtifact,
+  syncRunState,
+  type WorkflowArtifact,
+  type WorkflowRun,
 } from "./index.js";
 
 describe("workflow-engine", () => {
@@ -111,6 +115,44 @@ describe("workflow-engine", () => {
       state: "cancelled",
       notes: "operator cancelled"
     });
+  });
+
+  it("attaches artifacts once per artifact_id and normalizes kind/label from type", () => {
+    const run = createWorkflowRun("run_demo", "mis_demo", "bugfix");
+    startCurrentStep(run, "exec_demo");
+
+    // Callers (orchestrator, worker results) supply type-only artifacts;
+    // attachArtifact fills kind/label.
+    const artifact = { artifact_id: "art_1", type: "plan", uri: "file:///plan.md" } as WorkflowArtifact;
+    attachArtifact(run, "plan", artifact);
+    // Re-attaching the same artifact_id (orchestrator retries, event replays)
+    // must not duplicate the artifact.
+    attachArtifact(run, "plan", artifact);
+    attachArtifact(run, "missing-step", { artifact_id: "art_2", type: "plan", uri: "file:///other.md" } as WorkflowArtifact);
+
+    expect(run.steps[0].artifacts).toHaveLength(1);
+    expect(run.steps[0].artifacts[0]).toMatchObject({ artifact_id: "art_1", kind: "plan", label: "plan", uri: "file:///plan.md" });
+    // Unknown step ids attach nowhere.
+    expect(run.steps.flatMap((step) => step.artifacts).map((artifact) => artifact.artifact_id)).toEqual(["art_1"]);
+  });
+
+  it("rebuilds derived run fields from step state after a JSON round-trip", () => {
+    const run = createWorkflowRun("run_demo", "mis_demo", "bugfix");
+    startCurrentStep(run, "exec_demo");
+    markCurrentStepAwaitingApproval(run, "approval_demo", "worker summary", "needs approval");
+
+    // Simulate persistence: derived fields dropped or stale on the loaded copy.
+    const loaded = JSON.parse(JSON.stringify(run)) as WorkflowRun;
+    loaded.current_step_id = undefined;
+    loaded.approval_id = undefined;
+    loaded.summary = undefined;
+
+    const synced = syncRunState(loaded);
+    expect(synced.current_step_id).toBe("plan");
+    expect(synced.approval_id).toBe("approval_demo");
+    expect(synced.summary).toBe("worker summary");
+    // Non-terminal runs must not carry a completed_at.
+    expect(synced.completed_at).toBeUndefined();
   });
 
   it("does not resurrect a completed run via start or block transitions", () => {
