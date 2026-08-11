@@ -783,6 +783,10 @@ function Audit() {
 
 function Settings() {
   const [token, setToken] = useState(getOperatorToken());
+  // Render the server's actual workflow catalog instead of a hardcoded list
+  // that drifts as workflows are added.
+  const { data: workflows } = useSWR(`${ORCH}/api/read-models/workflows`, fetcher);
+  const workflowIds: string[] = (workflows?.workflows ?? []).map((workflow: any) => workflow.workflow_id);
   function saveToken() {
     window.localStorage.setItem("harness.operatorToken", token.trim());
     mutate(() => true);
@@ -791,7 +795,7 @@ function Settings() {
     <div style={{ padding: 16 }}>
       <Panel title="Settings">
         <StatusRow label="Policy model" value="approval-high-risk" />
-        <StatusRow label="Workflow library" value="bugfix, dependency_upgrade" />
+        <StatusRow label="Workflow library" value={workflowIds.length ? workflowIds.join(", ") : "unavailable"} />
         <StatusRow label="Eval endpoint" value={EVAL} />
         <div style={{ height: 16 }} />
         <div style={{ color: "#94a3b8", marginBottom: 8 }}>Operator bearer token</div>
