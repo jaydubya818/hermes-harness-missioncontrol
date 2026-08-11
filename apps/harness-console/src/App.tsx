@@ -11,7 +11,10 @@ const MEM = import.meta.env.VITE_MEMORY_URL ?? "/memory";
 const EVAL = import.meta.env.VITE_EVAL_URL ?? "/eval";
 
 function getOperatorToken() {
-  return window.localStorage.getItem("harness.operatorToken") ?? import.meta.env.VITE_OPERATOR_TOKEN ?? "";
+  // Trim: the APIs compare the bearer token byte-for-byte (timingSafeEqual),
+  // so a token pasted with a trailing newline or space fails auth with no
+  // visible difference in Settings.
+  return (window.localStorage.getItem("harness.operatorToken") ?? import.meta.env.VITE_OPERATOR_TOKEN ?? "").trim();
 }
 
 function authFetch(url: string, init: RequestInit = {}) {
@@ -775,7 +778,7 @@ function Audit() {
 function Settings() {
   const [token, setToken] = useState(getOperatorToken());
   function saveToken() {
-    window.localStorage.setItem("harness.operatorToken", token);
+    window.localStorage.setItem("harness.operatorToken", token.trim());
     mutate(() => true);
   }
   return (
