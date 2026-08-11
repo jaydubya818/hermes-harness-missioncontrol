@@ -245,6 +245,14 @@ describe("worker-runtime", () => {
     expect(parsed).toEqual(["README.md", "Makefile", "src/app.ts", "new.ts", "has space.txt"]);
   });
 
+  it("decodes git's C-style escapes in quoted status paths", () => {
+    // git renders café as "caf\303\251" (octal UTF-8 bytes) and escapes
+    // quotes/backslashes; the decoded path is what changed_files consumers
+    // (review artifacts, writable-path checks) should see.
+    const parsed = parseChangedFiles('?? "caf\\303\\251 menu.md"\n M "quote\\"name.md"\n?? "tab\\tname.md"\n');
+    expect(parsed).toEqual(["café menu.md", 'quote"name.md', "tab\tname.md"]);
+  });
+
   it("detects pnpm test commands from package metadata", async () => {
     const repo = join(sandboxRoot, "repo-a");
     await mkdir(repo, { recursive: true });

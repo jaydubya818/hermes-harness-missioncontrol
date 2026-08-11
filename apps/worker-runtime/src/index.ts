@@ -898,6 +898,35 @@ async function runTests(workspace: WorkspaceContext) {
 // leading character class: `[A-Z? ]+` also eats capital letters that belong
 // to the filename itself (README.md -> ".md", LICENSE -> dropped entirely)
 // and leaves renames pointing at the old path.
+// git renders quoted paths with C-style escapes: `\"` for quotes, `\\` for
+// backslashes, and octal byte sequences for non-ASCII characters (café ->
+// "caf\303\251"). Decode to bytes first so multi-byte UTF-8 sequences
+// reassemble correctly.
+function unescapeGitPath(quoted: string) {
+  const bytes: number[] = [];
+  for (let index = 0; index < quoted.length; index += 1) {
+    const char = quoted[index]!;
+    if (char !== "\\") {
+      bytes.push(...Buffer.from(char, "utf8"));
+      continue;
+    }
+    const next = quoted[index + 1];
+    if (next !== undefined && /[0-7]/.test(next)) {
+      let octal = "";
+      while (octal.length < 3 && /[0-7]/.test(quoted[index + 1] ?? "")) {
+        octal += quoted[index + 1];
+        index += 1;
+      }
+      bytes.push(Number.parseInt(octal, 8));
+      continue;
+    }
+    const simple: Record<string, string> = { n: "\n", t: "\t", r: "\r", '"': '"', "\\": "\\" };
+    bytes.push(...Buffer.from(simple[next ?? ""] ?? next ?? "", "utf8"));
+    index += 1;
+  }
+  return Buffer.from(bytes).toString("utf8");
+}
+
 function parseChangedFiles(statusOutput: string) {
   return statusOutput
     .split("\n")
@@ -906,7 +935,7 @@ function parseChangedFiles(statusOutput: string) {
       const path = line.slice(3);
       const target = path.includes(" -> ") ? path.slice(path.indexOf(" -> ") + 4) : path;
       // git quotes paths containing spaces or special characters
-      const unquoted = target.startsWith('"') && target.endsWith('"') ? target.slice(1, -1) : target;
+      const unquoted = target.startsWith('"') && target.endsWith('"') ? unescapeGitPath(target.slice(1, -1)) : target;
       return unquoted.trim();
     })
     .filter(Boolean);
