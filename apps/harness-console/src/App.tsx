@@ -298,7 +298,7 @@ function Missions() {
           {(data?.mission_queue ?? []).length === 0 ? <div>No missions yet.</div> : (data?.mission_queue ?? []).map((mission: any) => (
             <div key={mission.mission_id} style={{ padding: 12, borderBottom: "1px solid #1e293b" }}>
               <StatusRow label={mission.title} value={mission.status} />
-              <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6 }}>{mission.repo_path ?? "no repo path"}</div>
+              <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 6 }}>{mission.workflow ?? "bugfix"} · {mission.repo_path ?? "no repo path"}</div>
               <div style={{ color: "#64748b", fontSize: 12, marginTop: 6 }}>{mission.summary ?? ""}</div>
               <div style={{ height: 8 }} />
               <div style={{ display: "flex", gap: 8 }}>
@@ -353,6 +353,7 @@ function Missions() {
         <Panel title="Mission Detail">
           {!missionDetail ? <div>Select mission.</div> : <>
             <StatusRow label={missionDetail.mission.title} value={missionDetail.mission.status} />
+            <StatusRow label="Workflow" value={missionDetail.mission.workflow ?? "bugfix"} />
             <StatusRow label="Active run" value={missionDetail.mission.active_run_id ?? "none"} />
             <StatusRow label="Pending approvals" value={missionDetail.approval_summary.pending} />
             <StatusRow label="Artifacts" value={missionDetail.artifact_summary.total_artifacts} />
