@@ -41,6 +41,7 @@ describe("orchestrator-api", () => {
   it("creates a contract-shaped mission payload", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
 
+    process.env.ALLOWED_REPO_ROOT = "/repo";
     const app = await loadApp();
     const response = await app.request("/api/missions", {
       method: "POST",
@@ -250,7 +251,7 @@ describe("orchestrator-api", () => {
     expect(payload.execution_result?.recommended_next_step).toBe("implement");
   });
 
-  it("rejects repo paths outside the allowed root even when they embed it as a substring", async () => {
+  it("rejects mission creation for repo paths outside the allowed root even when they embed it as a substring", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
     const allowedRoot = mkdtempSync(join(tmpdir(), "orch-allowed-"));
     process.env.ALLOWED_REPO_ROOT = allowedRoot;
@@ -258,14 +259,45 @@ describe("orchestrator-api", () => {
     const evilRepo = join(tmpdir(), "elsewhere", allowedRoot, "evil");
 
     const app = await loadApp();
-    const createMission = await app.request("/api/missions", {
+    for (const body of [
+      { title: "Escape", project_id: "proj_demo", workflow_id: "bugfix", repo_path: evilRepo },
+      { title: "Escape", project_id: "proj_demo", workflow_id: "bugfix", workspace_root: join(tmpdir(), "outside-root") }
+    ]) {
+      const createMission = await app.request("/api/missions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const payload = await createMission.json() as { error?: string };
+      expect(createMission.status).toBe(400);
+      expect(payload.error).toMatch(/allowed repo root/);
+    }
+
+    // A path inside the allowed root is still accepted.
+    const okMission = await app.request("/api/missions", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title: "Escape", project_id: "proj_demo", workflow_id: "bugfix", repo_path: evilRepo })
+      body: JSON.stringify({ title: "Inside", project_id: "proj_demo", workflow_id: "bugfix", repo_path: join(allowedRoot, "repo") })
     });
-    const mission = await createMission.json() as { mission_id: string };
+    expect(okMission.status).toBe(201);
+  });
 
-    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+  it("still rejects out-of-root repo paths at dispatch for missions hydrated from older persisted state", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+    const allowedRoot = mkdtempSync(join(tmpdir(), "orch-allowed-"));
+    process.env.ALLOWED_REPO_ROOT = allowedRoot;
+    const evilRepo = join(tmpdir(), "elsewhere", allowedRoot, "evil");
+
+    // Persisted before creation-time validation existed: the mission carries
+    // an out-of-root repo_path, so the dispatch-time guard is the backstop.
+    const stateFile = join(mkdtempSync(join(tmpdir(), "orch-state-")), "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [{ mission_id: "mis_legacy", title: "Legacy escape", objective: "Legacy escape", project_id: "proj_demo", workflow: "bugfix", repo_path: evilRepo, status: "pending", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z" }],
+      runs: [], approvals: [], events: [], audit: [], processed_event_ids: []
+    }));
+
+    const app = await loadApp(stateFile);
+    const startRun = await app.request("/api/missions/mis_legacy/start", { method: "POST" });
     const run = await startRun.json() as { run_id: string };
 
     const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });

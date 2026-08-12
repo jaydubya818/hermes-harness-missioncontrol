@@ -1474,6 +1474,20 @@ app.post("/api/missions", async (c) => {
       return c.json({ error: `${field} must be a non-empty string when provided` }, 400);
     }
   }
+  // A repo_path/workspace_root outside ALLOWED_REPO_ROOT can never build a
+  // valid execution envelope, so the mission would only exist to fail its
+  // first dispatch with a policy violation. Reject it with a clear 400 at
+  // creation instead; dispatch still re-validates as defense in depth for
+  // missions hydrated from older persisted state.
+  for (const field of ["repo_path", "workspace_root"] as const) {
+    const value = body[field];
+    if (typeof value !== "string") continue;
+    try {
+      relativeWithin(allowedRepoRoot, value);
+    } catch {
+      return c.json({ error: `${field} must resolve inside the allowed repo root` }, 400);
+    }
+  }
   const now = new Date().toISOString();
   const mission: Mission = {
     mission_id: makeId("mis") as `mis_${string}`,
