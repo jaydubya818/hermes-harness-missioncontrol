@@ -302,7 +302,10 @@ function Missions() {
               <div style={{ color: "#64748b", fontSize: 12, marginTop: 6 }}>{mission.summary ?? ""}</div>
               <div style={{ height: 8 }} />
               <div style={{ display: "flex", gap: 8 }}>
-                <Button onClick={() => startMission(mission.mission_id)}>Start</Button>
+                {/* The server 409s a start while a run is live or the mission
+                    completed; only pending/failed/cancelled missions (or ones
+                    that never ran) are startable. */}
+                {(!mission.active_run_id || ["pending", "failed", "cancelled"].includes(mission.status)) && <Button onClick={() => startMission(mission.mission_id)}>{["failed", "cancelled"].includes(mission.status) ? "Restart" : "Start"}</Button>}
                 <Button onClick={() => setSelectedMissionId(mission.mission_id)} style={{ background: selectedMissionId === mission.mission_id ? "#111827" : "transparent" }}>Inspect</Button>
               </div>
             </div>
