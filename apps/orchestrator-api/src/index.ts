@@ -625,6 +625,9 @@ function buildMissionsReadModel() {
       title: mission.title,
       objective: mission.objective,
       status: mission.status,
+      // Missions choose a workflow at creation; without it here the console
+      // cannot tell which workflow a queued mission will run.
+      workflow: mission.workflow,
       repo_path: mission.repo_path,
       active_run_id: mission.active_run_id,
       summary: mission.summary,

@@ -1012,7 +1012,7 @@ describe("orchestrator-api", () => {
     const app = await loadApp(stateFile);
     const response = await app.request("/api/read-models/missions");
     const payload = await response.json() as {
-      mission_queue: Array<{ mission_id: string; status: string; active_run_id?: string }>;
+      mission_queue: Array<{ mission_id: string; status: string; active_run_id?: string; workflow?: string }>;
       approval_queue: Array<{ approval_id: string; step_id: string; status: string; requested_at: string }>;
       run_cards: Array<{
         run_id: string;
@@ -1030,7 +1030,7 @@ describe("orchestrator-api", () => {
     };
 
     expect(response.status).toBe(200);
-    expect(payload.mission_queue[0]).toMatchObject({ mission_id: "mis_demo", status: "awaiting_approval", active_run_id: "run_demo" });
+    expect(payload.mission_queue[0]).toMatchObject({ mission_id: "mis_demo", status: "awaiting_approval", active_run_id: "run_demo", workflow: "bugfix" });
     expect(payload.approval_queue[0]).toMatchObject({ approval_id: "approval_demo", step_id: "deploy", status: "pending", requested_at: "2026-04-11T00:00:00.000Z" });
     expect(payload.run_cards[0]).toMatchObject({ run_id: "run_demo", workflow_id: "bugfix", status: "awaiting_approval", current_step_id: "deploy" });
     expect(payload.run_cards[0].steps.find((step) => step.step_id === "deploy")).toMatchObject({
