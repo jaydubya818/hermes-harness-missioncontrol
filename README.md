@@ -109,6 +109,7 @@ Lifecycle / governance:
 - manual artifact attachment validates artifact_id/uri/content/metadata types so bad payloads cannot poison dedupe or read models
 - mission creation rejects workflow ids that are not in the workflow library
 - mission creation validates optional string fields (repo_path, workspace_root, objective, refs) so bad payloads fail at creation, not first dispatch
+- mission creation rejects repo_path/workspace_root outside `ALLOWED_REPO_ROOT` with a clear 400 (dispatch still re-validates as defense in depth)
 - approval responses validate the actor field instead of 500-ing on non-strings
 - persisted state hydration is single-flight, so concurrent first requests cannot double-replay events into live streams
 - worker results that land after an operator interrupt/cancel/retry are discarded instead of overriding the operator's decision
@@ -120,7 +121,7 @@ Lifecycle / governance:
 
 Operator surfaces:
 - overview read model
-- missions queue
+- missions queue (each mission surfaces its workflow in the read model and console)
 - approvals queue + history
 - audit timeline
 - mission detail
@@ -214,6 +215,7 @@ Sidecar call bounds
 Cleanup
 - terminal runs trigger worker cleanup
 - run branches and worktree bookkeeping are pruned even when the worktree directory is already gone (deletion is restricted to `hermes/` run branches)
+- unexpected git cleanup failures (worktree remove, branch delete) are logged and returned as `warnings` on the cleanup response instead of a silent `ok`
 - `POST /api/maintenance/sweep-orphans` prunes orphaned worktree/output roots
 - `ORPHAN_SWEEP_INTERVAL_MS` enables periodic sweep outside normal request flow
 
