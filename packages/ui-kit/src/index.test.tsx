@@ -32,9 +32,11 @@ describe("ui-kit", () => {
     expect(html).toContain('points="0,100 50,50 100,0"');
   });
 
-  it("anchors a single-value sparkline at the left edge without NaN coordinates", () => {
+  it("renders a single-value sparkline as a visible flat line without NaN coordinates", () => {
+    // A one-point polyline draws nothing in browsers, so the first eval
+    // record used to leave the trend chart looking empty.
     const html = renderToStaticMarkup(<Sparkline values={[5]} />);
-    expect(html).toContain('points="0,0"');
+    expect(html).toContain('points="0,0 100,0"');
     expect(html).not.toContain("NaN");
   });
 

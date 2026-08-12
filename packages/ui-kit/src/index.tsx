@@ -23,8 +23,11 @@ export function CapacityBar({ value, max }: { value: number; max: number }) {
 
 export function Sparkline({ values }: { values: number[] }) {
   if (values.length === 0) return null;
-  const max = Math.max(...values, 1);
-  const points = values.map((v, i) => `${(i / Math.max(values.length - 1, 1)) * 100},${100 - (v / max) * 100}`).join(" ");
+  // A one-point polyline draws nothing; duplicate the value so the first
+  // data point renders as a visible flat line instead of an empty chart.
+  const series = values.length === 1 ? [values[0]!, values[0]!] : values;
+  const max = Math.max(...series, 1);
+  const points = series.map((v, i) => `${(i / Math.max(series.length - 1, 1)) * 100},${100 - (v / max) * 100}`).join(" ");
   return <svg viewBox="0 0 100 100" style={{ width: "100%", height: 42 }}><polyline fill="none" stroke="#38bdf8" strokeWidth="3" points={points} /></svg>;
 }
 
