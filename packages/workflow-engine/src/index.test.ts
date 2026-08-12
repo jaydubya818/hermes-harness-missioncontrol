@@ -117,6 +117,34 @@ describe("workflow-engine", () => {
     });
   });
 
+  it("blocks the current step with a reason and lets retry clear the blocker", () => {
+    const run = createWorkflowRun("run_demo", "mis_demo", "bugfix");
+    startCurrentStep(run, "exec_demo");
+
+    markCurrentStepBlocked(run, "waiting on external dependency", "blocked by ops");
+
+    // Blocked parks the run in paused (operator attention required) while
+    // preserving why the step cannot proceed.
+    expect(run.status).toBe("paused");
+    expect(run.steps[0]).toMatchObject({
+      state: "blocked",
+      blocked_reason: "waiting on external dependency",
+      notes: "blocked by ops"
+    });
+    expect(run.steps[0]?.started_at).toBeDefined();
+    expect(run.steps[0]?.completed_at).toBeUndefined();
+
+    retryCurrentStep(run, "dependency arrived");
+
+    expect(run.status).toBe("running");
+    expect(run.steps[0]).toMatchObject({
+      state: "running",
+      blocked_reason: undefined,
+      execution_id: undefined,
+      notes: "dependency arrived"
+    });
+  });
+
   it("attaches artifacts once per artifact_id and normalizes kind/label from type", () => {
     const run = createWorkflowRun("run_demo", "mis_demo", "bugfix");
     startCurrentStep(run, "exec_demo");
