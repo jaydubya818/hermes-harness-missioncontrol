@@ -129,6 +129,45 @@ describe("orchestrator-api", () => {
     expect(missionsPayload.missions).toHaveLength(0);
   });
 
+  it("rejects a second start for an already-started mission but allows a restart after failure", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const app = await loadApp();
+    const createMission = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Start guard", project_id: "proj_demo", workflow_id: "bugfix" })
+    });
+    const mission = await createMission.json() as { mission_id: string };
+
+    const firstStart = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    expect(firstStart.status).toBe(201);
+    const firstRun = await firstStart.json() as { run_id: string };
+
+    // Starting again while the run is live would fork a second concurrent run.
+    const secondStart = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    expect(secondStart.status).toBe(409);
+
+    // Fail the live run via a rejected worker execution, then a restart is allowed.
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes("/api/execute-step")) {
+        return jsonResponse({ body: { execution_id: "exec_fail", summary: "worker exploded", confidence: 0.1, success: false, artifacts: [] } });
+      }
+      return jsonResponse();
+    }));
+    const execute = await app.request(`/api/runs/${firstRun.run_id}/execute-current`, { method: "POST" });
+    expect(execute.status).toBe(400);
+
+    const restart = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    expect(restart.status).toBe(201);
+    const restartedRun = await restart.json() as { run_id: string };
+    expect(restartedRun.run_id).not.toBe(firstRun.run_id);
+
+    const missionsAfter = await app.request("/api/missions");
+    const missionsPayload = await missionsAfter.json() as { missions: Array<{ mission_id: string; status: string; active_run_id?: string }> };
+    expect(missionsPayload.missions[0]).toMatchObject({ mission_id: mission.mission_id, status: "running", active_run_id: restartedRun.run_id });
+  });
+
   it("returns 400 instead of 500 for malformed JSON bodies", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
 
