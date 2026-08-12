@@ -341,6 +341,47 @@ describe("worker-runtime", () => {
     expect(branches.stdout.trim()).toBe("");
   });
 
+  it("surfaces unexpected git cleanup failures as warnings instead of a silent ok", async () => {
+    const run = promisify(execFile);
+    const runId = "run_cleanup_warning";
+    const branchName = `hermes/${runId}`;
+    const repo = join(sandboxRoot, "cleanup-warning-repo");
+    await mkdir(repo, { recursive: true });
+    await run("git", ["-C", repo, "init", "-q"]);
+    await writeFile(join(repo, "file.txt"), "content", "utf8");
+    await run("git", ["-C", repo, "add", "."]);
+    await run("git", ["-C", repo, "-c", "user.email=test@example.com", "-c", "user.name=test", "commit", "-q", "-m", "init"]);
+
+    // The run branch is checked out in a worktree cleanup does not manage,
+    // so `git branch -D` fails for a reason other than "not found".
+    const foreignWorktree = join(sandboxRoot, "cleanup-warning-foreign-worktree");
+    await run("git", ["-C", repo, "worktree", "add", "-B", branchName, foreignWorktree, "HEAD"]);
+
+    const result = await cleanupRun(runId, repo, branchName) as { ok: boolean; warnings?: string[] };
+    expect(result.ok).toBe(true);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings?.[0]).toMatch(/branch -D/);
+
+    // The stale branch really is still there for an operator to act on.
+    const branches = await run("git", ["-C", repo, "branch", "--list", branchName]);
+    expect(branches.stdout.trim()).not.toBe("");
+  });
+
+  it("reports no warnings when the run branch was simply never created", async () => {
+    const run = promisify(execFile);
+    const runId = "run_cleanup_no_branch";
+    const repo = join(sandboxRoot, "cleanup-no-branch-repo");
+    await mkdir(repo, { recursive: true });
+    await run("git", ["-C", repo, "init", "-q"]);
+    await writeFile(join(repo, "file.txt"), "content", "utf8");
+    await run("git", ["-C", repo, "add", "."]);
+    await run("git", ["-C", repo, "-c", "user.email=test@example.com", "-c", "user.name=test", "commit", "-q", "-m", "init"]);
+
+    const result = await cleanupRun(runId, repo, `hermes/${runId}`) as { ok: boolean; warnings?: string[] };
+    expect(result.ok).toBe(true);
+    expect(result.warnings).toBeUndefined();
+  });
+
   it("skips pnpm reinstall when the workspace is already hydrated at the cached commit", async () => {
     const run = promisify(execFile);
     const sourceRepo = join(sandboxRoot, "pnpm-cache-repo");

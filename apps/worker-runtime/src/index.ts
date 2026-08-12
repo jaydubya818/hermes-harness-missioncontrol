@@ -1027,16 +1027,30 @@ export async function cleanupRun(runId: string, sourceRepo?: string, branchName?
   }
   const repo = sourceRepo ? assertSafeRepoPath(sourceRepo) : undefined;
   const target = join(worktreesRoot, runId);
+  // Failed git cleanup used to be silently swallowed while the response
+  // still said ok, so stale worktree bookkeeping and hermes/run_* branches
+  // accumulated with no signal. Collect unexpected failures as warnings
+  // (still best-effort: the directory removal below proceeds regardless).
+  const warnings: string[] = [];
   if (repo && await assertGitRepo(repo)) {
     // Prune bookkeeping and delete the run branch even when the worktree
     // directory has already disappeared (partial cleanup, manual removal);
     // otherwise stale hermes/run_* branches accumulate in the source repo.
     if (await exists(target)) {
-      await runCmd("git", ["-C", repo, "worktree", "remove", "--force", target], repo);
+      const removeResult = await runCmd("git", ["-C", repo, "worktree", "remove", "--force", target], repo);
+      if (removeResult.exitCode !== 0) {
+        warnings.push(`git worktree remove failed: ${(removeResult.stderr || removeResult.stdout).trim()}`);
+      }
     }
     await runCmd("git", ["-C", repo, "worktree", "prune"], repo);
     if (branchName) {
-      await runCmd("git", ["-C", repo, "branch", "-D", branchName], repo);
+      const deleteResult = await runCmd("git", ["-C", repo, "branch", "-D", branchName], repo);
+      // "not found" is the benign case: the branch was never created (e.g.
+      // the run failed before workspace setup). Anything else -- still
+      // checked out elsewhere, locked refs -- leaves a stale branch behind.
+      if (deleteResult.exitCode !== 0 && !/not found/i.test(deleteResult.stderr)) {
+        warnings.push(`git branch -D ${branchName} failed: ${(deleteResult.stderr || deleteResult.stdout).trim()}`);
+      }
     }
   }
   if (await exists(target)) await rm(target, { recursive: true, force: true });
@@ -1049,7 +1063,10 @@ export async function cleanupRun(runId: string, sourceRepo?: string, branchName?
     if (await exists(outputRoot)) await rm(outputRoot, { recursive: true, force: true });
     removed_paths.push(outputRoot);
   }
-  return { ok: true, removed: target, removed_paths };
+  for (const warning of warnings) {
+    console.warn(`[worker] cleanup ${runId}: ${warning}`);
+  }
+  return { ok: true, removed: target, removed_paths, ...(warnings.length > 0 ? { warnings } : {}) };
 }
 
 // The console talks to these APIs via the Vite dev proxy (same-origin), so
