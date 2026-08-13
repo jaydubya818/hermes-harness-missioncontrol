@@ -18,3 +18,9 @@ export async function readApiResponse(response: Response) {
     return text;
   }
 }
+
+export function filterCommands<T extends { id: string; label: string }>(commands: T[], query: string): T[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return commands;
+  return commands.filter((command) => command.label.toLowerCase().includes(q) || command.id.toLowerCase().includes(q));
+}

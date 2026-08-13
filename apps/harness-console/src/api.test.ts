@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readApiResponse, withQuery } from "./api.js";
+import { filterCommands, readApiResponse, withQuery } from "./api.js";
 
 describe("withQuery", () => {
   it("returns the bare url when no params are set", () => {
@@ -32,5 +32,31 @@ describe("readApiResponse", () => {
 
   it("returns raw text for non-JSON bodies (proxy error pages)", async () => {
     expect(await readApiResponse(new Response("<html>502</html>"))).toBe("<html>502</html>");
+  });
+});
+
+describe("filterCommands", () => {
+  const commands = [
+    { id: "overview", label: "Open Overview" },
+    { id: "missions", label: "Open Missions" },
+    { id: "audit", label: "Open Audit" }
+  ];
+
+  it("returns everything for an empty or whitespace query", () => {
+    expect(filterCommands(commands, "")).toEqual(commands);
+    expect(filterCommands(commands, "   ")).toEqual(commands);
+  });
+
+  it("matches case-insensitively on label and id", () => {
+    expect(filterCommands(commands, "MISS").map((command) => command.id)).toEqual(["missions"]);
+    expect(filterCommands(commands, "audit").map((command) => command.id)).toEqual(["audit"]);
+  });
+
+  it("ignores surrounding whitespace in the query", () => {
+    expect(filterCommands(commands, " overview ").map((command) => command.id)).toEqual(["overview"]);
+  });
+
+  it("returns an empty list when nothing matches", () => {
+    expect(filterCommands(commands, "deploy")).toEqual([]);
   });
 });
