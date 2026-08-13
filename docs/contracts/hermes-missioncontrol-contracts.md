@@ -136,7 +136,9 @@ Worker-runtime enforces:
 - required `allowed_actions`
 - step-kind → action mapping
 - step-kind → required tools mapping
-- positive `timeout_seconds`
+- positive `timeout_seconds`, bounded to Node's 32-bit timer range
+  (~2,147,483 s; beyond it `setTimeout` clamps to 1 ms and every step would
+  instantly time out)
 - positive budget values
 - path boundaries for:
   - `workspace_root`
