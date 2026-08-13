@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { mutate } from "swr";
 import { CapacityBar, CostCard, Panel, Sparkline, StatusRow } from "@hermes-harness-with-missioncontrol/ui-kit";
 import { CommandPalette } from "./CommandPalette.js";
@@ -191,7 +191,17 @@ function Missions() {
   const { data: stepDetail } = useSWR(stepDetailUrl, fetcher, { refreshInterval: 3000 });
   const { data: stepArtifacts } = useSWR(stepArtifactsUrl, fetcher, { refreshInterval: 3000 });
 
+  // Single-flight guard for operator actions: a double-clicked Create would
+  // otherwise submit two identical missions (mission creation has no
+  // idempotency key), and stacked control actions race each other. A ref
+  // (not state) so two clicks in the same frame cannot both pass the check.
+  const actionInFlight = useRef(false);
+  const [busy, setBusy] = useState(false);
+
   async function runAction(action: () => Promise<unknown>, successMessage: string) {
+    if (actionInFlight.current) return;
+    actionInFlight.current = true;
+    setBusy(true);
     setError(null);
     setMessage(null);
     try {
@@ -199,6 +209,9 @@ function Missions() {
       setMessage(successMessage);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      actionInFlight.current = false;
+      setBusy(false);
     }
   }
 
@@ -288,7 +301,7 @@ function Missions() {
           <select value={workflowId} onChange={(event) => setWorkflowId(event.target.value)} style={{ borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }}>
             {(workflowOptions.length ? workflowOptions : ["bugfix"]).map((id) => <option key={id} value={id}>{id}</option>)}
           </select>
-          <Button onClick={createMission}>Create</Button>
+          <Button onClick={createMission} disabled={busy} style={{ opacity: busy ? 0.6 : 1 }}>Create</Button>
           {message && <div style={{ color: "#86efac", fontSize: 13 }}>{message}</div>}
           {error && <div style={{ color: "#fca5a5", fontSize: 13 }}>Action failed: {error}. If auth is enabled, save HARNESS_OPERATOR_TOKEN in Settings first.</div>}
         </div>
