@@ -88,6 +88,23 @@ describe("memory-api", () => {
     expect(((await after.json()) as { recent_promotions: number }).recent_promotions).toBe(1);
   });
 
+  it("re-reads promotion attribution when a promoted file changes on disk", async () => {
+    const vault = makeVault();
+    const app = await loadApp({ vaultRoot: vault });
+    const promotedPath = join(vault, "wiki", "projects", "proj_demo", "promoted-cached.md");
+
+    writeFileSync(promotedPath, "---\npromoted_by: agent_demo\n---\n");
+    const before = await app.request("/api/memory/agents/agent_demo/summary");
+    expect(((await before.json()) as { recent_promotions: number }).recent_promotions).toBe(1);
+
+    // The attribution cache is keyed by mtime; a rewritten file must not be
+    // served from the stale cache entry.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    writeFileSync(promotedPath, "---\npromoted_by: agent_other\n---\n");
+    const after = await app.request("/api/memory/agents/agent_demo/summary");
+    expect(((await after.json()) as { recent_promotions: number }).recent_promotions).toBe(0);
+  });
+
   it("counts only entry-anchored lines in learned_count and pending_rewrites", async () => {
     const vault = makeVault();
     // Frontmatter delimiters and horizontal rules start with "-" but are not

@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { access, readdir, readFile, writeFile, mkdir, rename, rm } from "node:fs/promises";
+import { access, readdir, readFile, stat, writeFile, mkdir, rename, rm } from "node:fs/promises";
 import { timingSafeEqual } from "node:crypto";
 import { dirname, join, resolve, relative } from "node:path";
 import { loadContextBundle, closeTask, promoteLearning } from "@hermes-harness-with-missioncontrol/memory-runtime";
@@ -98,6 +98,31 @@ async function listProjectFiles(projectId: string) {
 // `promoted_by:` frontmatter line; count the ones attributed to this agent.
 const PROMOTION_SCAN_MAX_FILES = 500;
 
+// The console polls agent summaries every few seconds and each poll used to
+// re-read every promoted file. Promotions are effectively write-once (the
+// promote endpoint refuses to overwrite), so cache each file's attribution
+// keyed by mtime and only re-read files that actually changed.
+const promotionAttributionCache = new Map<string, { mtimeMs: number; promotedBy: string | null }>();
+
+async function readPromotedBy(path: string): Promise<string | null> {
+  let mtimeMs: number;
+  try {
+    mtimeMs = (await stat(path)).mtimeMs;
+  } catch {
+    promotionAttributionCache.delete(path);
+    return null;
+  }
+  const cached = promotionAttributionCache.get(path);
+  if (cached && cached.mtimeMs === mtimeMs) return cached.promotedBy;
+  const content = await readText(path);
+  // Line-anchored match: matching anywhere in the line would credit agent_1
+  // with promotions made by agent_10.
+  const line = content?.split("\n").map((item) => item.trim()).find((item) => item.startsWith("promoted_by: "));
+  const promotedBy = line ? line.slice("promoted_by: ".length) : null;
+  promotionAttributionCache.set(path, { mtimeMs, promotedBy });
+  return promotedBy;
+}
+
 async function countAgentPromotions(agentId: string) {
   const projectsRoot = safeWikiPath("projects");
   let scanned = 0;
@@ -107,10 +132,7 @@ async function countAgentPromotions(agentId: string) {
       if (!file.startsWith("promoted-") || !file.endsWith(".md")) continue;
       if (scanned >= PROMOTION_SCAN_MAX_FILES) return count;
       scanned += 1;
-      const content = await readText(join(projectsRoot, project, file));
-      // Line-anchored match: a bare includes() would credit agent_1 with
-      // promotions made by agent_10.
-      if (content?.split("\n").some((line) => line.trim() === `promoted_by: ${agentId}`)) count += 1;
+      if (await readPromotedBy(join(projectsRoot, project, file)) === agentId) count += 1;
     }
   }
   return count;
