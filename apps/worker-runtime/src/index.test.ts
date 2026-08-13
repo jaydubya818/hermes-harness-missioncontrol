@@ -157,6 +157,28 @@ describe("worker-runtime", () => {
     }
   });
 
+  it("rejects envelope timeouts beyond Node's 32-bit timer range", async () => {
+    // setTimeout clamps delays past 2^31-1 ms to 1 ms, so such a timeout
+    // would instantly 408 every step instead of never firing.
+    const response = await app.request("/api/execute-step", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mission_id: "mis_contracts",
+        run_id: "run_contracts",
+        step_id: "step_plan",
+        execution_id: "exec_contracts",
+        kind: "plan",
+        envelope: buildEnvelope({ timeout_seconds: 2_147_484 })
+      })
+    });
+
+    const payload = await response.json() as { summary?: string; step_events?: Array<{ type: string; payload?: { violation_kind?: string } }> };
+    expect(response.status).toBe(400);
+    expect(payload.summary).toMatch(/timeout_seconds must be at most/i);
+    expect(payload.step_events?.some((event) => event.type === "policy.violation" && event.payload?.violation_kind === "invalid_timeout")).toBe(true);
+  });
+
   it("reports policy violations for missing repo_scope or non-string envelope paths", async () => {
     for (const overrides of [
       { repo_scope: undefined },

@@ -242,6 +242,9 @@ function assertAllowedRepoWrite(workspace: WorkspaceContext, targetPath: string)
 
 const STEP_KINDS = ["plan", "implement", "test", "review", "deploy"] as const;
 
+// setTimeout's maximum delay: floor((2^31 - 1) / 1000) seconds.
+const MAX_TIMEOUT_SECONDS = Math.floor((2 ** 31 - 1) / 1000);
+
 function validateEnvelope(req: StepRequest) {
   const envelope = req.envelope;
   if (!req.mission_id || !req.run_id || !req.step_id || !req.execution_id) {
@@ -275,6 +278,10 @@ function validateEnvelope(req: StepRequest) {
     }
   }
   if (!Number.isInteger(envelope.timeout_seconds) || envelope.timeout_seconds <= 0) throw new WorkerExecutionError("invalid execution envelope: timeout_seconds must be positive integer", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "invalid_timeout" } });
+  // Node clamps setTimeout/execFile delays beyond 2^31-1 ms to 1 ms, so a
+  // timeout past the 32-bit timer range would instantly time out every step
+  // (and kill every spawned command) instead of never firing.
+  if (envelope.timeout_seconds > MAX_TIMEOUT_SECONDS) throw new WorkerExecutionError(`invalid execution envelope: timeout_seconds must be at most ${MAX_TIMEOUT_SECONDS}`, { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "invalid_timeout", timeout_seconds: envelope.timeout_seconds, max_timeout_seconds: MAX_TIMEOUT_SECONDS } });
   // `undefined <= 0` and `NaN <= 0` are both false, so missing or
   // non-numeric budget fields would pass a bare `<= 0` check and then
   // silently disable every comparison in enforceBudget.
