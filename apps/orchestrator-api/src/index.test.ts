@@ -25,6 +25,22 @@ async function loadApp(stateFile?: string) {
   return module.app;
 }
 
+// Reads SSE chunks off a stream response until `expectedEvents` framed
+// events have arrived, then cancels the stream. Replay chunks are enqueued
+// synchronously at subscribe time, so reads resolve immediately.
+async function readSseEvents(response: Response, expectedEvents: number) {
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  while ((text.match(/^event: /gm) ?? []).length < expectedEvents) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    text += decoder.decode(value);
+  }
+  await reader.cancel();
+  return text;
+}
+
 describe("orchestrator-api", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -233,6 +249,95 @@ describe("orchestrator-api", () => {
     const streamWithHeader = await app.request("/api/events/stream?last=0", { headers: { authorization: "Bearer secret-token" } });
     expect(streamWithHeader.status).toBe(200);
     await streamWithHeader.body?.cancel();
+  });
+
+  it("replays recent events with SSE framing and honors stream filters", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+    process.env.SSE_HEARTBEAT_MS = "0";
+    const app = await loadApp();
+
+    const first = await (await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Stream A", project_id: "proj_demo" })
+    })).json() as { mission_id: string };
+    const second = await (await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Stream B", project_id: "proj_demo" })
+    })).json() as { mission_id: string };
+
+    const replayAll = await app.request("/api/events/stream?last=10");
+    const allText = await readSseEvents(replayAll, 2);
+    expect(allText).toContain(`id: `);
+    expect(allText).toContain("event: mission.created");
+    expect(allText).toContain(first.mission_id);
+    expect(allText).toContain(second.mission_id);
+    // Replay is oldest-first so EventSource consumers rebuild in order.
+    expect(allText.indexOf(first.mission_id)).toBeLessThan(allText.indexOf(second.mission_id));
+
+    const filtered = await app.request(`/api/events/stream?last=10&mission_id=${second.mission_id}`);
+    const filteredText = await readSseEvents(filtered, 1);
+    expect(filteredText).toContain(second.mission_id);
+    expect(filteredText).not.toContain(first.mission_id);
+
+    // Every data frame is parseable JSON with a canonical type.
+    for (const line of filteredText.split("\n").filter((item) => item.startsWith("data: "))) {
+      const event = JSON.parse(line.slice("data: ".length)) as { type: string; mission_id?: string };
+      expect(event.type).toBe("mission.created");
+      expect(event.mission_id).toBe(second.mission_id);
+    }
+  });
+
+  it("resumes the stream from Last-Event-ID instead of count-based replay", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+    process.env.SSE_HEARTBEAT_MS = "0";
+    const app = await loadApp();
+
+    const first = await (await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Resume A", project_id: "proj_demo" })
+    })).json() as { mission_id: string };
+    const second = await (await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Resume B", project_id: "proj_demo" })
+    })).json() as { mission_id: string };
+
+    const { events } = await (await app.request("/api/events")).json() as { events: Array<{ event_id: string; payload: { mission_id?: string } }> };
+    // events are newest-first; resume from the older mission.created.
+    const olderEventId = events[events.length - 1]!.event_id;
+
+    const resumed = await app.request("/api/events/stream", { headers: { "last-event-id": olderEventId } });
+    const resumedText = await readSseEvents(resumed, 1);
+    expect(resumedText).toContain(second.mission_id);
+    expect(resumedText).not.toContain(first.mission_id);
+
+    // An evicted/unknown id falls back to count-based replay.
+    const fallback = await app.request("/api/events/stream?last=10", { headers: { "last-event-id": "evt_gone" } });
+    const fallbackText = await readSseEvents(fallback, 2);
+    expect(fallbackText).toContain(first.mission_id);
+    expect(fallbackText).toContain(second.mission_id);
+  });
+
+  it("delivers live events to connected stream subscribers", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+    process.env.SSE_HEARTBEAT_MS = "0";
+    const app = await loadApp();
+
+    const stream = await app.request("/api/events/stream?last=0&event_type=mission.created");
+    expect(stream.status).toBe(200);
+
+    const created = await (await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Live mission", project_id: "proj_demo" })
+    })).json() as { mission_id: string };
+
+    const text = await readSseEvents(stream, 1);
+    expect(text).toContain("event: mission.created");
+    expect(text).toContain(created.mission_id);
   });
 
   it("returns a TaskExecutionResult-shaped execution_result payload", async () => {
