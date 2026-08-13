@@ -791,45 +791,49 @@ function paginateItems<T>(items: T[], query: Record<string, string | undefined>)
   };
 }
 
-function buildAuditReadModel(query: Record<string, string | undefined> = {}) {
-  const titleMap: Record<string, { kind: string; title: string }> = {
-    "approval.requested": { kind: "approval", title: "Approval requested" },
-    "approval.resolved": { kind: "approval", title: "Approval resolved" },
-    "step.started": { kind: "step", title: "Step started" },
-    "step.progress": { kind: "step", title: "Step progress" },
-    "step.blocked": { kind: "step", title: "Step blocked" },
-    "step.paused": { kind: "step", title: "Step paused" },
-    "step.resumed": { kind: "step", title: "Step resumed" },
-    "step.completed": { kind: "step", title: "Step completed" },
-    "step.failed": { kind: "step", title: "Step failed" },
-    "step.cancelled": { kind: "step", title: "Step cancelled" },
-    "step.retried": { kind: "step", title: "Step retried" },
-    "run.started": { kind: "run", title: "Run started" },
-    "run.running": { kind: "run", title: "Run running" },
-    "run.paused": { kind: "run", title: "Run paused" },
-    "run.completed": { kind: "run", title: "Run completed" },
-    "run.failed": { kind: "run", title: "Run failed" },
-    "run.cancelled": { kind: "run", title: "Run cancelled" },
-    "mission.created": { kind: "mission", title: "Mission created" },
-    "mission.updated": { kind: "mission", title: "Mission updated" },
-    "mission.running": { kind: "mission", title: "Mission running" },
-    "mission.paused": { kind: "mission", title: "Mission paused" },
-    "mission.cancelled": { kind: "mission", title: "Mission cancelled" },
-    "mission.completed": { kind: "mission", title: "Mission completed" },
-    "tool.started": { kind: "tool", title: "Tool started" },
-    "tool.completed": { kind: "tool", title: "Tool completed" },
-    "tool.failed": { kind: "tool", title: "Tool failed" },
-    "artifact.created": { kind: "artifact", title: "Artifact created" },
-    "eval.started": { kind: "eval", title: "Eval started" },
-    "eval.completed": { kind: "eval", title: "Eval completed" },
-    "eval.failed": { kind: "eval", title: "Eval failed" },
-    "policy.violation": { kind: "policy", title: "Policy violation" },
-    "execution.timeout": { kind: "execution", title: "Execution timeout" },
-    "execution.budget_exceeded": { kind: "execution", title: "Execution budget exceeded" }
-  };
+// Static event-type presentation metadata for the audit timeline. Hoisted:
+// the console polls the audit read model every few seconds, and rebuilding
+// this map on every call (five times per mission/run/step detail request)
+// is pure allocation churn.
+const AUDIT_EVENT_TITLES: Record<string, { kind: string; title: string }> = {
+  "approval.requested": { kind: "approval", title: "Approval requested" },
+  "approval.resolved": { kind: "approval", title: "Approval resolved" },
+  "step.started": { kind: "step", title: "Step started" },
+  "step.progress": { kind: "step", title: "Step progress" },
+  "step.blocked": { kind: "step", title: "Step blocked" },
+  "step.paused": { kind: "step", title: "Step paused" },
+  "step.resumed": { kind: "step", title: "Step resumed" },
+  "step.completed": { kind: "step", title: "Step completed" },
+  "step.failed": { kind: "step", title: "Step failed" },
+  "step.cancelled": { kind: "step", title: "Step cancelled" },
+  "step.retried": { kind: "step", title: "Step retried" },
+  "run.started": { kind: "run", title: "Run started" },
+  "run.running": { kind: "run", title: "Run running" },
+  "run.paused": { kind: "run", title: "Run paused" },
+  "run.completed": { kind: "run", title: "Run completed" },
+  "run.failed": { kind: "run", title: "Run failed" },
+  "run.cancelled": { kind: "run", title: "Run cancelled" },
+  "mission.created": { kind: "mission", title: "Mission created" },
+  "mission.updated": { kind: "mission", title: "Mission updated" },
+  "mission.running": { kind: "mission", title: "Mission running" },
+  "mission.paused": { kind: "mission", title: "Mission paused" },
+  "mission.cancelled": { kind: "mission", title: "Mission cancelled" },
+  "mission.completed": { kind: "mission", title: "Mission completed" },
+  "tool.started": { kind: "tool", title: "Tool started" },
+  "tool.completed": { kind: "tool", title: "Tool completed" },
+  "tool.failed": { kind: "tool", title: "Tool failed" },
+  "artifact.created": { kind: "artifact", title: "Artifact created" },
+  "eval.started": { kind: "eval", title: "Eval started" },
+  "eval.completed": { kind: "eval", title: "Eval completed" },
+  "eval.failed": { kind: "eval", title: "Eval failed" },
+  "policy.violation": { kind: "policy", title: "Policy violation" },
+  "execution.timeout": { kind: "execution", title: "Execution timeout" },
+  "execution.budget_exceeded": { kind: "execution", title: "Execution budget exceeded" }
+};
 
+function buildAuditReadModel(query: Record<string, string | undefined> = {}) {
   const timeline = state.events.map((event: any) => {
-    const meta = titleMap[event.type] ?? { kind: "event", title: String(event.type ?? "Event") };
+    const meta = AUDIT_EVENT_TITLES[event.type] ?? { kind: "event", title: String(event.type ?? "Event") };
     return {
       kind: meta.kind,
       title: meta.title,
