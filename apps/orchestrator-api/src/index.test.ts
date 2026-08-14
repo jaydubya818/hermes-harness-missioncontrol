@@ -2312,6 +2312,39 @@ describe("orchestrator-api", () => {
     expect(payload.events.map((event) => event.event_id)).toEqual(["evt_newer", "evt_older"]);
   });
 
+  it("reassigns out-of-range event sequences instead of poisoning the sequence counter", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-bad-sequence-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [],
+      runs: [],
+      approvals: [],
+      events: [
+        { event_id: "evt_huge", type: "step.progress", ts: "2026-04-11T00:00:00.000Z", sequence: 1e308, mission_id: "mis_demo", run_id: "run_demo", payload: {} },
+        { event_id: "evt_frac", type: "step.progress", ts: "2026-04-11T00:01:00.000Z", sequence: -2.5, mission_id: "mis_demo", run_id: "run_demo", payload: {} }
+      ],
+      audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Sequence sanity", project_id: "proj_demo" })
+    });
+
+    const payload = await (await app.request("/api/events")).json() as { events: Array<{ sequence: number }> };
+    // Every sequence must be a positive safe integer: the 1e308 replay must
+    // not leak through, and the mission.created event minted afterwards must
+    // not inherit a poisoned counter (1e308 + 1 === 1e308).
+    for (const event of payload.events) {
+      expect(Number.isSafeInteger(event.sequence)).toBe(true);
+      expect(event.sequence).toBeGreaterThan(0);
+    }
+  });
+
   it("skips unrecognized persisted events instead of failing every request", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

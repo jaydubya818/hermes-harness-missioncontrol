@@ -297,7 +297,12 @@ function normalizeEventRecord(event: HarnessEvent | Record<string, unknown>) {
     event_id: raw.event_id ?? makeId("evt"),
     timestamp: raw.timestamp ?? raw.ts ?? now,
     ts: raw.ts ?? raw.timestamp ?? now,
-    sequence: Number.isFinite(raw.sequence) ? raw.sequence : nextEventSequence(),
+    // Sequences come from external sources too (worker step_events, persisted
+    // state). Any finite number used to pass, so one negative, fractional, or
+    // absurdly large value (e.g. 1e308) permanently poisoned maxEventSequence
+    // and every internally minted sequence after it. Accept only positive
+    // integers in the safe range; reassign anything else.
+    sequence: Number.isInteger(raw.sequence) && raw.sequence > 0 && Number.isSafeInteger(raw.sequence) ? raw.sequence : nextEventSequence(),
     source: raw.source === "hermes" ? "hermes" : "missioncontrol",
     type: normalizeEventType(raw.type),
     project_id: raw.project_id,
