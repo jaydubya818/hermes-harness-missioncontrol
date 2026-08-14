@@ -175,6 +175,7 @@ function Missions() {
   const { data } = useSWR(`${ORCH}/api/read-models/missions`, fetcher, { refreshInterval: 3000 });
   const { data: approvalsView } = useSWR(`${ORCH}/api/read-models/approvals`, fetcher, { refreshInterval: 3000 });
   const [title, setTitle] = useState("Fix duplicate webhook jobs");
+  const [objective, setObjective] = useState("");
   const [repoPath, setRepoPath] = useState("/Users/jaywest/projects/Hermes-harness-with-missioncontrol");
   const [workflowId, setWorkflowId] = useState("bugfix");
   const { data: workflows } = useSWR(`${ORCH}/api/read-models/workflows`, fetcher);
@@ -249,7 +250,9 @@ function Missions() {
       await authJson(`${ORCH}/api/missions`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title, project_id: "proj_demo", workflow_id: workflowId, repo_path: repoPath })
+        // The server rejects empty-but-present optional fields; only send the
+        // objective when the operator typed one (it defaults to the title).
+        body: JSON.stringify({ title, project_id: "proj_demo", workflow_id: workflowId, repo_path: repoPath, ...(objective.trim() ? { objective: objective.trim() } : {}) })
       });
       await refreshAll();
     }, "Mission created.");
@@ -305,6 +308,7 @@ function Missions() {
       <Panel title="New Mission">
         <div style={{ display: "grid", gap: 12 }}>
           <input value={title} onChange={(event) => setTitle(event.target.value)} style={{ flex: 1, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+          <input value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="Objective (optional, defaults to the title)" style={{ flex: 1, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
           <input value={repoPath} onChange={(event) => setRepoPath(event.target.value)} style={{ flex: 1, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
           <select value={workflowId} onChange={(event) => setWorkflowId(event.target.value)} style={{ borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }}>
             {(workflowOptions.length ? workflowOptions : ["bugfix"]).map((id) => <option key={id} value={id}>{id}</option>)}
@@ -377,6 +381,7 @@ function Missions() {
         <Panel title="Mission Detail">
           {!missionDetail ? <div>Select mission.</div> : <>
             <StatusRow label={missionDetail.mission.title} value={missionDetail.mission.status} />
+            <StatusRow label="Objective" value={missionDetail.mission.objective ?? missionDetail.mission.title} />
             <StatusRow label="Workflow" value={missionDetail.mission.workflow ?? "bugfix"} />
             <StatusRow label="Active run" value={missionDetail.mission.active_run_id ?? "none"} />
             <StatusRow label="Pending approvals" value={missionDetail.approval_summary.pending} />
