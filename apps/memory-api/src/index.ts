@@ -334,6 +334,36 @@ app.get("/api/memory/projects/:id/summary", async (c) => {
 const SEARCH_MAX_FILES = 200;
 const SEARCH_MAX_RESULTS = 20;
 
+// The console polls search every few seconds and each poll used to re-read
+// (and lowercase) every markdown file in the corpus. Wiki files change
+// rarely; cache each file's content keyed by mtime, mirroring the promotion
+// attribution cache above.
+const searchContentCache = new Map<string, { mtimeMs: number; content: string; lower: string }>();
+
+async function readSearchText(path: string) {
+  let mtimeMs: number;
+  try {
+    mtimeMs = (await stat(path)).mtimeMs;
+  } catch {
+    searchContentCache.delete(path);
+    return null;
+  }
+  const cached = searchContentCache.get(path);
+  if (cached && cached.mtimeMs === mtimeMs) return cached;
+  const content = await readText(path);
+  if (content === null) {
+    searchContentCache.delete(path);
+    return null;
+  }
+  // Scans are capped at SEARCH_MAX_FILES, but renamed/deleted files outside
+  // the scanned window are never re-stat'ed; bound the cache so churn cannot
+  // grow it without limit.
+  if (searchContentCache.size >= SEARCH_MAX_FILES * 4) searchContentCache.clear();
+  const entry = { mtimeMs, content, lower: content.toLowerCase() };
+  searchContentCache.set(path, entry);
+  return entry;
+}
+
 async function listWikiMarkdownFiles(root: string) {
   const results: string[] = [];
   const queue: string[] = [""];
@@ -368,14 +398,14 @@ app.get("/api/memory/search", async (c) => {
   for (const rel of files) {
     if (results.length >= SEARCH_MAX_RESULTS) break;
     const path = `wiki/${rel}`;
-    const content = await readText(join(wikiRoot, rel));
-    if (!content) continue;
-    const matchIndex = query ? content.toLowerCase().indexOf(query) : -1;
+    const entry = await readSearchText(join(wikiRoot, rel));
+    if (!entry || !entry.content) continue;
+    const matchIndex = query ? entry.lower.indexOf(query) : -1;
     if (query && matchIndex === -1 && !path.toLowerCase().includes(query)) continue;
     // Anchor the snippet at the first content match so the result shows why
     // the file matched instead of always echoing its first 240 characters.
     const start = matchIndex > 60 ? matchIndex - 60 : 0;
-    results.push({ path, snippet: content.slice(start, start + 240) });
+    results.push({ path, snippet: entry.content.slice(start, start + 240) });
   }
   return c.json({ query, results });
 });

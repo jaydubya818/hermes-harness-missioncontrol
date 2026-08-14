@@ -346,6 +346,23 @@ describe("memory-api", () => {
     expect(payload.results[0]!.snippet).toContain("zebra-pattern");
   });
 
+  it("re-reads searched files when they change on disk", async () => {
+    const vault = makeVault();
+    const app = await loadApp({ vaultRoot: vault });
+
+    const miss = await app.request("/api/memory/search?q=chronometer");
+    expect(((await miss.json()) as { results: unknown[] }).results).toHaveLength(0);
+
+    // The search content cache is keyed by mtime; new content must be
+    // picked up instead of serving the stale cached read.
+    writeFileSync(join(vault, "wiki", "projects", "proj_demo", "standards.md"), "calibrate the chronometer weekly");
+    const hit = await app.request("/api/memory/search?q=chronometer");
+    const payload = (await hit.json()) as { results: Array<{ path: string; snippet: string }> };
+    expect(payload.results).toHaveLength(1);
+    expect(payload.results[0]).toMatchObject({ path: "wiki/projects/proj_demo/standards.md" });
+    expect(payload.results[0]!.snippet).toContain("chronometer");
+  });
+
   it("anchors search snippets at the first match instead of the file head", async () => {
     const vault = makeVault();
     const filler = "filler line\n".repeat(60);
