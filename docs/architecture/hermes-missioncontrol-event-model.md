@@ -340,8 +340,17 @@ MissionControl emits:
 - policy violations from policy-engine / dispatch validation
 - artifact.created for MissionControl-side artifact persistence
 
+## Sequence semantics
+- `sequence` must be a positive integer in the safe-integer range
+- MissionControl mints sequences monotonically from the highest sequence seen
+- externally supplied sequences (worker `step_events`, persisted state) outside
+  that range are reassigned on ingest rather than trusted: one oversized value
+  would otherwise poison the counter for every later event
+
 ## Replay semantics
 - load path normalizes legacy names into canonical names
 - load path rebuilds audit timeline from canonical events
 - duplicate `event_id` is ignored
+- events sharing a timestamp replay in their originally recorded order
+  (persisted state is newest-first; replay tie-breaks on persisted position)
 - UI should read `/api/read-models/audit`, not stitch raw internal event variants
