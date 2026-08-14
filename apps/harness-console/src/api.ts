@@ -24,3 +24,30 @@ export function filterCommands<T extends { id: string; label: string }>(commands
   if (!q) return commands;
   return commands.filter((command) => command.label.toLowerCase().includes(q) || command.id.toLowerCase().includes(q));
 }
+
+// Trailing-edge throttle: fire immediately when idle, then coalesce further
+// calls into one trailing invocation per window. Used to keep SSE event
+// bursts (replay on connect, chatty step dispatches) from triggering a
+// refetch storm -- one revalidation per window instead of one per event.
+export function createTrailingThrottle(fn: () => void, windowMs: number): { (): void; cancel: () => void } {
+  let lastInvokedAt = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const invoke = () => {
+    lastInvokedAt = Date.now();
+    timer = undefined;
+    fn();
+  };
+  const throttled = () => {
+    if (timer !== undefined) return;
+    const elapsed = Date.now() - lastInvokedAt;
+    if (elapsed >= windowMs) invoke();
+    else timer = setTimeout(invoke, windowMs - elapsed);
+  };
+  throttled.cancel = () => {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+  };
+  return throttled;
+}

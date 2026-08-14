@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { filterCommands, readApiResponse, withQuery } from "./api.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createTrailingThrottle, filterCommands, readApiResponse, withQuery } from "./api.js";
 
 describe("withQuery", () => {
   it("returns the bare url when no params are set", () => {
@@ -58,5 +58,51 @@ describe("filterCommands", () => {
 
   it("returns an empty list when nothing matches", () => {
     expect(filterCommands(commands, "deploy")).toEqual([]);
+  });
+});
+
+describe("createTrailingThrottle", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("fires immediately when idle", () => {
+    const fn = vi.fn();
+    const throttled = createTrailingThrottle(fn, 1000);
+    throttled();
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("coalesces a burst into one trailing call per window", () => {
+    const fn = vi.fn();
+    const throttled = createTrailingThrottle(fn, 1000);
+    throttled();
+    for (let i = 0; i < 50; i += 1) throttled();
+    expect(fn).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1000);
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it("fires immediately again once the window has elapsed", () => {
+    const fn = vi.fn();
+    const throttled = createTrailingThrottle(fn, 1000);
+    throttled();
+    vi.advanceTimersByTime(1500);
+    throttled();
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancel drops a pending trailing call", () => {
+    const fn = vi.fn();
+    const throttled = createTrailingThrottle(fn, 1000);
+    throttled();
+    throttled();
+    throttled.cancel();
+    vi.advanceTimersByTime(2000);
+    expect(fn).toHaveBeenCalledTimes(1);
   });
 });

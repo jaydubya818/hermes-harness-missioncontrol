@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { mutate } from "swr";
 import { CapacityBar, CostCard, Panel, Sparkline, StatusRow } from "@hermes-harness-with-missioncontrol/ui-kit";
 import { CommandPalette } from "./CommandPalette.js";
-import { readApiResponse, withQuery } from "./api.js";
+import { createTrailingThrottle, readApiResponse, withQuery } from "./api.js";
 
 const tabs = ["Overview", "Missions", "Agents", "Memory", "Code", "Audit", "Settings"] as const;
 type Tab = (typeof tabs)[number];
@@ -98,16 +98,23 @@ function useLiveEventStream(url: string) {
     setStatus("connecting");
     setEvents([]);
     const source = new EventSource(url);
+    // Every live event used to fire five mutate() calls, so the replay on
+    // connect (up to 10 events) and chatty step dispatches turned into an
+    // instant refetch storm against all five endpoints. Coalesce to one
+    // trailing revalidation per window; the panels also poll on their own.
+    const revalidate = createTrailingThrottle(() => {
+      mutate(`${ORCH}/api/events`);
+      mutate(`${ORCH}/api/read-models/audit`);
+      mutate(`${ORCH}/api/read-models/overview`);
+      mutate(`${EVAL}/api/evals`);
+      mutate(`${EVAL}/api/evals?order=desc`);
+    }, 1500);
     const handleEvent = (event: MessageEvent) => {
       setStatus("open");
       try {
         const payload = JSON.parse(event.data);
         setEvents((current) => [payload, ...current].slice(0, 20));
-        mutate(`${ORCH}/api/events`);
-        mutate(`${ORCH}/api/read-models/audit`);
-        mutate(`${ORCH}/api/read-models/overview`);
-        mutate(`${EVAL}/api/evals`);
-        mutate(`${EVAL}/api/evals?order=desc`);
+        revalidate();
       } catch {
         // ignore malformed stream frames
       }
@@ -119,6 +126,7 @@ function useLiveEventStream(url: string) {
 
     return () => {
       LIVE_EVENT_TYPES.forEach((type) => source.removeEventListener(type, handleEvent as EventListener));
+      revalidate.cancel();
       source.close();
     };
   }, [url]);
