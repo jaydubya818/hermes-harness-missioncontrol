@@ -431,7 +431,17 @@ async function hydrateState() {
         return [];
       }
     })
-    .sort((a, b) => (a.ts ?? a.timestamp ?? "").localeCompare(b.ts ?? b.timestamp ?? ""));
+    .map((event, index) => ({ event, index }))
+    .sort((a, b) => {
+      const byTs = (a.event.ts ?? a.event.timestamp ?? "").localeCompare(b.event.ts ?? b.event.timestamp ?? "");
+      // state.events persists newest-first, so within one timestamp the
+      // higher persisted index is the older event. Without this tie-break a
+      // stable ascending sort replays same-millisecond events newest-first,
+      // and recordEvent's unshift then leaves them reversed in the retained
+      // window (the older event surfaces as the latest in read models).
+      return byTs !== 0 ? byTs : b.index - a.index;
+    })
+    .map(({ event }) => event);
   for (const event of normalizedEvents) {
     recordEvent(event);
   }

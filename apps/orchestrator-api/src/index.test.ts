@@ -2287,6 +2287,31 @@ describe("orchestrator-api", () => {
     expect(after.audit.map((entry) => entry.audit_id)).toEqual(before.audit.map((entry) => entry.audit_id));
   });
 
+  it("preserves the order of same-timestamp events across hydration replay", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-event-order-"));
+    const stateFile = join(stateDir, "state.json");
+    // state.events persists newest-first; both events share one timestamp,
+    // as step.started/step.completed pairs recorded in the same millisecond do.
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [],
+      runs: [],
+      approvals: [],
+      events: [
+        { event_id: "evt_newer", type: "step.completed", ts: "2026-04-11T00:00:00.000Z", mission_id: "mis_demo", run_id: "run_demo", payload: {} },
+        { event_id: "evt_older", type: "step.started", ts: "2026-04-11T00:00:00.000Z", mission_id: "mis_demo", run_id: "run_demo", payload: {} }
+      ],
+      audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const payload = await (await app.request("/api/events")).json() as { events: Array<{ event_id?: string }> };
+
+    // Newest-first read model: the completed event must still lead.
+    expect(payload.events.map((event) => event.event_id)).toEqual(["evt_newer", "evt_older"]);
+  });
+
   it("skips unrecognized persisted events instead of failing every request", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
