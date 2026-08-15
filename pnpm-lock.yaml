@@ -20,7 +20,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^3.2.7
-        version: 3.2.7(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0)
+        version: 3.2.7(@types/node@24.13.3)(tsx@4.23.12)(yaml@2.9.0)
 
   apps/eval-api:
     dependencies:
@@ -31,18 +31,18 @@ importers:
         specifier: workspace:*
         version: link:../../packages/state-store
       '@hono/node-server':
-        specifier: ^2.0.12
-        version: 2.0.12(hono@4.12.34)
+        specifier: ^2.1.0
+        version: 2.1.0(hono@4.13.1)
       hono:
-        specifier: ^4.12.34
-        version: 4.12.34
+        specifier: ^4.13.1
+        version: 4.13.1
     devDependencies:
       tsx:
-        specifier: ^4.23.1
-        version: 4.23.1
+        specifier: ^4.23.12
+        version: 4.23.12
       vitest:
         specifier: ^3.2.7
-        version: 3.2.7(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0)
+        version: 3.2.7(@types/node@24.13.3)(tsx@4.23.12)(yaml@2.9.0)
 
   apps/harness-console:
     dependencies:
@@ -56,8 +56,8 @@ importers:
         specifier: ^19.2.8
         version: 19.2.8(react@19.2.8)
       swr:
-        specifier: ^2.4.2
-        version: 2.4.2(react@19.2.8)
+        specifier: ^2.5.0
+        version: 2.5.0(react@19.2.8)
     devDependencies:
       '@types/react':
         specifier: ^19.2.18
@@ -67,10 +67,10 @@ importers:
         version: 19.2.4(@types/react@19.2.18)
       '@vitejs/plugin-react':
         specifier: ^5.2.0
-        version: 5.2.0(vite@7.3.6(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0))
+        version: 5.2.0(vite@7.3.6(@types/node@24.13.3)(tsx@4.23.12)(yaml@2.9.0))
       vite:
         specifier: ^7.3.6
-        version: 7.3.6(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0)
+        version: 7.3.6(@types/node@24.13.3)(tsx@4.23.12)(yaml@2.9.0)
 
   apps/memory-api:
     dependencies:
@@ -81,18 +81,18 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shared-types
       '@hono/node-server':
-        specifier: ^2.0.12
-        version: 2.0.12(hono@4.12.34)
+        specifier: ^2.1.0
+        version: 2.1.0(hono@4.13.1)
       hono:
-        specifier: ^4.12.34
-        version: 4.12.34
+        specifier: ^4.13.1
+        version: 4.13.1
     devDependencies:
       tsx:
-        specifier: ^4.23.1
-        version: 4.23.1
+        specifier: ^4.23.12
+        version: 4.23.12
       vitest:
         specifier: ^3.2.7
-        version: 3.2.7(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0)
+        version: 3.2.7(@types/node@24.13.3)(tsx@4.23.12)(yaml@2.9.0)
 
   apps/orchestrator-api:
     dependencies:
@@ -115,18 +115,18 @@ importers:
         specifier: workspace:*
         version: link:../../packages/workflow-engine
       '@hono/node-server':
-        specifier: ^2.0.12
-        version: 2.0.12(hono@4.12.34)
+        specifier: ^2.1.0
+        version: 2.1.0(hono@4.13.1)
       hono:
-        specifier: ^4.12.34
-        version: 4.12.34
+        specifier: ^4.13.1
+        version: 4.13.1
     devDependencies:
       tsx:
-        specifier: ^4.23.1
-        version: 4.23.1
+        specifier: ^4.23.12
+        version: 4.23.12
       vitest:
         specifier: ^3.2.7
-        version: 3.2.7(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0)
+        version: 3.2.7(@types/node@24.13.3)(tsx@4.23.12)(yaml@2.9.0)
 
   apps/worker-runtime:
     dependencies:
@@ -137,15 +137,15 @@ importers:
         specifier: workspace:*
         version: link:../../packages/state-store
       '@hono/node-server':
-        specifier: ^2.0.12
-        version: 2.0.12(hono@4.12.34)
+        specifier: ^2.1.0
+        version: 2.1.0(hono@4.13.1)
       hono:
-        specifier: ^4.12.34
-        version: 4.12.34
+        specifier: ^4.13.1
+        version: 4.13.1
     devDependencies:
       tsx:
-        specifier: ^4.23.1
-        version: 4.23.1
+        specifier: ^4.23.12
+        version: 4.23.12
 
   packages/contracts:
     devDependencies:
@@ -154,7 +154,7 @@ importers:
         version: 7.13.0(typescript@5.9.3)
       vitest:
         specifier: ^3.2.7
-        version: 3.2.7(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0)
+        version: 3.2.7(@types/node@24.13.3)(tsx@4.23.12)(yaml@2.9.0)
 
   packages/eval-core:
     dependencies:
@@ -442,8 +442,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@hono/node-server@2.0.12':
-    resolution: {integrity: sha512-eWpQYr67tqJLeaSUl0Q+TquuYfUdTibpOJlUMV2FfUP7+KqCC5TufnwnlXL6mobZBJbGAYRd7ZvEBDCbLInjhg==}
+  '@hono/node-server@2.1.0':
+    resolution: {integrity: sha512-XovyyCCnBzW+zKu+z/zq8hwNs4KOR5rEMAOxo2f40Q5xoOI37IMm6MIg2COOUtUApo0i6850MTBKH2u4QLGIqg==}
     engines: {node: '>=20'}
     peerDependencies:
       hono: ^4
@@ -807,8 +807,8 @@ packages:
     resolution: {integrity: sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg==}
     engines: {node: '>=6.9.0'}
 
-  hono@4.12.34:
-    resolution: {integrity: sha512-GqXJqY/xJkJmuloTrnV1ZEXG3fqte+VjkUqoRNZXcrUidiUOP4fMSIHHY4tsqZBK++kVyWmt/AAfSUuy57/eSA==}
+  hono@4.13.1:
+    resolution: {integrity: sha512-kdJoFVv2xmayw6cY09H7AbMJMt8Jn5jdlEdXsP7AGBdF2DIptVlKlOLKXP41yPip4/a3yQPv9gVcJYI8YY04dw==}
     engines: {node: '>=16.9.0'}
 
   https-proxy-agent@7.0.6:
@@ -952,8 +952,8 @@ packages:
     resolution: {integrity: sha512-SS+jx45GF1QjgEXQx4NJZV9ImqmO2NPz5FNsIHrsDjh2YsHnawpan7SNQ1o8NuhrbHZy9AZhIoCUiCeaW/C80g==}
     engines: {node: '>=18'}
 
-  swr@2.4.2:
-    resolution: {integrity: sha512-ej644Y2bvkIajfR32KGeSSdBXQW+ScjGjkybZgSE7kFpk9eGnV44XY9FJylXi+W75pavSX1PVNB57W5EbhGIYw==}
+  swr@2.5.0:
+    resolution: {integrity: sha512-W0GomadRJe9OfzIoRX0kZHhDSaRRfdiOUeH6uazgR05SibBhDNwfdTbhAxmFtObvkf59fFymo22mooKukosvNA==}
     peerDependencies:
       react: ^16.11.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
@@ -979,8 +979,8 @@ packages:
     resolution: {integrity: sha512-azl+t0z7pw/z958Gy9svOTuzqIk6xq+NSheJzn5MMWtWTFywIacg2wUlzKFGtt3cthx0r2SxMK0yzJOR0IES7Q==}
     engines: {node: '>=14.0.0'}
 
-  tsx@4.23.1:
-    resolution: {integrity: sha512-GQHnkIfxyx1wYCOS/wonik5MVRZU9hi1TEZmzGZSCJB1y9YgoZ8H6itNE/u4suE+yLmOzuE4E5S4TZ/ZX2wcWQ==}
+  tsx@4.23.12:
+    resolution: {integrity: sha512-FDf4L4sYzKtzWYhU/Xm0AQFdTjdIxNo9ElTf2mxXM6k8YMHXzYUe4yODVaXP4V9uMFbVg8c0qyBccK2OOxb45Q==}
     engines: {node: '>=18.0.0'}
     hasBin: true
 
@@ -1295,9 +1295,9 @@ snapshots:
   '@esbuild/win32-x64@0.28.1':
     optional: true
 
-  '@hono/node-server@2.0.12(hono@4.12.34)':
+  '@hono/node-server@2.1.0(hono@4.13.1)':
     dependencies:
-      hono: 4.12.34
+      hono: 4.13.1
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
@@ -1463,7 +1463,7 @@ snapshots:
     dependencies:
       csstype: 3.2.3
 
-  '@vitejs/plugin-react@5.2.0(vite@7.3.6(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0))':
+  '@vitejs/plugin-react@5.2.0(vite@7.3.6(@types/node@24.13.3)(tsx@4.23.12)(yaml@2.9.0))':
     dependencies:
       '@babel/core': 7.29.7
       '@babel/plugin-transform-react-jsx-self': 7.29.7(@babel/core@7.29.7)
@@ -1471,7 +1471,7 @@ snapshots:
       '@rolldown/pluginutils': 1.0.0-rc.3
       '@types/babel__core': 7.20.5
       react-refresh: 0.18.0
-      vite: 7.3.6(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0)
+      vite: 7.3.6(@types/node@24.13.3)(tsx@4.23.12)(yaml@2.9.0)
     transitivePeerDependencies:
       - supports-color
 
@@ -1483,13 +1483,13 @@ snapshots:
       chai: 5.3.3
       tinyrainbow: 2.0.0
 
-  '@vitest/mocker@3.2.7(vite@7.3.6(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0))':
+  '@vitest/mocker@3.2.7(vite@7.3.6(@types/node@24.13.3)(tsx@4.23.12)(yaml@2.9.0))':
     dependencies:
       '@vitest/spy': 3.2.7
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 7.3.6(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0)
+      vite: 7.3.6(@types/node@24.13.3)(tsx@4.23.12)(yaml@2.9.0)
 
   '@vitest/pretty-format@3.2.7':
     dependencies:
@@ -1625,7 +1625,7 @@ snapshots:
 
   gensync@1.0.0-beta.2: {}
 
-  hono@4.12.34: {}
+  hono@4.13.1: {}
 
   https-proxy-agent@7.0.6(supports-color@10.2.2):
     dependencies:
@@ -1765,7 +1765,7 @@ snapshots:
 
   supports-color@10.2.2: {}
 
-  swr@2.4.2(react@19.2.8):
+  swr@2.5.0(react@19.2.8):
     dependencies:
       dequal: 2.0.3
       react: 19.2.8
@@ -1786,7 +1786,7 @@ snapshots:
 
   tinyspy@4.0.4: {}
 
-  tsx@4.23.1:
+  tsx@4.23.12:
     dependencies:
       esbuild: 0.28.1
     optionalDependencies:
@@ -1810,13 +1810,13 @@ snapshots:
     dependencies:
       react: 19.2.8
 
-  vite-node@3.2.4(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0):
+  vite-node@3.2.4(@types/node@24.13.3)(tsx@4.23.12)(yaml@2.9.0):
     dependencies:
       cac: 6.7.14
       debug: 4.4.3(supports-color@10.2.2)
       es-module-lexer: 1.7.0
       pathe: 2.0.3
-      vite: 7.3.6(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0)
+      vite: 7.3.6(@types/node@24.13.3)(tsx@4.23.12)(yaml@2.9.0)
     transitivePeerDependencies:
       - '@types/node'
       - jiti
@@ -1831,7 +1831,7 @@ snapshots:
       - tsx
       - yaml
 
-  vite@7.3.6(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0):
+  vite@7.3.6(@types/node@24.13.3)(tsx@4.23.12)(yaml@2.9.0):
     dependencies:
       esbuild: 0.28.1
       fdir: 6.5.0(picomatch@4.0.5)
@@ -1842,14 +1842,14 @@ snapshots:
     optionalDependencies:
       '@types/node': 24.13.3
       fsevents: 2.3.3
-      tsx: 4.23.1
+      tsx: 4.23.12
       yaml: 2.9.0
 
-  vitest@3.2.7(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0):
+  vitest@3.2.7(@types/node@24.13.3)(tsx@4.23.12)(yaml@2.9.0):
     dependencies:
       '@types/chai': 5.2.3
       '@vitest/expect': 3.2.7
-      '@vitest/mocker': 3.2.7(vite@7.3.6(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0))
+      '@vitest/mocker': 3.2.7(vite@7.3.6(@types/node@24.13.3)(tsx@4.23.12)(yaml@2.9.0))
       '@vitest/pretty-format': 3.2.7
       '@vitest/runner': 3.2.7
       '@vitest/snapshot': 3.2.7
@@ -1867,8 +1867,8 @@ snapshots:
       tinyglobby: 0.2.17
       tinypool: 1.1.1
       tinyrainbow: 2.0.0
-      vite: 7.3.6(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0)
-      vite-node: 3.2.4(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0)
+      vite: 7.3.6(@types/node@24.13.3)(tsx@4.23.12)(yaml@2.9.0)
+      vite-node: 3.2.4(@types/node@24.13.3)(tsx@4.23.12)(yaml@2.9.0)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 24.13.3
