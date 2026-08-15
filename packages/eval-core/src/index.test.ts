@@ -103,6 +103,27 @@ describe("summarize", () => {
     expect(result.average_efficiency).toBe(0.4);
     expect(result.average_risk_score).toBe(0.75);
   });
+
+  it("ignores non-finite numerics instead of poisoning every average", () => {
+    const result = summarize([
+      { mission_id: "m1", run_id: "r1", outcome: "success", cost_usd: 0.5,
+        approval_count: 1, artifact_count: 1, created_at: new Date().toISOString(),
+        confidence: 0.9, efficiency_score: 0.8, risk_score: 1.0, duration_ms: 1000 },
+      // A record persisted by an older build / hand-edited state file.
+      { mission_id: "m2", run_id: "r2", outcome: "failure", cost_usd: "0.3" as unknown as number,
+        approval_count: Number.NaN, artifact_count: 0, created_at: new Date().toISOString(),
+        confidence: "high" as unknown as number, efficiency_score: Number.NaN,
+        risk_score: Number.POSITIVE_INFINITY, duration_ms: null as unknown as number },
+    ]);
+    expect(result.total_runs).toBe(2);
+    expect(result.total_cost_usd).toBe(0.5);
+    expect(result.average_cost_usd).toBe(0.25);
+    expect(result.total_approvals).toBe(1);
+    expect(result.average_confidence).toBe(0.9);
+    expect(result.average_efficiency).toBe(0.8);
+    expect(result.average_risk_score).toBe(1);
+    expect(result.average_duration_ms).toBe(1000);
+  });
 });
 
 // ---------------------------------------------------------------------------

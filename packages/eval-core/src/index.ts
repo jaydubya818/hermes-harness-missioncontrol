@@ -30,6 +30,10 @@ export interface EvalSummary {
   average_duration_ms: number;
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 export function summarize(records: EvalRecord[]): EvalSummary {
   const total = records.length;
   if (total === 0) {
@@ -49,18 +53,25 @@ export function summarize(records: EvalRecord[]): EvalSummary {
 
   const successes = records.filter((r) => r.outcome === "success").length;
   const failures  = records.filter((r) => r.outcome === "failure").length;
-  const cost      = records.reduce((sum, r) => sum + r.cost_usd, 0);
-  const approvals = records.reduce((sum, r) => sum + (Number.isFinite(r.approval_count) ? r.approval_count : 0), 0);
+  // Records reach summarize() from persisted state and from the eval-api
+  // request body. Validation only runs on the POST path, so a state file
+  // written by an older build (or hand-edited) can carry a string or NaN
+  // here, and one such record turned every cost/average in the summary into
+  // NaN -- serialized as null, which the console renders as $0.00 with no
+  // hint that the numbers are wrong. Ignore non-finite values instead.
+  const cost      = records.reduce((sum, r) => sum + (isFiniteNumber(r.cost_usd) ? r.cost_usd : 0), 0);
+  const approvals = records.reduce((sum, r) => sum + (isFiniteNumber(r.approval_count) ? r.approval_count : 0), 0);
 
-  // Optional fields: only average over records that have them
-  const withConfidence  = records.filter((r) => r.confidence   != null);
-  const withEfficiency  = records.filter((r) => r.efficiency_score != null);
-  const withRisk        = records.filter((r) => r.risk_score    != null);
-  const withDuration    = records.filter((r) => r.duration_ms   != null);
+  // Optional fields: only average over records that carry a usable number.
+  // `!= null` alone let a string or NaN through and poisoned the average.
+  const withConfidence  = records.filter((r) => isFiniteNumber(r.confidence));
+  const withEfficiency  = records.filter((r) => isFiniteNumber(r.efficiency_score));
+  const withRisk        = records.filter((r) => isFiniteNumber(r.risk_score));
+  const withDuration    = records.filter((r) => isFiniteNumber(r.duration_ms));
 
   function avg(arr: EvalRecord[], key: keyof EvalRecord): number {
     if (arr.length === 0) return 0;
-    return arr.reduce((sum, r) => sum + ((r[key] as number) ?? 0), 0) / arr.length;
+    return arr.reduce((sum, r) => sum + (r[key] as number), 0) / arr.length;
   }
 
   return {
