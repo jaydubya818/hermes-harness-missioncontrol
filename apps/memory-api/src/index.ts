@@ -39,6 +39,26 @@ app.use("*", async (c, next) => {
   await next();
 });
 
+// Cross-origin CSRF guard. Browsers send form and no-cors POSTs (text/plain,
+// form-encoded, or no content-type at all) without a preflight, and
+// c.req.json() parses whatever arrives regardless of content-type. With no
+// HARNESS_OPERATOR_TOKEN configured -- the documented local default -- any
+// page the operator happened to visit could therefore drive this control
+// plane from their browser. application/json is not a CORS "simple" content
+// type, so requiring it on state-changing requests forces a preflight, which
+// the origin allowlist above governs.
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+app.use("*", async (c, next) => {
+  if (MUTATING_METHODS.has(c.req.method)) {
+    const mediaType = (c.req.header("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
+    if (mediaType !== "application/json") {
+      return c.json({ error: "content-type must be application/json" }, 415);
+    }
+  }
+  await next();
+});
+
 
 
 function isSafeId(value: unknown): value is string {

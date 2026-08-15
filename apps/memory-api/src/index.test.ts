@@ -38,6 +38,19 @@ describe("memory-api", () => {
     expect(await res.json()).toMatchObject({ ok: true, service: "memory-api" });
   });
 
+  it("rejects state-changing requests that do not declare a JSON content-type", async () => {
+    const app = await loadApp({ vaultRoot: makeVault() });
+    // A cross-origin HTML form post uses a "simple" content type that never
+    // triggers a CORS preflight; the vault must not accept writes from one.
+    const res = await app.request("/api/memory/bus/publish", {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: JSON.stringify({ channel: "discovery", agent_id: "agent_demo", project_id: "proj_demo", title: "t", body: "b" })
+    });
+    expect(res.status).toBe(415);
+    expect(await res.json()).toEqual({ error: "content-type must be application/json" });
+  });
+
   it("rejects malformed JSON bodies with 400", async () => {
     const app = await loadApp();
     const res = await app.request("/api/memory/context/load", {

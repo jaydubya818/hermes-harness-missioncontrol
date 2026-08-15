@@ -17,11 +17,19 @@ function getOperatorToken() {
   return (window.localStorage.getItem("harness.operatorToken") ?? import.meta.env.VITE_OPERATOR_TOKEN ?? "").trim();
 }
 
+// The APIs reject state-changing requests that do not declare a JSON
+// content-type (their cross-origin CSRF guard). Several actions here POST
+// with no body at all, so set the header centrally rather than at each call
+// site; an explicit content-type in `init` still wins.
+const MUTATING_METHODS = ["POST", "PUT", "PATCH", "DELETE"];
+
 function authFetch(url: string, init: RequestInit = {}) {
   const token = getOperatorToken();
+  const method = (init.method ?? "GET").toUpperCase();
   return fetch(url, {
     ...init,
     headers: {
+      ...(MUTATING_METHODS.includes(method) ? { "content-type": "application/json" } : {}),
       ...(init.headers ?? {}),
       ...(token ? { authorization: `Bearer ${token}` } : {})
     }

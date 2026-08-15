@@ -254,6 +254,7 @@ Most important env vars:
 - `HARNESS_OPERATOR_TOKEN` — bearer token guarding all mutating APIs and all read endpoints (orchestrator, eval, memory) except `/health`; the SSE event stream also accepts it as a `token` query parameter since `EventSource` cannot send headers; also used by console auth fallback flow
 - `HOST` — bind address for each API service (default `127.0.0.1`; set explicitly, e.g. `0.0.0.0`, to expose a service beyond the machine)
 - `CORS_ALLOWED_ORIGINS` — comma-separated origin allowlist for cross-origin API access (default `http://localhost:5173,http://127.0.0.1:5173`, the console dev origins; the console normally uses the Vite proxy and needs no CORS)
+- State-changing requests (`POST`/`PUT`/`PATCH`/`DELETE`) must send `content-type: application/json` on every API, including bodiless action posts; anything else gets `415`. This forces a CORS preflight for cross-origin callers, so a page the operator visits cannot drive the control plane from their browser when no operator token is set.
 - `SSE_HEARTBEAT_MS` — keep-alive comment cadence on `GET /api/events/stream` (default 25000, 0 disables)
 - `SSE_MAX_SUBSCRIBERS` — cap on concurrent `GET /api/events/stream` subscribers; further connections get `503` until a slot frees (default 64, 0 disables)
 - `MAX_REQUEST_BODY_BYTES` — reject requests declaring a larger `Content-Length` with `413` on every API (default 2097152, 0 disables)

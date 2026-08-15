@@ -158,12 +158,12 @@ describe("orchestrator-api", () => {
     });
     const mission = await createMission.json() as { mission_id: string };
 
-    const firstStart = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const firstStart = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } });
     expect(firstStart.status).toBe(201);
     const firstRun = await firstStart.json() as { run_id: string };
 
     // Starting again while the run is live would fork a second concurrent run.
-    const secondStart = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const secondStart = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } });
     expect(secondStart.status).toBe(409);
 
     // Fail the live run via a rejected worker execution, then a restart is allowed.
@@ -173,10 +173,10 @@ describe("orchestrator-api", () => {
       }
       return jsonResponse();
     }));
-    const execute = await app.request(`/api/runs/${firstRun.run_id}/execute-current`, { method: "POST" });
+    const execute = await app.request(`/api/runs/${firstRun.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } });
     expect(execute.status).toBe(400);
 
-    const restart = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const restart = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } });
     expect(restart.status).toBe(201);
     const restartedRun = await restart.json() as { run_id: string };
     expect(restartedRun.run_id).not.toBe(firstRun.run_id);
@@ -372,10 +372,10 @@ describe("orchestrator-api", () => {
     });
     const mission = await createMission.json() as { mission_id: string };
 
-    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } });
     const run = await startRun.json() as { run_id: string };
 
-    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } });
     const payload = await execute.json() as {
       execution_result?: {
         execution_id: string;
@@ -443,10 +443,10 @@ describe("orchestrator-api", () => {
     }));
 
     const app = await loadApp(stateFile);
-    const startRun = await app.request("/api/missions/mis_legacy/start", { method: "POST" });
+    const startRun = await app.request("/api/missions/mis_legacy/start", { method: "POST", headers: { "content-type": "application/json" } });
     const run = await startRun.json() as { run_id: string };
 
-    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } });
     const payload = await execute.json() as { error?: string };
 
     expect(execute.status).toBe(400);
@@ -474,10 +474,10 @@ describe("orchestrator-api", () => {
     });
     const mission = await createMission.json() as { mission_id: string };
 
-    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } });
     const run = await startRun.json() as { run_id: string };
 
-    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } });
     const payload = await execute.json() as { error?: string; run?: { status: string } };
 
     expect(execute.status).toBe(502);
@@ -524,10 +524,10 @@ describe("orchestrator-api", () => {
     });
     const mission = await createMission.json() as { mission_id: string };
 
-    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } });
     const run = await startRun.json() as { run_id: string };
 
-    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } });
     expect(execute.status).toBe(200);
 
     const eventsResponse = await app.request("/api/events");
@@ -580,10 +580,10 @@ describe("orchestrator-api", () => {
       body: JSON.stringify({ title: "Unknown worker event", project_id: "proj_demo", workflow_id: "bugfix" })
     });
     const mission = await createMission.json() as { mission_id: string };
-    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } });
     const run = await startRun.json() as { run_id: string };
 
-    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } });
     expect(execute.status).toBe(200);
     const executePayload = await execute.json() as { run: { steps: Array<{ step_id: string; state: string }> } };
     expect(executePayload.run.steps.find((step) => step.step_id === "plan")?.state).toBe("completed");
@@ -618,10 +618,10 @@ describe("orchestrator-api", () => {
     });
     const mission = await createMission.json() as { mission_id: string };
 
-    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } });
     const run = await startRun.json() as { run_id: string };
 
-    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } });
     const payload = await execute.json() as { run: { status: string; steps: Array<{ step_id: string; notes?: string; state?: string }> } };
 
     expect(execute.status).toBe(400);
@@ -674,7 +674,7 @@ describe("orchestrator-api", () => {
     }, null, 2), "utf8");
 
     const app = await loadApp(stateFile);
-    const response = await app.request("/api/runs/run_demo/steps/deploy/complete", { method: "POST" });
+    const response = await app.request("/api/runs/run_demo/steps/deploy/complete", { method: "POST", headers: { "content-type": "application/json" } });
     const payload = await response.json() as {
       run: { status: string; approval_id?: string; steps: Array<{ step_id: string; state: string; approval_id?: string }> };
       approval: { approval_id: string; status: string };
@@ -737,7 +737,7 @@ describe("orchestrator-api", () => {
     }, null, 2), "utf8");
 
     const app = await loadApp(stateFile);
-    const response = await app.request("/api/runs/run_demo/steps/deploy/complete", { method: "POST" });
+    const response = await app.request("/api/runs/run_demo/steps/deploy/complete", { method: "POST", headers: { "content-type": "application/json" } });
     expect(response.status).toBe(409);
     const payload = await response.json() as { error: string };
     expect(payload.error).toMatch(/awaiting_approval/);
@@ -798,7 +798,7 @@ describe("orchestrator-api", () => {
     }, null, 2), "utf8");
 
     const app = await loadApp(stateFile);
-    const response = await app.request("/api/runs/run_demo/steps/plan/complete", { method: "POST" });
+    const response = await app.request("/api/runs/run_demo/steps/plan/complete", { method: "POST", headers: { "content-type": "application/json" } });
     expect(response.status).toBe(409);
 
     // No approval minted, mission still cancelled.
@@ -1676,7 +1676,7 @@ describe("orchestrator-api", () => {
     }, null, 2), "utf8");
 
     const app = await loadApp(stateFile);
-    const response = await app.request("/api/runs/run_demo/interrupt-step", { method: "POST" });
+    const response = await app.request("/api/runs/run_demo/interrupt-step", { method: "POST", headers: { "content-type": "application/json" } });
     const payload = await response.json() as { run: { status: string; steps: Array<{ state: string; notes?: string }> }; mission: { status: string } };
 
     expect(response.status).toBe(200);
@@ -1697,7 +1697,7 @@ describe("orchestrator-api", () => {
     }, null, 2), "utf8");
 
     const app = await loadApp(stateFile);
-    const response = await app.request("/api/runs/run_demo/resume-step", { method: "POST" });
+    const response = await app.request("/api/runs/run_demo/resume-step", { method: "POST", headers: { "content-type": "application/json" } });
     const payload = await response.json() as { run: { status: string; steps: Array<{ state: string; notes?: string }> }; mission: { status: string } };
 
     expect(response.status).toBe(200);
@@ -1718,7 +1718,7 @@ describe("orchestrator-api", () => {
     }, null, 2), "utf8");
 
     const app = await loadApp(stateFile);
-    const response = await app.request("/api/runs/run_demo/retry-step", { method: "POST" });
+    const response = await app.request("/api/runs/run_demo/retry-step", { method: "POST", headers: { "content-type": "application/json" } });
     const payload = await response.json() as { run: { status: string; steps: Array<{ state: string; notes?: string; execution_id?: string }> }; mission: { status: string } };
 
     expect(response.status).toBe(200);
@@ -1744,7 +1744,7 @@ describe("orchestrator-api", () => {
     }, null, 2), "utf8");
 
     const app = await loadApp(stateFile);
-    const response = await app.request("/api/runs/run_demo/cancel", { method: "POST" });
+    const response = await app.request("/api/runs/run_demo/cancel", { method: "POST", headers: { "content-type": "application/json" } });
     const payload = await response.json() as { run: { status: string; steps: Array<{ state: string }> }; mission: { status: string }; approval?: { status: string; resolved_by?: string } };
 
     expect(response.status).toBe(200);
@@ -1988,10 +1988,10 @@ describe("orchestrator-api", () => {
       body: JSON.stringify({ title: "Eval success", project_id: "proj_demo", workflow_id: "bugfix" })
     });
     const mission = await createMission.json() as { mission_id: string };
-    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } });
     const run = await startRun.json() as { run_id: string };
 
-    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } });
     expect(execute.status).toBe(400);
 
     const eventsResponse = await app.request("/api/events");
@@ -2033,10 +2033,10 @@ describe("orchestrator-api", () => {
       body: JSON.stringify({ title: "Eval failure", project_id: "proj_demo", workflow_id: "bugfix" })
     });
     const mission = await createMission.json() as { mission_id: string };
-    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } });
     const run = await startRun.json() as { run_id: string };
 
-    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } });
     expect(execute.status).toBe(400);
 
     const eventsResponse = await app.request("/api/events");
@@ -2078,7 +2078,7 @@ describe("orchestrator-api", () => {
     }, null, 2), "utf8");
 
     const app = await loadApp(stateFile);
-    const response = await app.request("/api/maintenance/sweep-orphans", { method: "POST" });
+    const response = await app.request("/api/maintenance/sweep-orphans", { method: "POST", headers: { "content-type": "application/json" } });
     const payload = await response.json() as { removed_run_ids: string[]; skipped_run_ids: string[]; removed_count: number };
 
     expect(response.status).toBe(200);
@@ -2119,7 +2119,7 @@ describe("orchestrator-api", () => {
     writeFileSync(stateFile, JSON.stringify({ missions: [], runs: [], approvals: [], events: [], audit: [] }, null, 2), "utf8");
 
     const app = await loadApp(stateFile);
-    const response = await app.request("/api/maintenance/sweep-orphans", { method: "POST" });
+    const response = await app.request("/api/maintenance/sweep-orphans", { method: "POST", headers: { "content-type": "application/json" } });
     const payload = await response.json() as { removed_run_ids: string[]; failed_run_ids: Array<{ run_id: string; error: string }>; removed_count: number; failed_count: number };
 
     expect(response.status).toBe(200);
@@ -2152,7 +2152,7 @@ describe("orchestrator-api", () => {
     }, null, 2), "utf8");
 
     const app = await loadApp(stateFile);
-    const response = await app.request("/api/maintenance/sweep-orphans", { method: "POST" });
+    const response = await app.request("/api/maintenance/sweep-orphans", { method: "POST", headers: { "content-type": "application/json" } });
     const payload = await response.json() as { removed_run_ids: string[]; skipped_run_ids: string[]; removed_count: number };
 
     expect(response.status).toBe(200);
@@ -2174,6 +2174,38 @@ describe("orchestrator-api", () => {
     const { value } = await reader.read();
     expect(new TextDecoder().decode(value)).toContain(": keep-alive");
     await reader.cancel();
+  });
+
+  it("rejects state-changing requests that do not declare a JSON content-type", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const app = await loadApp();
+    // What a cross-origin HTML form post looks like: a "simple" content type
+    // that never triggers a CORS preflight, carrying a JSON body that
+    // c.req.json() would otherwise happily parse.
+    const formPost = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: JSON.stringify({ title: "csrf", project_id: "proj_demo" })
+    });
+    expect(formPost.status).toBe(415);
+    expect(await formPost.json()).toEqual({ error: "content-type must be application/json" });
+
+    // A bodiless action POST is equally reachable from a cross-origin form,
+    // so it must carry the header too.
+    const bodiless = await app.request("/api/missions/mis_nope/start", { method: "POST" });
+    expect(bodiless.status).toBe(415);
+
+    // Charset parameters are still acceptable.
+    const withCharset = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify({ title: "ok", project_id: "proj_demo" })
+    });
+    expect(withCharset.status).toBe(201);
+
+    // Reads are unaffected.
+    expect((await app.request("/api/missions")).status).toBe(200);
   });
 
   it("rejects request bodies larger than the configured limit with 413", async () => {
@@ -2442,12 +2474,12 @@ describe("orchestrator-api", () => {
       body: JSON.stringify({ title: "Concurrent dispatch", project_id: "proj_demo", workflow_id: "bugfix" })
     });
     const mission = await createMission.json() as { mission_id: string };
-    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } });
     const run = await startRun.json() as { run_id: string };
 
     const [first, second] = await Promise.all([
-      app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" }),
-      app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" })
+      app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } }),
+      app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } })
     ]);
 
     expect([first.status, second.status].sort((a, b) => a - b)).toEqual([200, 409]);
@@ -2482,12 +2514,12 @@ describe("orchestrator-api", () => {
       body: JSON.stringify({ title: "Abort in-flight execution", project_id: "proj_demo", workflow_id: "bugfix" })
     });
     const mission = await createMission.json() as { mission_id: string };
-    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } });
     const run = await startRun.json() as { run_id: string };
 
-    const executePromise = app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    const executePromise = app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } });
     await new Promise((resolve) => setTimeout(resolve, 10));
-    const interrupt = await app.request(`/api/runs/${run.run_id}/interrupt-step`, { method: "POST" });
+    const interrupt = await app.request(`/api/runs/${run.run_id}/interrupt-step`, { method: "POST", headers: { "content-type": "application/json" } });
     expect(interrupt.status).toBe(200);
 
     // The interrupt must reach the worker's abort endpoint with the
@@ -2517,12 +2549,12 @@ describe("orchestrator-api", () => {
       body: JSON.stringify({ title: "No abort without execution", project_id: "proj_demo", workflow_id: "bugfix" })
     });
     const mission = await createMission.json() as { mission_id: string };
-    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } });
     const run = await startRun.json() as { run_id: string };
 
     // The step is running (started at mission start) but was never
     // dispatched, so it has no execution id to abort.
-    const interrupt = await app.request(`/api/runs/${run.run_id}/interrupt-step`, { method: "POST" });
+    const interrupt = await app.request(`/api/runs/${run.run_id}/interrupt-step`, { method: "POST", headers: { "content-type": "application/json" } });
     expect(interrupt.status).toBe(200);
     expect(abortCalls).toHaveLength(0);
   });
@@ -2547,13 +2579,13 @@ describe("orchestrator-api", () => {
       body: JSON.stringify({ title: "Interrupt mid-dispatch", project_id: "proj_demo", workflow_id: "bugfix" })
     });
     const mission = await createMission.json() as { mission_id: string };
-    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } });
     const run = await startRun.json() as { run_id: string };
 
-    const executePromise = app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    const executePromise = app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } });
     // Let the dispatch reach the in-flight worker call before interrupting.
     await new Promise((resolve) => setTimeout(resolve, 10));
-    const interrupt = await app.request(`/api/runs/${run.run_id}/interrupt-step`, { method: "POST" });
+    const interrupt = await app.request(`/api/runs/${run.run_id}/interrupt-step`, { method: "POST", headers: { "content-type": "application/json" } });
     expect(interrupt.status).toBe(200);
 
     releaseWorker?.();
@@ -2609,20 +2641,20 @@ describe("orchestrator-api", () => {
       body: JSON.stringify({ title: "Fresh id after discard", project_id: "proj_demo", workflow_id: "bugfix" })
     });
     const mission = await createMission.json() as { mission_id: string };
-    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } });
     const run = await startRun.json() as { run_id: string };
 
-    const executePromise = app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    const executePromise = app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } });
     await new Promise((resolve) => setTimeout(resolve, 10));
-    await app.request(`/api/runs/${run.run_id}/interrupt-step`, { method: "POST" });
+    await app.request(`/api/runs/${run.run_id}/interrupt-step`, { method: "POST", headers: { "content-type": "application/json" } });
     releaseWorker?.();
     const discarded = await executePromise;
     expect(discarded.status).toBe(409);
 
-    const resume = await app.request(`/api/runs/${run.run_id}/resume-step`, { method: "POST" });
+    const resume = await app.request(`/api/runs/${run.run_id}/resume-step`, { method: "POST", headers: { "content-type": "application/json" } });
     expect(resume.status).toBe(200);
 
-    const second = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    const second = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } });
     expect(second.status).toBe(200);
 
     // The discarded execution's events were already recorded; reusing its id
@@ -2656,12 +2688,12 @@ describe("orchestrator-api", () => {
       body: JSON.stringify({ title: "Cancel mid-dispatch", project_id: "proj_demo", workflow_id: "bugfix" })
     });
     const mission = await createMission.json() as { mission_id: string };
-    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } });
     const run = await startRun.json() as { run_id: string };
 
-    const executePromise = app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    const executePromise = app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } });
     await new Promise((resolve) => setTimeout(resolve, 10));
-    const cancel = await app.request(`/api/runs/${run.run_id}/cancel-step`, { method: "POST" });
+    const cancel = await app.request(`/api/runs/${run.run_id}/cancel-step`, { method: "POST", headers: { "content-type": "application/json" } });
     expect(cancel.status).toBe(200);
 
     releaseWorker?.();
@@ -2758,10 +2790,10 @@ describe("orchestrator-api", () => {
       body: JSON.stringify({ title: "Attribution", project_id: "proj_alpha", workflow_id: "bugfix" })
     });
     const mission = await createMission.json() as { mission_id: string };
-    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST" });
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } });
     const run = await startRun.json() as { run_id: string };
 
-    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST" });
+    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } });
     expect(execute.status).toBe(200);
 
     const writebackCall = fetchMock.mock.calls.find((call) => String(call[0]).includes("/api/memory/tasks/close"));
@@ -2782,7 +2814,7 @@ describe("orchestrator-api", () => {
     }, null, 2), "utf8");
 
     const app = await loadApp(stateFile);
-    const response = await app.request("/api/runs/run_demo/retry-step", { method: "POST" });
+    const response = await app.request("/api/runs/run_demo/retry-step", { method: "POST", headers: { "content-type": "application/json" } });
     const payload = await response.json() as { run: { status: string }; approval?: { status: string; resolved_by?: string } };
 
     expect(response.status).toBe(200);
