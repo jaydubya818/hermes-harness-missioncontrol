@@ -1,0 +1,104 @@
+{
+  "schema_version": "factory.work_order.v0.1",
+  "work_order_id": "wo_sellerfi_safe_copy_001",
+  "title": "Clarify SellerFi marketplace intro copy",
+  "goal": "Make a low-risk copy-only improvement to an existing SellerFi UI surface.",
+  "problem_statement": "The existing intro copy does not make the seller's next action obvious enough.",
+  "desired_outcome": "A seller can understand the next action without changing product behavior.",
+  "repository": {
+    "name": "SellerFi",
+    "path": "/Users/jaywest/projects/SellerFi",
+    "remote": "https://github.com/jaydubya818/SellerFi.git",
+    "default_branch": "main"
+  },
+  "base_ref": "main",
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "statement": "The copy change is limited to existing UI/copy files and does not change auth, payment, Prisma, or deployment behavior.",
+      "verification_method": "static_analysis",
+      "evidence_required": true,
+      "expected_evidence": ["changed-files", "restricted-path-verifier"]
+    },
+    {
+      "id": "AC-2",
+      "statement": "The changed page or component still type-checks and passes lint.",
+      "verification_method": "typecheck",
+      "evidence_required": true,
+      "expected_evidence": ["npm-run-type-check", "npm-run-lint"]
+    }
+  ],
+  "allowed_paths": ["app/**", "components/**", "docs/**", "__tests__/**", "tests/**"],
+  "restricted_paths": ["prisma/**", "lib/auth/**", "lib/stripe/**", ".env*", ".github/workflows/**", "vercel.json"],
+  "risk_classification": {
+    "level": "low",
+    "domains": ["copy", "ui"],
+    "rationale": "Copy-only UI work is reversible by git revert and remains human-approved before merge.",
+    "reversible": true,
+    "requires_human_approval": true
+  },
+  "required_human_approvals": ["merge"],
+  "worker_profile": "sellerfi-safe-product-change",
+  "max_attempts": 2,
+  "max_runtime_seconds": 1800,
+  "max_cost_usd": 2,
+  "network_policy": "restricted",
+  "required_checks": ["restricted-paths", "lint", "type-check", "independent-review"],
+  "expected_artifacts": ["implementation-plan", "patch-diff", "artifact-manifest", "verification-receipt"],
+  "source_of_truths": [
+    {
+      "kind": "task",
+      "system": "missioncontrol",
+      "uri": "missioncontrol://work-orders/wo_sellerfi_safe_copy_001",
+      "writeback_required": true,
+      "verification_required": true
+    },
+    {
+      "kind": "code",
+      "system": "github",
+      "uri": "https://github.com/jaydubya818/SellerFi",
+      "writeback_required": true,
+      "verification_required": true
+    },
+    {
+      "kind": "review",
+      "system": "github",
+      "uri": "https://github.com/jaydubya818/SellerFi/pulls",
+      "writeback_required": true,
+      "verification_required": true
+    },
+    {
+      "kind": "execution_state",
+      "system": "missioncontrol",
+      "uri": "missioncontrol://runs/run_sellerfi_safe_copy_001",
+      "writeback_required": true,
+      "verification_required": true
+    },
+    {
+      "kind": "artifacts",
+      "system": "missioncontrol",
+      "uri": "missioncontrol://artifacts/run_sellerfi_safe_copy_001",
+      "writeback_required": true,
+      "verification_required": true
+    },
+    {
+      "kind": "learning",
+      "system": "agentic-kb",
+      "uri": "file:///Users/jaywest/Agentic-KB/wiki",
+      "writeback_required": false,
+      "verification_required": true
+    },
+    {
+      "kind": "final_delivery",
+      "system": "github",
+      "uri": "https://github.com/jaydubya818/SellerFi/pulls",
+      "writeback_required": true,
+      "verification_required": true
+    }
+  ],
+  "delivery_target": "github_pull_request",
+  "auto_merge_eligible": false,
+  "initiator": "hermes",
+  "created_at": "2026-07-10T18:00:00Z",
+  "amendments": []
+}

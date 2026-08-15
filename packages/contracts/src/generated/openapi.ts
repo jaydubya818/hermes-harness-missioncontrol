@@ -20,7 +20,213 @@ export interface components {
         /** @enum {string} */
         FinalOutcome: "success" | "partial" | "blocked" | "failed" | "cancelled";
         /** @enum {string} */
-        EventSource: "hermes" | "missioncontrol";
+        EventSource: "hermes" | "missioncontrol" | "pi" | "worker" | "github" | "verifier";
+        /** @enum {string} */
+        RiskLevel: "low" | "medium" | "high" | "critical";
+        /** @enum {string} */
+        RiskDomain: "ui" | "copy" | "form_validation" | "accessibility" | "tests" | "logging" | "admin_ui" | "seed_data" | "refactor" | "auth" | "authorization" | "payments" | "database" | "infrastructure" | "secrets" | "external_integrations" | "sensitive_data" | "legal_financial_claims" | "deployment" | "architecture";
+        /** @enum {string} */
+        VerificationMethod: "deterministic_test" | "lint" | "typecheck" | "build" | "static_analysis" | "browser_smoke" | "accessibility_check" | "independent_review" | "manual_review" | "artifact_inspection" | "other";
+        /** @enum {string} */
+        SourceOfTruthKind: "task" | "code" | "review" | "execution_state" | "artifacts" | "learning" | "final_delivery";
+        /** @enum {string} */
+        LearningTrigger: "human_review_comment" | "manual_code_change_after_agent_output" | "failed_ci" | "failed_verifier" | "repeated_worker_retries" | "human_takeover" | "missing_repository_context" | "missing_tools" | "browser_qa_failure" | "escaped_defect" | "repeated_task_pattern" | "other";
+        /** @enum {string} */
+        LearningOutputType: "new_skill" | "updated_skill" | "new_deterministic_test" | "new_static_rule" | "new_verifier" | "new_policy" | "new_runbook" | "new_repository_instruction" | "new_agentic_kb_pattern" | "accepted_exception" | "no_action_with_reason";
+        RiskClassification: {
+            level: components["schemas"]["RiskLevel"];
+            domains: components["schemas"]["RiskDomain"][];
+            rationale: string;
+            reversible?: boolean;
+            requires_human_approval?: boolean;
+        };
+        AcceptanceCriterion: {
+            id: string;
+            statement: string;
+            verification_method: components["schemas"]["VerificationMethod"];
+            evidence_required?: boolean;
+            expected_evidence?: string[];
+        };
+        SourceOfTruth: {
+            kind: components["schemas"]["SourceOfTruthKind"];
+            system: string;
+            uri: string;
+            writeback_required: boolean;
+            verification_required: boolean;
+            metadata?: {
+                [key: string]: unknown;
+            };
+        };
+        WorkOrderAmendment: {
+            amendment_id: string;
+            /** Format: date-time */
+            amended_at: string;
+            amended_by: string;
+            reason: string;
+            changes: {
+                [key: string]: unknown;
+            };
+        };
+        WorkOrderRepository: {
+            name: string;
+            path: string;
+            remote?: string;
+            default_branch?: string;
+        };
+        WorkOrder: {
+            schema_version: string;
+            work_order_id: string;
+            title: string;
+            goal: string;
+            problem_statement: string;
+            desired_outcome: string;
+            repository: components["schemas"]["WorkOrderRepository"];
+            base_ref: string;
+            acceptance_criteria: components["schemas"]["AcceptanceCriterion"][];
+            allowed_paths: string[];
+            restricted_paths: string[];
+            risk_classification: components["schemas"]["RiskClassification"];
+            required_human_approvals: string[];
+            worker_profile: string;
+            max_attempts: number;
+            max_runtime_seconds: number;
+            max_cost_usd: number;
+            /** @enum {string} */
+            network_policy: "none" | "restricted" | "approved_domains" | "unrestricted";
+            required_checks: string[];
+            expected_artifacts: string[];
+            source_of_truths: components["schemas"]["SourceOfTruth"][];
+            delivery_target: string;
+            auto_merge_eligible: boolean;
+            initiator: string;
+            /** Format: date-time */
+            created_at: string;
+            amendments: components["schemas"]["WorkOrderAmendment"][];
+        };
+        CheckResult: {
+            check_id: string;
+            /** @enum {string} */
+            status: "passed" | "failed" | "skipped" | "inconclusive";
+            summary?: string;
+            evidence_refs: string[];
+        };
+        AcceptanceVerificationResult: {
+            acceptance_criterion_id: string;
+            /** @enum {string} */
+            status: "verified" | "failed" | "unverified" | "not_applicable";
+            method?: components["schemas"]["VerificationMethod"];
+            evidence_refs: string[];
+            notes?: string;
+        };
+        VerificationReceipt: {
+            receipt_id: string;
+            mission_id: string;
+            run_id: string;
+            work_order_id?: string;
+            /** Format: date-time */
+            generated_at: string;
+            verifier_id?: string;
+            /** @enum {string} */
+            overall_status: "passed" | "failed" | "inconclusive";
+            check_results: components["schemas"]["CheckResult"][];
+            acceptance_results: components["schemas"]["AcceptanceVerificationResult"][];
+            evidence_refs: string[];
+            limitations?: string[];
+        };
+        ArtifactManifest: {
+            manifest_id: string;
+            mission_id: string;
+            run_id: string;
+            execution_id?: string;
+            work_order_id?: string;
+            /** Format: date-time */
+            generated_at: string;
+            produced_by: string;
+            artifacts: components["schemas"]["ArtifactRef"][];
+            trace_refs?: string[];
+            /** @enum {string} */
+            completeness?: "complete" | "partial" | "missing_required_artifacts";
+        };
+        OutcomeMetrics: {
+            mission_id: string;
+            run_id: string;
+            work_order_id?: string;
+            /** Format: date-time */
+            generated_at: string;
+            primary_outcome: string;
+            total_cycle_time_ms?: number;
+            queue_time_ms?: number;
+            execution_time_ms?: number;
+            verification_time_ms?: number;
+            human_approval_time_ms?: number;
+            worker_attempts?: number;
+            worker_retries?: number;
+            human_review_comment_count?: number;
+            human_takeover_required?: boolean;
+            checks_passed?: number;
+            checks_failed?: number;
+            verifier_failures?: number;
+            acceptance_criteria_verified?: number;
+            acceptance_criteria_total?: number;
+            cost_by_model_or_worker?: {
+                [key: string]: number;
+            };
+            pull_request_created?: boolean;
+            pull_request_merged?: boolean;
+            reverted?: boolean;
+            escaped_defect?: boolean;
+        };
+        LearningCandidate: {
+            learning_candidate_id: string;
+            mission_id: string;
+            run_id: string;
+            work_order_id?: string;
+            trigger: components["schemas"]["LearningTrigger"];
+            observation: string;
+            category: string;
+            evidence_refs: string[];
+            frequency?: number;
+            /** @enum {string} */
+            impact: "low" | "medium" | "high" | "critical";
+            /** @enum {string} */
+            confidence: "low" | "medium" | "high";
+            recommended_action: string;
+            target: string;
+            proposed_output_type: components["schemas"]["LearningOutputType"];
+            /** @enum {string} */
+            status?: "proposed" | "accepted" | "rejected" | "implemented" | "no_action";
+            /** Format: date-time */
+            created_at: string;
+        };
+        ApprovalDecision: {
+            approval_id: string;
+            /** @enum {string} */
+            decision: "approved" | "rejected";
+            /** Format: date-time */
+            resolved_at: string;
+            resolved_by?: string;
+            actor?: string;
+            decision_rationale?: string;
+            evidence_refs?: string[];
+        };
+        FactoryEvent: {
+            /** @enum {string} */
+            schema_version: "v1";
+            event_id: string;
+            /** Format: date-time */
+            timestamp: string;
+            sequence: number;
+            source: components["schemas"]["EventSource"];
+            type: string;
+            mission_id: string;
+            run_id?: string;
+            step_id?: string;
+            execution_id?: string;
+            actor?: string;
+            payload: {
+                [key: string]: unknown;
+            };
+        };
         Mission: {
             mission_id: string;
             title: string;
@@ -44,6 +250,10 @@ export interface components {
             mission_id: string;
             status: components["schemas"]["RunState"];
             current_step_id?: string;
+            work_order_id?: string;
+            source_of_truths?: components["schemas"]["SourceOfTruth"][];
+            outcome_metrics?: components["schemas"]["OutcomeMetrics"];
+            learning_candidates?: components["schemas"]["LearningCandidate"][];
             /** Format: date-time */
             started_at?: string;
             /** Format: date-time */
@@ -125,6 +335,8 @@ export interface components {
             output_dir: string;
             /** @enum {string} */
             environment_classification: "sandbox" | "staging" | "production" | "local";
+            work_order?: components["schemas"]["WorkOrder"];
+            source_of_truths?: components["schemas"]["SourceOfTruth"][];
         };
         StepExecutionRequest: {
             mission_id: string;
@@ -149,6 +361,10 @@ export interface components {
             approval_needed: boolean;
             recommended_next_step?: components["schemas"]["StepKind"];
             confidence?: number;
+            artifact_manifest?: components["schemas"]["ArtifactManifest"];
+            verification_receipt?: components["schemas"]["VerificationReceipt"];
+            outcome_metrics?: components["schemas"]["OutcomeMetrics"];
+            learning_candidates?: components["schemas"]["LearningCandidate"][];
             command_refs?: {
                 kind: string;
                 label: string;
@@ -164,7 +380,7 @@ export interface components {
             sequence: number;
             source: components["schemas"]["EventSource"];
             /** @enum {string} */
-            type: "mission.created" | "mission.updated" | "mission.paused" | "mission.running" | "mission.cancelled" | "mission.completed" | "run.started" | "run.running" | "run.paused" | "run.completed" | "run.failed" | "run.cancelled" | "step.started" | "step.progress" | "step.blocked" | "step.paused" | "step.resumed" | "step.completed" | "step.failed" | "step.cancelled" | "step.retried" | "tool.started" | "tool.completed" | "tool.failed" | "artifact.created" | "approval.requested" | "approval.resolved" | "eval.started" | "eval.completed" | "eval.failed" | "policy.violation" | "execution.timeout" | "execution.budget_exceeded";
+            type: "mission.created" | "mission.updated" | "mission.paused" | "mission.running" | "mission.cancelled" | "mission.completed" | "run.started" | "run.running" | "run.paused" | "run.completed" | "run.failed" | "run.cancelled" | "step.started" | "step.progress" | "step.blocked" | "step.paused" | "step.resumed" | "step.completed" | "step.failed" | "step.cancelled" | "step.retried" | "tool.started" | "tool.completed" | "tool.failed" | "artifact.created" | "approval.requested" | "approval.resolved" | "eval.started" | "eval.completed" | "eval.failed" | "policy.violation" | "policy.evaluated" | "work_order.created" | "work_order.amended" | "factory.eligibility_evaluated" | "verification.started" | "verification.completed" | "verification.failed" | "outcome_metrics.recorded" | "learning_candidate.created" | "github.pr_created" | "github.pr_updated" | "github.pr_merged" | "manual.takeover_requested" | "manual.takeover_completed" | "execution.timeout" | "execution.budget_exceeded";
             mission_id: string;
             run_id?: string;
             step_id?: string;
