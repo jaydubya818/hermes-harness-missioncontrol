@@ -51,6 +51,7 @@ describe("orchestrator-api", () => {
     delete process.env.ALLOWED_REPO_ROOT;
     delete process.env.HARNESS_OPERATOR_TOKEN;
     delete process.env.SSE_HEARTBEAT_MS;
+    delete process.env.SSE_MAX_SUBSCRIBERS;
     process.env.VITEST = "1";
   });
 
@@ -2172,6 +2173,29 @@ describe("orchestrator-api", () => {
     const { value } = await reader.read();
     expect(new TextDecoder().decode(value)).toContain(": keep-alive");
     await reader.cancel();
+  });
+
+  it("caps concurrent SSE subscribers and frees a slot when a stream closes", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+    process.env.SSE_MAX_SUBSCRIBERS = "2";
+
+    const app = await loadApp();
+    const first = await app.request("/api/events/stream?last=0");
+    const second = await app.request("/api/events/stream?last=0");
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+
+    const rejected = await app.request("/api/events/stream?last=0");
+    expect(rejected.status).toBe(503);
+    expect(await rejected.json()).toEqual({ error: "too many concurrent event streams" });
+
+    // Closing a stream releases its slot.
+    await first.body!.cancel();
+    const readmitted = await app.request("/api/events/stream?last=0");
+    expect(readmitted.status).toBe(200);
+
+    await second.body!.cancel();
+    await readmitted.body!.cancel();
   });
 
   it("streams recent events over SSE with filters", async () => {

@@ -255,6 +255,7 @@ Most important env vars:
 - `HOST` — bind address for each API service (default `127.0.0.1`; set explicitly, e.g. `0.0.0.0`, to expose a service beyond the machine)
 - `CORS_ALLOWED_ORIGINS` — comma-separated origin allowlist for cross-origin API access (default `http://localhost:5173,http://127.0.0.1:5173`, the console dev origins; the console normally uses the Vite proxy and needs no CORS)
 - `SSE_HEARTBEAT_MS` — keep-alive comment cadence on `GET /api/events/stream` (default 25000, 0 disables)
+- `SSE_MAX_SUBSCRIBERS` — cap on concurrent `GET /api/events/stream` subscribers; further connections get `503` until a slot frees (default 64, 0 disables)
 - `VITE_OPERATOR_TOKEN` — console-side default token for local dev
 - `HARNESS_VAULT_ROOT` — memory-api vault root; default `vault/agentic-kb`
 - `ORCHESTRATOR_STATE_FILE` — orchestrator persistence file

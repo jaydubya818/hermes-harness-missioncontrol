@@ -22,6 +22,12 @@ const orphanSweepIntervalMs = Number(process.env.ORPHAN_SWEEP_INTERVAL_MS ?? "0"
 // SSE comment frames keep idle streams alive through proxies/load balancers
 // that drop quiet connections. Set to 0 to disable.
 const sseHeartbeatMs = Number(process.env.SSE_HEARTBEAT_MS ?? "25000");
+// Every open stream pins a ReadableStream controller plus a heartbeat timer
+// and is fanned out to on every recorded event. Nothing closed the door on
+// how many a client could open, so a loop of EventSource connections (or a
+// client that reconnects without closing) grows the subscriber map without
+// bound and multiplies per-event work. Set to 0 to disable the cap.
+const sseMaxSubscribers = Number(process.env.SSE_MAX_SUBSCRIBERS ?? "64");
 const allowedRepoRoot = resolve(process.env.ALLOWED_REPO_ROOT ?? "/Users/jaywest/projects");
 const operatorToken = process.env.HARNESS_OPERATOR_TOKEN;
 // Sidecar calls run inside lifecycle handlers; without a bound, one
@@ -1360,6 +1366,9 @@ app.get("/api/events", async (c) => { const authError = requireOperator(c); if (
 app.get("/api/events/stream", async (c) => {
   const authError = requireOperatorForStream(c);
   if (authError) return authError;
+  if (Number.isFinite(sseMaxSubscribers) && sseMaxSubscribers > 0 && eventSubscribers.size >= sseMaxSubscribers) {
+    return c.json({ error: "too many concurrent event streams" }, 503);
+  }
   await ensureLoaded();
   const filters = normalizeSseFilters(c.req.query());
   const lastEventId = c.req.header("last-event-id") ?? c.req.query("last_event_id");
