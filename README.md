@@ -258,7 +258,7 @@ Most important env vars:
 - `SSE_HEARTBEAT_MS` — keep-alive comment cadence on `GET /api/events/stream` (default 25000, 0 disables)
 - `SSE_MAX_SUBSCRIBERS` — cap on concurrent `GET /api/events/stream` subscribers; further connections get `503` until a slot frees (default 64, 0 disables)
 - `MAX_REQUEST_BODY_BYTES` — reject requests declaring a larger `Content-Length` with `413` on every API (default 2097152, 0 disables)
-- `VITE_OPERATOR_TOKEN` — console-side default token for local dev
+- `VITE_OPERATOR_TOKEN` — console-side default token for local dev only. Vite inlines every `VITE_*` variable into the built bundle in clear text, so `vite build` refuses to run while it is set; enter the token in the console's Settings tab instead (it is kept in `localStorage`). Set `ALLOW_OPERATOR_TOKEN_IN_BUNDLE=1` to override.
 - `HARNESS_VAULT_ROOT` — memory-api vault root; default `vault/agentic-kb`
 - `ORCHESTRATOR_STATE_FILE` — orchestrator persistence file
 - `EVAL_STATE_FILE` — eval persistence file
