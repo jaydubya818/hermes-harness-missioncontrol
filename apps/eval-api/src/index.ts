@@ -17,6 +17,27 @@ const operatorToken = process.env.HARNESS_OPERATOR_TOKEN;
 const corsOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? "http://localhost:5173,http://127.0.0.1:5173")
   .split(",").map((origin) => origin.trim()).filter(Boolean);
 app.use("*", cors({ origin: corsOrigins }));
+
+// Request bodies land in memory and, for artifacts and markdown writes, on
+// disk. c.req.json() buffers whatever arrives, so a single oversized POST
+// could balloon process memory (and the persisted state file) unchecked.
+// Reject a body that declares more than the limit before any handler reads
+// it. Set MAX_REQUEST_BODY_BYTES to 0 to disable. This trusts Content-Length:
+// a chunked request that omits the header still reaches json(), so it bounds
+// honest clients and accidents rather than a determined attacker that has
+// already cleared the operator-token boundary.
+const maxRequestBodyBytes = Number(process.env.MAX_REQUEST_BODY_BYTES ?? String(2 * 1024 * 1024));
+
+app.use("*", async (c, next) => {
+  if (Number.isFinite(maxRequestBodyBytes) && maxRequestBodyBytes > 0) {
+    const declared = Number(c.req.header("content-length"));
+    if (Number.isFinite(declared) && declared > maxRequestBodyBytes) {
+      return c.json({ error: "request body too large" }, 413);
+    }
+  }
+  await next();
+});
+
 const OPTIONAL_NUMERIC_FIELDS = ["approval_count", "artifact_count", "duration_ms", "confidence", "efficiency_score", "risk_score"] as const;
 const records: EvalRecord[] = [];
 let initialized = false;

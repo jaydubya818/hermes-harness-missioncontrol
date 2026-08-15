@@ -52,6 +52,7 @@ describe("orchestrator-api", () => {
     delete process.env.HARNESS_OPERATOR_TOKEN;
     delete process.env.SSE_HEARTBEAT_MS;
     delete process.env.SSE_MAX_SUBSCRIBERS;
+    delete process.env.MAX_REQUEST_BODY_BYTES;
     process.env.VITEST = "1";
   });
 
@@ -2173,6 +2174,33 @@ describe("orchestrator-api", () => {
     const { value } = await reader.read();
     expect(new TextDecoder().decode(value)).toContain(": keep-alive");
     await reader.cancel();
+  });
+
+  it("rejects request bodies larger than the configured limit with 413", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+    process.env.MAX_REQUEST_BODY_BYTES = "200";
+
+    const app = await loadApp();
+    const oversized = JSON.stringify({ title: "x".repeat(500), project_id: "proj_demo" });
+    // The Request constructor does not derive content-length from a string
+    // body, so set it explicitly here. Over the wire @hono/node-server copies
+    // the header off the incoming message, which is what the guard reads.
+    const rejected = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json", "content-length": String(oversized.length) },
+      body: oversized
+    });
+    expect(rejected.status).toBe(413);
+    expect(await rejected.json()).toEqual({ error: "request body too large" });
+
+    // A body under the limit still goes through.
+    const small = JSON.stringify({ title: "small", project_id: "proj_demo" });
+    const accepted = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json", "content-length": String(small.length) },
+      body: small
+    });
+    expect(accepted.status).toBe(201);
   });
 
   it("caps concurrent SSE subscribers and frees a slot when a stream closes", async () => {
