@@ -302,6 +302,19 @@ function nextEventSequence() {
 // TypeError -- ensureLoaded runs on every request, so the service would 500
 // forever after the next restart. Coerce anything that is not a usable
 // string into one.
+// event_id is echoed verbatim into the `id:` line of every SSE frame and is
+// the key replay dedupe hangs off. Ids reach normalizeEventRecord from
+// outside the service (worker step_events, persisted state), and nothing
+// checked their shape: a CR/LF inside one let a worker inject arbitrary extra
+// frames -- forged mission.completed events, say -- into every connected
+// console, and a non-string id serialized as "[object Object]" and broke
+// dedupe. Accept only bounded, plain tokens; mint a fresh id for the rest.
+const SAFE_EVENT_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
+
+function normalizeEventId(value: unknown): string {
+  return typeof value === "string" && SAFE_EVENT_ID.test(value) ? value : makeId("evt");
+}
+
 function normalizeEventTimestamp(value: unknown, fallback: string): string {
   if (typeof value === "string" && value.trim()) return value;
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -316,7 +329,7 @@ function normalizeEventRecord(event: HarnessEvent | Record<string, unknown>) {
   const raw = event as any;
   return {
     schema_version: raw.schema_version ?? "v1",
-    event_id: raw.event_id ?? makeId("evt"),
+    event_id: normalizeEventId(raw.event_id),
     timestamp: normalizeEventTimestamp(raw.timestamp ?? raw.ts, now),
     ts: normalizeEventTimestamp(raw.ts ?? raw.timestamp, now),
     // Sequences come from external sources too (worker step_events, persisted

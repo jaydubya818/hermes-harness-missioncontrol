@@ -1409,6 +1409,53 @@ describe("orchestrator-api", () => {
     expect(payload.timeline[0]).toMatchObject({ title: "Approval resolved", occurred_at: "2026-04-11T00:02:00.000Z", run_id: "run_demo" });
   });
 
+  it("refuses worker event ids that would forge extra SSE frames", async () => {
+    // event_id lands verbatim in the SSE `id:` line, so a newline inside one
+    // used to let the worker append arbitrary frames of its own.
+    const forged = "evt_ok\nevent: mission.completed\ndata: {\"forged\":true}\n";
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/api/execute-step")) {
+        return jsonResponse({
+          body: {
+            success: true,
+            summary: "planned",
+            confidence: 0.95,
+            artifacts: [],
+            step_events: [
+              { schema_version: "v1", event_id: forged, timestamp: "2026-04-18T18:00:00Z", sequence: 1, source: "hermes", type: "step.progress", payload: { message: "thinking" } }
+            ]
+          }
+        });
+      }
+      return jsonResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await loadApp();
+    const createMission = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Forged frames", project_id: "proj_demo", workflow_id: "bugfix" })
+    });
+    const mission = await createMission.json() as { mission_id: string };
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } });
+    const run = await startRun.json() as { run_id: string };
+    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } });
+    expect(execute.status).toBe(200);
+
+    const eventsResponse = await app.request("/api/events");
+    const eventsPayload = await eventsResponse.json() as { events: Array<{ event_id?: string; type: string }> };
+    const ingested = eventsPayload.events.find((event) => event.type === "step.progress");
+    expect(ingested?.event_id).not.toBe(forged);
+    expect(ingested?.event_id).toMatch(/^evt_[A-Za-z0-9]+$/);
+
+    // The framed stream must not contain a second, worker-authored frame.
+    const stream = await app.request(`/api/events/stream?run_id=${run.run_id}&last=100`);
+    const text = await readSseEvents(stream, 1);
+    expect(text).not.toContain("\"forged\"");
+    expect(text.match(/^event: mission\.completed$/gm)).toBeNull();
+  });
+
   it("hydrates persisted events whose timestamps are not strings", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
 
