@@ -45,6 +45,13 @@ Running `pnpm -r test` on a clean checkout without building packages first fails
   input must 400, never 500. Path inputs go through the existing containment helpers
   (`safeWikiPath`, `relativeWithin`, `safeVaultPath`); never `join` user input to a root
   without one.
+- Anything crossing a service boundary is untrusted, including worker `step_events`.
+  `normalizeEventRecord` is the choke point: event ids must stay plain bounded tokens
+  (they are echoed into the SSE `id:` line), timestamps must be coerced to strings
+  (hydration sorts them with `localeCompare`), and mission/run/step/execution ids are
+  re-scoped to the dispatch. Keep new ingestion paths behind it.
+- The canonical event taxonomy lives in `packages/contracts` as `CANONICAL_EVENT_TYPES`;
+  add new types there, not in per-service copies.
 - Markdown vault files are parsed line-anchored ("- " entries, "### " candidates,
   "## " log sections); user-supplied text is inlined/escaped before it is appended.
   Keep new writers consistent with these formats.
