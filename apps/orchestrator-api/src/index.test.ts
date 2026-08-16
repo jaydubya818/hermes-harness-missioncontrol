@@ -1409,6 +1409,37 @@ describe("orchestrator-api", () => {
     expect(payload.timeline[0]).toMatchObject({ title: "Approval resolved", occurred_at: "2026-04-11T00:02:00.000Z", run_id: "run_demo" });
   });
 
+  it("hydrates persisted events whose timestamps are not strings", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-numeric-ts-"));
+    const stateFile = join(stateDir, "state.json");
+    // A worker step event with an epoch-number ts used to be persisted as-is;
+    // hydration then called localeCompare on that number and threw, so every
+    // request after the next restart 500ed.
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [],
+      runs: [],
+      approvals: [],
+      events: [
+        { event_id: "evt_string", type: "step.started", ts: "2026-04-11T00:00:00.000Z", mission_id: "mis_demo", run_id: "run_demo", payload: {} },
+        { event_id: "evt_numeric", type: "step.progress", ts: 1776124800000, mission_id: "mis_demo", run_id: "run_demo", payload: {} }
+      ],
+      audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const response = await app.request("/api/events");
+    const payload = await response.json() as { events: Array<{ event_id?: string; ts?: unknown; timestamp?: unknown }> };
+
+    expect(response.status).toBe(200);
+    const numeric = payload.events.find((event) => event.event_id === "evt_numeric");
+    expect(typeof numeric?.ts).toBe("string");
+    expect(typeof numeric?.timestamp).toBe("string");
+    expect(numeric?.ts).toBe(new Date(1776124800000).toISOString());
+    expect(payload.events.some((event) => event.event_id === "evt_string")).toBe(true);
+  });
+
   it("hydrates persisted state exactly once for concurrent first requests", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
 

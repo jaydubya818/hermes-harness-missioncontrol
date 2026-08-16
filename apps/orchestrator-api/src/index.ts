@@ -295,14 +295,30 @@ function nextEventSequence() {
   return maxEventSequence + 1;
 }
 
+// Everything downstream treats ts/timestamp as strings: hydration sorts the
+// persisted window with localeCompare, and the read models compare them
+// lexicographically. Timestamps arrive from outside too (worker step_events,
+// persisted state), and a single numeric ts made hydrateState throw a bare
+// TypeError -- ensureLoaded runs on every request, so the service would 500
+// forever after the next restart. Coerce anything that is not a usable
+// string into one.
+function normalizeEventTimestamp(value: unknown, fallback: string): string {
+  if (typeof value === "string" && value.trim()) return value;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const asDate = new Date(value);
+    if (!Number.isNaN(asDate.getTime())) return asDate.toISOString();
+  }
+  return fallback;
+}
+
 function normalizeEventRecord(event: HarnessEvent | Record<string, unknown>) {
   const now = new Date().toISOString();
   const raw = event as any;
   return {
     schema_version: raw.schema_version ?? "v1",
     event_id: raw.event_id ?? makeId("evt"),
-    timestamp: raw.timestamp ?? raw.ts ?? now,
-    ts: raw.ts ?? raw.timestamp ?? now,
+    timestamp: normalizeEventTimestamp(raw.timestamp ?? raw.ts, now),
+    ts: normalizeEventTimestamp(raw.ts ?? raw.timestamp, now),
     // Sequences come from external sources too (worker step_events, persisted
     // state). Any finite number used to pass, so one negative, fractional, or
     // absurdly large value (e.g. 1e308) permanently poisoned maxEventSequence
