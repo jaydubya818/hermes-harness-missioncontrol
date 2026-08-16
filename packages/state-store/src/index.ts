@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, rename, rm } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 export async function loadJsonFile<T>(path: string, fallback: T): Promise<T> {
@@ -20,11 +20,31 @@ export async function loadJsonFile<T>(path: string, fallback: T): Promise<T> {
 }
 
 export async function saveJsonFile<T>(path: string, value: T): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const tmpPath = join(dirname(path), `.${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
+  const dir = dirname(path);
+  await mkdir(dir, { recursive: true });
+  const tmpPath = join(dir, `.${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
   try {
-    await writeFile(tmpPath, JSON.stringify(value, null, 2), "utf8");
+    // write-then-rename is only atomic against a *reader*: without an fsync
+    // the rename can reach disk before the data does, so a crash or power
+    // loss leaves a valid-looking but truncated state file. loadJsonFile then
+    // falls back to empty state and the next save overwrites it -- the whole
+    // mission history disappears silently. Flush the contents before the
+    // rename publishes them, then flush the directory entry itself.
+    const handle = await open(tmpPath, "w");
+    try {
+      await handle.writeFile(JSON.stringify(value, null, 2), "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
     await rename(tmpPath, path);
+    const dirHandle = await open(dir, "r").catch(() => null);
+    if (dirHandle) {
+      // Directory fsync is unsupported on some platforms (notably Windows);
+      // the file contents are already durable, so a failure here is benign.
+      await dirHandle.sync().catch(() => undefined);
+      await dirHandle.close();
+    }
   } catch (error) {
     // A failed write/rename must not leave orphaned .tmp files accumulating
     // next to the state file.

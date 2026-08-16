@@ -4,6 +4,25 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadJsonFile, saveJsonFile } from "./index.js";
 
+// Records which paths saveJsonFile fsyncs. ESM namespaces are not spy-able,
+// so wrap open() at module-resolution time instead.
+const syncedTargets: string[] = [];
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    open: async (path: Parameters<typeof actual.open>[0], ...rest: unknown[]) => {
+      const handle = await (actual.open as (...args: unknown[]) => Promise<Awaited<ReturnType<typeof actual.open>>>)(path, ...rest);
+      const sync = handle.sync.bind(handle);
+      handle.sync = async () => {
+        syncedTargets.push(String(path));
+        return sync();
+      };
+      return handle;
+    },
+  };
+});
+
 describe("state-store", () => {
   it("persists json data", async () => {
     const dir = mkdtempSync(join(tmpdir(), "state-store-"));
@@ -21,6 +40,21 @@ describe("state-store", () => {
     mkdirSync(target);
 
     await expect(saveJsonFile(target, { ok: true })).rejects.toThrow();
+    expect(readdirSync(dir).filter((name) => name.endsWith(".tmp"))).toHaveLength(0);
+  });
+
+  it("flushes contents to disk before publishing the rename", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "state-store-"));
+    const file = join(dir, "state.json");
+
+    await saveJsonFile(file, { ok: true });
+
+    // The temp file must be fsynced before the rename that publishes it, and
+    // the directory entry fsynced after; otherwise a crash can leave a
+    // valid-looking but truncated state file behind.
+    expect(syncedTargets.some((target) => target.endsWith(".tmp"))).toBe(true);
+    expect(syncedTargets.indexOf(dir)).toBeGreaterThan(syncedTargets.findIndex((target) => target.endsWith(".tmp")));
+    expect(await loadJsonFile(file, { ok: false })).toEqual({ ok: true });
     expect(readdirSync(dir).filter((name) => name.endsWith(".tmp"))).toHaveLength(0);
   });
 
