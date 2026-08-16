@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  CANONICAL_EVENT_TYPES,
   StepKind,
   StepState,
   ApprovalMode,
   FinalOutcome,
+  type CanonicalEventType,
   type EventEnvelope,
   type TaskExecutionResult,
   type ApprovalRequest,
@@ -21,6 +23,18 @@ describe("contracts package exports", () => {
     expect(StepState.Running).toBe("running");
     expect(ApprovalMode.OnPolicyTrigger).toBe("on_policy_trigger");
     expect(FinalOutcome.Success).toBe("success");
+  });
+
+  it("exports the canonical event taxonomy as a runtime list", () => {
+    // The orchestrator validates incoming event types against this list and
+    // the console registers one SSE listener per entry, so it has to be a
+    // value, unique, and cover every lifecycle family.
+    expect(new Set(CANONICAL_EVENT_TYPES).size).toBe(CANONICAL_EVENT_TYPES.length);
+    for (const prefix of ["mission.", "run.", "step.", "tool.", "artifact.", "approval.", "eval.", "policy.", "execution."]) {
+      expect(CANONICAL_EVENT_TYPES.some((type) => type.startsWith(prefix))).toBe(true);
+    }
+    const asType: CanonicalEventType = "step.completed";
+    expect(CANONICAL_EVENT_TYPES).toContain(asType);
   });
 
   it("supports canonical contract shapes", () => {

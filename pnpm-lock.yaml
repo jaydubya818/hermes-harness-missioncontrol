@@ -46,6 +46,9 @@ importers:
 
   apps/harness-console:
     dependencies:
+      '@hermes-harness-with-missioncontrol/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@hermes-harness-with-missioncontrol/ui-kit':
         specifier: workspace:*
         version: link:../../packages/ui-kit

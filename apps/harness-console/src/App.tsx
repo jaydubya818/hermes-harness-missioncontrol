@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { mutate } from "swr";
+import { CANONICAL_EVENT_TYPES } from "@hermes-harness-with-missioncontrol/contracts";
 import { CapacityBar, CostCard, Panel, Sparkline, StatusRow } from "@hermes-harness-with-missioncontrol/ui-kit";
 import { CommandPalette } from "./CommandPalette.js";
 import { createTrailingThrottle, readApiResponse, withQuery } from "./api.js";
@@ -50,41 +51,10 @@ async function authJson(url: string, init: RequestInit = {}) {
 // empty states) instead of treating an error body like a read model.
 const fetcher = (url: string) => authJson(url);
 
-const LIVE_EVENT_TYPES = [
-  "mission.created",
-  "mission.updated",
-  "mission.paused",
-  "mission.running",
-  "mission.cancelled",
-  "mission.completed",
-  "run.started",
-  "run.running",
-  "run.paused",
-  "run.completed",
-  "run.failed",
-  "run.cancelled",
-  "step.started",
-  "step.progress",
-  "step.blocked",
-  "step.paused",
-  "step.resumed",
-  "step.completed",
-  "step.failed",
-  "step.cancelled",
-  "step.retried",
-  "tool.started",
-  "tool.completed",
-  "tool.failed",
-  "artifact.created",
-  "approval.requested",
-  "approval.resolved",
-  "eval.started",
-  "eval.completed",
-  "eval.failed",
-  "policy.violation",
-  "execution.timeout",
-  "execution.budget_exceeded"
-] as const;
+// One SSE listener per canonical type, straight from the contracts package:
+// a hand-maintained copy silently dropped newly added event types from the
+// live feed.
+const LIVE_EVENT_TYPES = CANONICAL_EVENT_TYPES;
 
 // Filter inputs rebuild the stream URL on every keystroke; without a debounce
 // each keystroke tears down the SSE connection, drops the buffered events, and

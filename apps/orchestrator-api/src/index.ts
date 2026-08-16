@@ -9,7 +9,7 @@ import { evaluateStepPolicy } from "@hermes-harness-with-missioncontrol/policy-e
 import { loadJsonFile, saveJsonFile } from "@hermes-harness-with-missioncontrol/state-store";
 import { makeId, type HarnessEvent } from "@hermes-harness-with-missioncontrol/shared-types";
 import { scoreRun, type EvalRecord } from "@hermes-harness-with-missioncontrol/eval-core";
-import { FinalOutcome, type ApprovalRequest, type ApprovalResult, type ArtifactRef, type ExecutionEnvelope, type StepExecutionRequest, type TaskExecutionResult } from "@hermes-harness-with-missioncontrol/contracts";
+import { CANONICAL_EVENT_TYPES, FinalOutcome, type ApprovalRequest, type ApprovalResult, type ArtifactRef, type ExecutionEnvelope, type StepExecutionRequest, type TaskExecutionResult } from "@hermes-harness-with-missioncontrol/contracts";
 
 const app = new Hono();
 const stateFile = process.env.ORCHESTRATOR_STATE_FILE ?? resolve(process.cwd(), "../../data/orchestrator-state.json");
@@ -149,41 +149,7 @@ function normalizeApproval(approval: Approval): Approval {
   };
 }
 
-const CANONICAL_EVENT_TYPES = new Set<HarnessEvent["type"]>([
-  "mission.created",
-  "mission.updated",
-  "mission.paused",
-  "mission.running",
-  "mission.cancelled",
-  "mission.completed",
-  "run.started",
-  "run.running",
-  "run.paused",
-  "run.completed",
-  "run.failed",
-  "run.cancelled",
-  "step.started",
-  "step.progress",
-  "step.paused",
-  "step.resumed",
-  "step.blocked",
-  "step.completed",
-  "step.failed",
-  "step.cancelled",
-  "step.retried",
-  "tool.started",
-  "tool.completed",
-  "tool.failed",
-  "artifact.created",
-  "approval.requested",
-  "approval.resolved",
-  "eval.started",
-  "eval.completed",
-  "eval.failed",
-  "policy.violation",
-  "execution.timeout",
-  "execution.budget_exceeded",
-] as const);
+const CANONICAL_EVENT_TYPE_SET = new Set<string>(CANONICAL_EVENT_TYPES);
 
 const LEGACY_EVENT_TYPE_MAP: Record<string, HarnessEvent["type"]> = {
   "approval.granted": "approval.resolved",
@@ -294,7 +260,7 @@ function buildStepExecutionRequest(run: WorkflowRun, step: WorkflowRun["steps"][
 function normalizeEventType(type: unknown): HarnessEvent["type"] {
   const raw = String(type ?? "").trim();
   const normalized = LEGACY_EVENT_TYPE_MAP[raw] ?? raw;
-  if (!CANONICAL_EVENT_TYPES.has(normalized as HarnessEvent["type"])) {
+  if (!CANONICAL_EVENT_TYPE_SET.has(normalized)) {
     throw new Error(`unsupported event type: ${raw}`);
   }
   return normalized as HarnessEvent["type"];
