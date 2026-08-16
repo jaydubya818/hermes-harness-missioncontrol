@@ -112,6 +112,9 @@ Lifecycle / governance:
 - mission creation rejects repo_path/workspace_root outside `ALLOWED_REPO_ROOT` with a clear 400 (dispatch still re-validates as defense in depth)
 - approval responses validate the actor field instead of 500-ing on non-strings
 - persisted state hydration is single-flight, so concurrent first requests cannot double-replay events into live streams
+- event ids from outside the service are constrained to plain bounded tokens; a newline in one used to forge extra frames in the SSE stream
+- event timestamps are coerced to strings, so a numeric `ts` from a worker (or hand-edited state) cannot break hydration and 500 every request after restart
+- worker `step_events` are re-scoped to the dispatch that produced them, so a worker cannot attribute events to another mission
 - worker results that land after an operator interrupt/cancel/retry are discarded instead of overriding the operator's decision
 - operator interrupt/cancel/retry also signal the worker to abort the in-flight execution's child commands (best-effort; the stale-dispatch guard stays authoritative)
 - cancelled runs release their worktree/branch and record an eval, matching the other terminal transitions
@@ -129,6 +132,7 @@ Operator surfaces:
 - step detail
 - artifact read model with filters/pagination
 - console drill-down and live SSE event feed
+- date-only `to=` filters on the audit/approval/artifact read models cover that whole day (`from=D&to=D` returns D's records)
 - console step/run lifecycle controls (interrupt, resume, retry, cancel step, cancel run)
 - docs browser lists wiki subdirectories separately and navigates into them
 
@@ -149,6 +153,7 @@ Worker/runtime:
 - envelope timeouts abort in-flight child commands (installs, git ops, deploy planning) instead of letting them keep mutating the worktree after the step already failed
 - workspace setup (worktree creation, dependency bootstrap) runs inside the same timeout/abort scope, so a hung bootstrap install fails the step at the envelope timeout too
 - `POST /api/abort-execution` aborts a live execution by `execution_id`; duplicate dispatches for a still-running execution id are rejected
+- concurrent executions are capped (`WORKER_MAX_CONCURRENT_EXECUTIONS`); dispatches beyond the cap get a `429` instead of forking unbounded worktrees and child processes
 
 Eval / observability:
 - eval record persistence and summaries (including `total_approvals`)
@@ -161,6 +166,7 @@ Eval / observability:
 - close-task writebacks validate outcome/step_id/note collections and keep line-anchored wiki fields single-line
 - memory search anchors result snippets at the first content match
 - atomic state/wiki writers clean up their temp files when a write fails
+- state files are fsynced before the publishing rename (and the directory after), so a crash cannot leave a truncated file that silently resets all persisted state
 - concurrent close-task writebacks and bus publishes are serialized so appends are never lost
 - bus publishes validate the channel against the `PublishBusRequest` union
 - heading-like lines inside free-text bodies (task-log summaries, rewrite content, bus bodies) are escaped so callers cannot forge entry boundaries
@@ -176,6 +182,8 @@ Eval / observability:
 Network / service posture:
 - all four APIs bind to loopback by default (`HOST` opts into wider exposure); @hono/node-server would otherwise listen on `0.0.0.0`
 - CORS is an explicit origin allowlist (`CORS_ALLOWED_ORIGINS`) instead of a wildcard, closing the drive-by-localhost window
+- SSE subscribers that stop draining their stream are dropped once their backlog passes `SSE_MAX_QUEUED_EVENTS`, so one stalled console cannot pin the event history in memory
+- `pnpm dev:console:auth` requires an explicit `VITE_OPERATOR_TOKEN` instead of falling back to a token baked into `package.json`
 - `pnpm audit --prod` is clean (hono 4.12.34, @hono/node-server 2.x)
 
 ## Deferred
@@ -257,6 +265,7 @@ Most important env vars:
 - State-changing requests (`POST`/`PUT`/`PATCH`/`DELETE`) must send `content-type: application/json` on every API, including bodiless action posts; anything else gets `415`. This forces a CORS preflight for cross-origin callers, so a page the operator visits cannot drive the control plane from their browser when no operator token is set.
 - `SSE_HEARTBEAT_MS` — keep-alive comment cadence on `GET /api/events/stream` (default 25000, 0 disables)
 - `SSE_MAX_SUBSCRIBERS` — cap on concurrent `GET /api/events/stream` subscribers; further connections get `503` until a slot frees (default 64, 0 disables)
+- `SSE_MAX_QUEUED_EVENTS` — per-subscriber backlog cap on `GET /api/events/stream`; a stream whose consumer stops reading is closed once it exceeds this many undelivered frames, and `EventSource` reconnects with `Last-Event-ID` (default 512, 0 disables)
 - `MAX_REQUEST_BODY_BYTES` — reject requests declaring a larger `Content-Length` with `413` on every API (default 2097152, 0 disables)
 - `VITE_OPERATOR_TOKEN` — console-side default token for local dev only. Vite inlines every `VITE_*` variable into the built bundle in clear text, so `vite build` refuses to run while it is set; enter the token in the console's Settings tab instead (it is kept in `localStorage`). Set `ALLOW_OPERATOR_TOKEN_IN_BUNDLE=1` to override.
 - `HARNESS_VAULT_ROOT` — memory-api vault root; default `vault/agentic-kb`
@@ -267,6 +276,7 @@ Most important env vars:
 - `WORKSPACE_CACHE_FILE` — worker bootstrap cache metadata
 - `ALLOWED_REPO_ROOT` — root boundary for repo/worktree paths
 - `ORPHAN_SWEEP_INTERVAL_MS` — optional periodic orphan cleanup cadence
+- `WORKER_MAX_CONCURRENT_EXECUTIONS` — cap on concurrent worker step executions; further dispatches get `429` (default 4, 0 disables)
 - `DEPLOY_ADAPTER` — `auto | noop-canary | vercel | render`
 - `DEPLOY_BASE_URL` — base URL used in deploy-plan metadata
 
