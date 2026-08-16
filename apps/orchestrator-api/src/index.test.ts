@@ -52,6 +52,7 @@ describe("orchestrator-api", () => {
     delete process.env.HARNESS_OPERATOR_TOKEN;
     delete process.env.SSE_HEARTBEAT_MS;
     delete process.env.SSE_MAX_SUBSCRIBERS;
+    delete process.env.SSE_MAX_QUEUED_EVENTS;
     delete process.env.MAX_REQUEST_BODY_BYTES;
     process.env.VITEST = "1";
   });
@@ -1407,6 +1408,45 @@ describe("orchestrator-api", () => {
     expect(response.status).toBe(200);
     expect(payload.timeline).toHaveLength(1);
     expect(payload.timeline[0]).toMatchObject({ title: "Approval resolved", occurred_at: "2026-04-11T00:02:00.000Z", run_id: "run_demo" });
+  });
+
+  it("drops SSE subscribers that stop draining their stream", async () => {
+    process.env.SSE_MAX_QUEUED_EVENTS = "2";
+    // One slot only, so the reconnect below also proves the dropped
+    // subscriber released it instead of wedging the cap.
+    process.env.SSE_MAX_SUBSCRIBERS = "1";
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const app = await loadApp();
+    const stream = await app.request("/api/events/stream?last=0");
+    expect(stream.status).toBe(200);
+
+    // Never read the body: without a backlog cap every recorded event just
+    // piles up in this subscriber's queue forever.
+    for (let index = 0; index < 8; index += 1) {
+      const created = await app.request("/api/missions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: `Backlog ${index}`, project_id: "proj_demo", workflow_id: "bugfix" })
+      });
+      expect(created.status).toBe(201);
+    }
+
+    const reader = stream.body!.getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value);
+    }
+    const delivered = (text.match(/^event: /gm) ?? []).length;
+    expect(delivered).toBeGreaterThan(0);
+    expect(delivered).toBeLessThan(8);
+
+    const reconnect = await app.request("/api/events/stream?last=0");
+    expect(reconnect.status).toBe(200);
+    await reconnect.body!.cancel();
   });
 
   it("refuses worker event ids that would forge extra SSE frames", async () => {

@@ -28,6 +28,15 @@ const sseHeartbeatMs = Number(process.env.SSE_HEARTBEAT_MS ?? "25000");
 // client that reconnects without closing) grows the subscriber map without
 // bound and multiplies per-event work. Set to 0 to disable the cap.
 const sseMaxSubscribers = Number(process.env.SSE_MAX_SUBSCRIBERS ?? "64");
+// The subscriber cap bounds how many streams exist, not how much each one
+// retains. A consumer that stops reading -- a backgrounded tab, a TCP
+// connection that died without surfacing an abort -- still gets every
+// recorded event enqueued into its ReadableStream queue, and nothing drains
+// it, so one stalled console pins the full event history in memory for as
+// long as the socket lingers. desiredSize is (highWaterMark - queued), so a
+// backlog past this many frames drops the subscriber; EventSource reconnects
+// and Last-Event-ID resumes it from the retained window. Set to 0 to disable.
+const sseMaxQueuedEvents = Number(process.env.SSE_MAX_QUEUED_EVENTS ?? "512");
 const allowedRepoRoot = resolve(process.env.ALLOWED_REPO_ROOT ?? "/Users/jaywest/projects");
 const operatorToken = process.env.HARNESS_OPERATOR_TOKEN;
 // Sidecar calls run inside lifecycle handlers; without a bound, one
@@ -1469,6 +1478,11 @@ app.get("/api/events/stream", async (c) => {
         matches: (event) => eventMatchesFilters(event, filters),
         enqueue: (event) => {
           if (closed) return;
+          const desiredSize = controller.desiredSize;
+          if (Number.isFinite(sseMaxQueuedEvents) && sseMaxQueuedEvents > 0 && typeof desiredSize === "number" && desiredSize < -sseMaxQueuedEvents) {
+            close();
+            return;
+          }
           controller.enqueue(encoder.encode(formatSseEvent(event)));
         },
         close,
