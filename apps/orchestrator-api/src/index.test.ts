@@ -532,8 +532,18 @@ describe("orchestrator-api", () => {
     expect(execute.status).toBe(200);
 
     const eventsResponse = await app.request("/api/events");
-    const eventsPayload = await eventsResponse.json() as { events: Array<{ source?: string; type: string; execution_id?: string; project_id?: string }> };
-    expect(eventsPayload.events.some((event) => event.source === "hermes" && event.type === "step.progress" && event.execution_id === "exec_worker_1")).toBe(true);
+    const eventsPayload = await eventsResponse.json() as { events: Array<{ source?: string; type: string; execution_id?: string; project_id?: string; mission_id?: string; run_id?: string }> };
+    // Worker-chosen scoping ids ("mis_placeholder"/"run_placeholder") are
+    // replaced with the dispatch's own, so the event lands on the right run.
+    const ingested = eventsPayload.events.find((event) => event.source === "hermes" && event.type === "step.progress");
+    expect(ingested).toBeDefined();
+    expect(ingested?.mission_id).toBe(mission.mission_id);
+    expect(ingested?.run_id).toBe(run.run_id);
+    expect(ingested?.execution_id).not.toBe("exec_worker_1");
+    expect(eventsPayload.events.some((event) => event.mission_id === "mis_placeholder" || event.run_id === "run_placeholder")).toBe(false);
+    // ...and it cannot surface in a foreign mission's audit timeline.
+    const foreignTimeline = await app.request("/api/read-models/audit?mission_id=mis_placeholder");
+    expect((await foreignTimeline.json() as { timeline: unknown[] }).timeline).toHaveLength(0);
     // Lifecycle events recorded with a project_id must not lose it during normalization.
     expect(eventsPayload.events.some((event) => event.type === "mission.created" && event.project_id === "proj_demo")).toBe(true);
   });

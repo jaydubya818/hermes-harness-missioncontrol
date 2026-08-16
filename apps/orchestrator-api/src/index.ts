@@ -644,13 +644,25 @@ function recordEvent(event: HarnessEvent | Record<string, unknown>) {
   return true;
 }
 
+type DispatchScope = {
+  mission_id: string;
+  run_id: string;
+  step_id: string;
+  execution_id: string;
+};
+
 // Worker step_events cross a service boundary. recordEvent throws on
 // unrecognized event types, and one bad event from the worker must not 500
 // the dispatch after the step already executed (stranding the run
 // mid-step); drop the event and keep the lifecycle moving.
-function recordExternalEvent(event: HarnessEvent | Record<string, unknown>) {
+//
+// The worker also chooses its own mission/run/step/execution ids. Recording
+// those verbatim let a worker response attribute events to *other* missions,
+// polluting their audit timelines, detail read models and SSE filters. The
+// dispatch this response answers is the only correct scope, so pin it.
+function recordExternalEvent(event: HarnessEvent | Record<string, unknown>, scope: DispatchScope) {
   try {
-    return recordEvent(event);
+    return recordEvent({ ...(event as Record<string, unknown>), ...scope });
   } catch (err) {
     console.warn("[orchestrator] skipping unrecognized worker event:", err instanceof Error ? err.message : err);
     return false;
@@ -1663,8 +1675,9 @@ function isDispatchStale(run: WorkflowRun, step: WorkflowRun["steps"][number], e
 
 async function discardStaleDispatch(run: WorkflowRun, step: WorkflowRun["steps"][number], executionId: string, execution: WorkerExecution | undefined, c: any) {
   const summary = `worker result for ${step.step_id} discarded: run state changed during dispatch (step now ${step.state}${step.execution_id === executionId ? "" : ", execution superseded"})`;
+  const scope: DispatchScope = { mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id, execution_id: executionId };
   for (const event of execution?.step_events ?? []) {
-    recordExternalEvent(event);
+    recordExternalEvent(event, scope);
   }
   recordEvent({ type: "step.progress", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id as `step_${string}`, execution_id: executionId, payload: { message: summary, discarded_execution_id: executionId, step_state: step.state } as any });
   // The discarded execution is dead. If the paused step still carries its id
@@ -1720,7 +1733,7 @@ app.post("/api/runs/:id/execute-current", async (c) => {
       return discardStaleDispatch(run, step, request.execution_id, workerExecution, c);
     }
     for (const event of workerExecution?.step_events ?? []) {
-      recordExternalEvent(event);
+      recordExternalEvent(event, { mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id, execution_id: request.execution_id });
     }
     const summary = String(error instanceof Error ? error.message : error);
     await failRun(run, step.step_id, summary, workerExecution ?? { execution_id: request.execution_id, summary, confidence: 0, success: false, artifacts: [] });
@@ -1743,7 +1756,7 @@ app.post("/api/runs/:id/execute-current", async (c) => {
     recordEvent({ type: "artifact.created", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id as `step_${string}`, execution_id: execution.execution_id, payload: { artifact_id: artifactId, kind: artifact.type, label: artifact.type, uri: artifact.uri, metadata: artifact.metadata } as any });
   }
   for (const event of execution.step_events ?? []) {
-    recordExternalEvent(event);
+    recordExternalEvent(event, { mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id, execution_id: request.execution_id });
   }
 
   if (!execution.success) {
