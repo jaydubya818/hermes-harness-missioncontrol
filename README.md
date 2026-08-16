@@ -306,7 +306,8 @@ HARNESS_OPERATOR_TOKEN=dev-secret pnpm dev:worker
 VITE_OPERATOR_TOKEN=dev-secret pnpm dev:console
 ```
 
-Or use the auth helper for console only:
+Or use the auth helper for console only (it refuses to start without an
+explicit token rather than falling back to a built-in default):
 ```bash
 VITE_OPERATOR_TOKEN=dev-secret pnpm dev:console:auth
 ```
