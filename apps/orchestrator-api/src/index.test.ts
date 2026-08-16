@@ -1410,6 +1410,35 @@ describe("orchestrator-api", () => {
     expect(payload.timeline[0]).toMatchObject({ title: "Approval resolved", occurred_at: "2026-04-11T00:02:00.000Z", run_id: "run_demo" });
   });
 
+  it("treats a date-only `to` filter as inclusive of that whole day", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-date-only-to-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [],
+      runs: [],
+      approvals: [],
+      events: [
+        { event_id: "evt_in_range", type: "step.started", ts: "2026-04-11T09:30:00.000Z", mission_id: "mis_demo", run_id: "run_demo", payload: {} },
+        { event_id: "evt_next_day", type: "step.completed", ts: "2026-04-12T00:00:01.000Z", mission_id: "mis_demo", run_id: "run_demo", payload: {} }
+      ],
+      audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const response = await app.request("/api/read-models/audit?from=2026-04-11&to=2026-04-11");
+    const payload = await response.json() as { timeline: Array<{ occurred_at: string }> };
+
+    expect(response.status).toBe(200);
+    expect(payload.timeline.map((item) => item.occurred_at)).toEqual(["2026-04-11T09:30:00.000Z"]);
+
+    // Full timestamps keep their exact-bound semantics.
+    const exact = await app.request("/api/read-models/audit?to=2026-04-11T09:00:00.000Z");
+    const exactPayload = await exact.json() as { timeline: Array<{ occurred_at: string }> };
+    expect(exactPayload.timeline).toHaveLength(0);
+  });
+
   it("drops SSE subscribers that stop draining their stream", async () => {
     process.env.SSE_MAX_QUEUED_EVENTS = "2";
     // One slot only, so the reconnect below also proves the dropped

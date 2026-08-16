@@ -742,10 +742,17 @@ function toApprovalOperatorView(approval: Approval) {
   };
 }
 
+// A date-only upper bound ("2026-04-18") reads as "through that day", but a
+// plain string compare excludes the whole day: every ISO timestamp on it
+// ("2026-04-18T09:00:00.000Z") sorts after the bare date. Compare only the
+// matching prefix of the value in that case. `from` needs no such handling --
+// a bare date already sorts before every timestamp on it.
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
 function inDateRange(value: string | undefined, from?: string, to?: string) {
   if (!value) return false;
   if (from && value < from) return false;
-  if (to && value > to) return false;
+  if (to && (DATE_ONLY.test(to) ? value.slice(0, to.length) : value) > to) return false;
   return true;
 }
 
