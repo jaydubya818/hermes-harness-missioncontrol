@@ -580,6 +580,76 @@ describe("worker-runtime", () => {
     expect(again.status).toBe(404);
   });
 
+  it("rejects dispatches beyond the concurrent execution cap", { timeout: 30_000 }, async () => {
+    const repo = join(sandboxRoot, "capacity-repo");
+    await mkdir(repo, { recursive: true });
+    await writeFile(join(repo, "package.json"), JSON.stringify({ name: "capacity", scripts: { test: "sleep 60" } }), "utf8");
+
+    const request = (suffix: string) => app.request("/api/execute-step", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mission_id: "mis_capacity",
+        run_id: `run_capacity_${suffix}`,
+        step_id: "step_test",
+        execution_id: `exec_capacity_${suffix}`,
+        kind: "test",
+        repo_path: repo,
+        envelope: buildEnvelope({
+          timeout_seconds: 60,
+          allowed_actions: ["run_tests"],
+          worktree_path: join(process.cwd(), `../../data/worktrees/run_capacity_${suffix}`),
+          output_dir: join(process.cwd(), `../../data/worker-runs/run_capacity_${suffix}/step_test`),
+          repo_scope: { root_path: repo, writable_paths: [] }
+        })
+      })
+    });
+
+    // WORKER_MAX_CONCURRENT_EXECUTIONS is 2 in vitest.config.ts.
+    const first = request("a");
+    const second = request("b");
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const third = await request("c");
+    expect(third.status).toBe(429);
+    const rejected = await third.json() as { error?: string; in_flight?: number; max_concurrent?: number };
+    expect(rejected.error).toMatch(/worker at capacity/);
+    expect(rejected.max_concurrent).toBe(2);
+
+    for (const suffix of ["a", "b"]) {
+      await app.request("/api/abort-execution", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ execution_id: `exec_capacity_${suffix}` })
+      });
+    }
+    expect((await first).status).toBe(409);
+    expect((await second).status).toBe(409);
+
+    // Aborted executions release their slots: a plan step (which settles on
+    // its own) gets through instead of another 429.
+    const afterDrain = await app.request("/api/execute-step", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mission_id: "mis_capacity",
+        run_id: "run_capacity_d",
+        step_id: "step_plan",
+        execution_id: "exec_capacity_d",
+        kind: "plan",
+        envelope: buildEnvelope({
+          worktree_path: join(process.cwd(), "../../data/worktrees/run_capacity_d"),
+          output_dir: join(process.cwd(), "../../data/worker-runs/run_capacity_d/step_plan")
+        })
+      })
+    });
+    expect(afterDrain.status).toBe(200);
+
+    for (const suffix of ["a", "b", "c", "d"]) {
+      await cleanupRun(`run_capacity_${suffix}`, undefined, undefined, true);
+    }
+  });
+
   it("rejects a duplicate dispatch for a still-running execution id", { timeout: 20_000 }, async () => {
     const repo = join(sandboxRoot, "duplicate-dispatch-repo");
     await mkdir(repo, { recursive: true });

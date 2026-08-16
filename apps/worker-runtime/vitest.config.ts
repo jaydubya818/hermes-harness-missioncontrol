@@ -10,6 +10,9 @@ export default defineConfig({
     env: {
       ALLOWED_REPO_ROOT: process.env.ALLOWED_REPO_ROOT ?? join(tmpdir(), "hermes-worker-runtime-allowed"),
       WORKSPACE_CACHE_FILE: process.env.WORKSPACE_CACHE_FILE ?? join(tmpdir(), "hermes-worker-runtime-cache.json"),
+      // Small enough that the concurrency-cap test can reach it without
+      // holding four sleeping child processes open.
+      WORKER_MAX_CONCURRENT_EXECUTIONS: process.env.WORKER_MAX_CONCURRENT_EXECUTIONS ?? "2",
     },
   },
 });

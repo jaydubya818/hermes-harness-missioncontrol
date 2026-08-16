@@ -19,6 +19,13 @@ const allowedRepoRoot = resolve(process.env.ALLOWED_REPO_ROOT ?? "/Users/jaywest
 const deployAdapterEnv = process.env.DEPLOY_ADAPTER ?? "auto";
 const deployBaseUrl = process.env.DEPLOY_BASE_URL ?? "https://staging.example.internal";
 const operatorToken = process.env.HARNESS_OPERATOR_TOKEN;
+// Each in-flight execution owns a git worktree and spawns real child
+// processes (dependency installs, the target repo's test suite, deploy
+// planning). Nothing bounded how many could run at once: the orchestrator
+// only single-flights per run, so a burst of dispatches across runs -- or a
+// retry loop -- could fork unbounded work onto the operator's machine.
+// Set to 0 to disable the cap.
+const maxConcurrentExecutions = Number(process.env.WORKER_MAX_CONCURRENT_EXECUTIONS ?? "4");
 
 type StepRequest = StepExecutionRequest;
 
@@ -1164,6 +1171,9 @@ app.post("/api/execute-step", async (c) => {
     // first registration and leave that execution unabortable.
     if (liveExecutions.has(body.execution_id)) {
       return c.json({ error: `execution ${body.execution_id} already in flight` }, 409);
+    }
+    if (Number.isFinite(maxConcurrentExecutions) && maxConcurrentExecutions > 0 && liveExecutions.size >= maxConcurrentExecutions) {
+      return c.json({ error: `worker at capacity: ${liveExecutions.size} concurrent step executions already in flight`, in_flight: liveExecutions.size, max_concurrent: maxConcurrentExecutions }, 429);
     }
     let rejectOperatorAbort: ((error: Error) => void) | undefined;
     const operatorAborted = new Promise<StepResult>((_, reject) => {
