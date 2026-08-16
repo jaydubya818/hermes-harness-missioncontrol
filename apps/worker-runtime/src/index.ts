@@ -1132,7 +1132,12 @@ app.use("*", async (c, next) => {
 });
 
 
-app.get("/health", (c) => c.json({ ok: true, service: "worker-runtime", allowed_repo_root: allowedRepoRoot }));
+// /health is the one unauthenticated endpoint on every service, and the
+// others expose no filesystem detail. Echoing ALLOWED_REPO_ROOT here handed
+// the operator's absolute source-tree path to any unauthenticated caller,
+// which matters as soon as HOST widens the bind beyond loopback. The
+// configured root is already logged at startup for operators who need it.
+app.get("/health", (c) => c.json({ ok: true, service: "worker-runtime" }));
 
 // In-flight executions by execution_id so operator controls (interrupt,
 // cancel) can abort a running step's child commands instead of letting them
@@ -1282,6 +1287,7 @@ if (!process.env.VITEST) {
   const hostname = process.env.HOST ?? "127.0.0.1";
   serve({ fetch: app.fetch, port, hostname });
   console.log(`worker-runtime listening on http://${hostname}:${port}`);
+  console.log(`[worker] allowed repo root: ${allowedRepoRoot}`);
 }
 
 export { app, ensureWorkspace, detectTestCommand, bootstrapWorkspaceDependencies, assertAllowedRepoWrite, parseChangedFiles };
