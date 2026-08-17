@@ -7,10 +7,21 @@ import { loadJsonFile, saveJsonFile } from "./index.js";
 // Records which paths saveJsonFile fsyncs. ESM namespaces are not spy-able,
 // so wrap open() at module-resolution time instead.
 const syncedTargets: string[] = [];
+// Lets one test hold the first rename open so an unserialized second save can
+// overtake it; the publish race is otherwise timing-dependent.
+const renameHooks: { delayFirstMs: number } = { delayFirstMs: 0 };
+let renameCount = 0;
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return {
     ...actual,
+    rename: async (from: string, to: string) => {
+      renameCount += 1;
+      if (renameCount === 1 && renameHooks.delayFirstMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, renameHooks.delayFirstMs));
+      }
+      return actual.rename(from, to);
+    },
     open: async (path: Parameters<typeof actual.open>[0], ...rest: unknown[]) => {
       const handle = await (actual.open as (...args: unknown[]) => Promise<Awaited<ReturnType<typeof actual.open>>>)(path, ...rest);
       const sync = handle.sync.bind(handle);
@@ -55,6 +66,26 @@ describe("state-store", () => {
     expect(syncedTargets.some((target) => target.endsWith(".tmp"))).toBe(true);
     expect(syncedTargets.indexOf(dir)).toBeGreaterThan(syncedTargets.findIndex((target) => target.endsWith(".tmp")));
     expect(await loadJsonFile(file, { ok: false })).toEqual({ ok: true });
+    expect(readdirSync(dir).filter((name) => name.endsWith(".tmp"))).toHaveLength(0);
+  });
+
+  it("publishes the newest snapshot when saves to one file overlap", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "state-store-"));
+    const file = join(dir, "state.json");
+    renameCount = 0;
+    renameHooks.delayFirstMs = 300;
+
+    try {
+      // Unserialized, the first save's rename can land after the second's and
+      // publish its older snapshot, silently dropping the newer record.
+      const first = saveJsonFile(file, [1]);
+      const second = saveJsonFile(file, [1, 2]);
+      await Promise.all([first, second]);
+    } finally {
+      renameHooks.delayFirstMs = 0;
+    }
+
+    expect(await loadJsonFile<number[]>(file, [])).toEqual([1, 2]);
     expect(readdirSync(dir).filter((name) => name.endsWith(".tmp"))).toHaveLength(0);
   });
 

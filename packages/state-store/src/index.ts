@@ -1,5 +1,5 @@
 import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 export async function loadJsonFile<T>(path: string, fallback: T): Promise<T> {
   let raw: string;
@@ -19,7 +19,31 @@ export async function loadJsonFile<T>(path: string, fallback: T): Promise<T> {
   }
 }
 
-export async function saveJsonFile<T>(path: string, value: T): Promise<void> {
+// Writes to one state file are not atomic against each other: each call
+// stringifies, writes a uniquely named temp file, then renames it over the
+// target. Two overlapping saves therefore race on the rename, and the one
+// that started first can land last -- publishing its older snapshot and
+// silently dropping whatever the newer save had already recorded (a mission
+// event, an eval record). The services call this after every mutation
+// without awaiting each other, so serialize per path: queued saves still
+// stringify at write time, so the last one to run always publishes current
+// state.
+const saveQueues = new Map<string, Promise<unknown>>();
+
+export function saveJsonFile<T>(path: string, value: T): Promise<void> {
+  const key = resolve(path);
+  const previous = saveQueues.get(key) ?? Promise.resolve();
+  const save = previous.then(() => writeJsonFile(path, value));
+  const queued = save.catch(() => undefined).then(() => {
+    // Drop the entry once this is the tail, so the map cannot grow with
+    // every distinct state file a long-lived process touches.
+    if (saveQueues.get(key) === queued) saveQueues.delete(key);
+  });
+  saveQueues.set(key, queued);
+  return save;
+}
+
+async function writeJsonFile<T>(path: string, value: T): Promise<void> {
   const dir = dirname(path);
   await mkdir(dir, { recursive: true });
   const tmpPath = join(dir, `.${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
