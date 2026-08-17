@@ -3,7 +3,7 @@ import useSWR, { mutate } from "swr";
 import { CANONICAL_EVENT_TYPES } from "@hermes-harness-with-missioncontrol/contracts";
 import { CapacityBar, CostCard, Panel, Sparkline, StatusRow } from "@hermes-harness-with-missioncontrol/ui-kit";
 import { CommandPalette } from "./CommandPalette.js";
-import { createTrailingThrottle, readApiResponse, withQuery } from "./api.js";
+import { createTrailingThrottle, encodePathSegments, readApiResponse, withQuery } from "./api.js";
 
 const tabs = ["Overview", "Missions", "Agents", "Memory", "Code", "Audit", "Settings"] as const;
 type Tab = (typeof tabs)[number];
@@ -463,7 +463,7 @@ function Memory() {
   const [section, setSection] = useState("projects/proj_demo");
   const [selectedArticle, setSelectedArticle] = useState("projects/proj_demo/standards.md");
   const { data: articles } = useSWR(`${MEM}/api/memory/articles?section=${encodeURIComponent(section)}`, fetcher, { refreshInterval: 10000 });
-  const { data: article } = useSWR(selectedArticle ? `${MEM}/api/memory/articles/${selectedArticle}` : null, fetcher, { refreshInterval: 10000 });
+  const { data: article } = useSWR(selectedArticle ? `${MEM}/api/memory/articles/${encodePathSegments(selectedArticle)}` : null, fetcher, { refreshInterval: 10000 });
 
   async function closeTaskWriteback() {
     // Match the SWR fetcher: surface HTTP errors instead of rendering the

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createTrailingThrottle, filterCommands, readApiResponse, withQuery } from "./api.js";
+import { createTrailingThrottle, encodePathSegments, filterCommands, readApiResponse, withQuery } from "./api.js";
 
 describe("withQuery", () => {
   it("returns the bare url when no params are set", () => {
@@ -17,6 +17,20 @@ describe("withQuery", () => {
 
   it("url-encodes filter values", () => {
     expect(withQuery("/api/events/stream", { token: "a b&c" })).toBe("/api/events/stream?token=a+b%26c");
+  });
+});
+
+describe("encodePathSegments", () => {
+  it("keeps the separators and escapes each segment", () => {
+    expect(encodePathSegments("projects/proj_demo/standards.md")).toBe("projects/proj_demo/standards.md");
+    expect(encodePathSegments("projects/proj demo/notes #1.md")).toBe("projects/proj%20demo/notes%20%231.md");
+  });
+
+  it("escapes characters that would truncate the request path", () => {
+    // "?" starts a query string and "#" a fragment, so an unescaped slug
+    // silently asked the API for a different (shorter) article.
+    expect(encodePathSegments("projects/p/what?.md")).toBe("projects/p/what%3F.md");
+    expect(encodePathSegments("projects/p/a#b.md")).toBe("projects/p/a%23b.md");
   });
 });
 

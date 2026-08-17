@@ -10,6 +10,16 @@ export function withQuery(url: string, params: Record<string, string | undefined
   return suffix ? `${url}?${suffix}` : url;
 }
 
+// Article slugs are wiki-relative paths built from real filenames, and they
+// go into the URL *path* (not a query value), so each segment needs escaping
+// on its own -- encodeURIComponent over the whole slug would eat the "/"
+// separators. Unescaped, a filename containing "?" or "#" silently truncated
+// the request (everything after became a query string or fragment) and one
+// containing a space produced an invalid URL.
+export function encodePathSegments(path: string) {
+  return path.split("/").map(encodeURIComponent).join("/");
+}
+
 export async function readApiResponse(response: Response) {
   const text = await response.text();
   try {
