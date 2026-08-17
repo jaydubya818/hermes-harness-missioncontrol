@@ -626,9 +626,16 @@ type DispatchScope = {
 // those verbatim let a worker response attribute events to *other* missions,
 // polluting their audit timelines, detail read models and SSE filters. The
 // dispatch this response answers is the only correct scope, so pin it.
+//
+// `actor` is the same class of problem one field over: it is what the audit
+// timeline attributes an entry to and what the SSE/approval `actor` filters
+// key on, and nothing stopped a worker response from stamping
+// actor:"operator" onto its own step events -- forging operator-attributed
+// entries in the governance trail. Worker events are never operator actions,
+// so clear it.
 function recordExternalEvent(event: HarnessEvent | Record<string, unknown>, scope: DispatchScope) {
   try {
-    return recordEvent({ ...(event as Record<string, unknown>), ...scope });
+    return recordEvent({ ...(event as Record<string, unknown>), ...scope, actor: undefined });
   } catch (err) {
     console.warn("[orchestrator] skipping unrecognized worker event:", err instanceof Error ? err.message : err);
     return false;

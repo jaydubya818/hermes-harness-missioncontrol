@@ -114,7 +114,7 @@ Lifecycle / governance:
 - persisted state hydration is single-flight, so concurrent first requests cannot double-replay events into live streams
 - event ids from outside the service are constrained to plain bounded tokens; a newline in one used to forge extra frames in the SSE stream
 - event timestamps are coerced to strings, so a numeric `ts` from a worker (or hand-edited state) cannot break hydration and 500 every request after restart
-- worker `step_events` are re-scoped to the dispatch that produced them, so a worker cannot attribute events to another mission
+- worker `step_events` are re-scoped to the dispatch that produced them, so a worker cannot attribute events to another mission — or, via `actor`, to an operator
 - worker results that land after an operator interrupt/cancel/retry are discarded instead of overriding the operator's decision
 - operator interrupt/cancel/retry also signal the worker to abort the in-flight execution's child commands (best-effort; the stale-dispatch guard stays authoritative)
 - cancelled runs release their worktree/branch and record an eval, matching the other terminal transitions

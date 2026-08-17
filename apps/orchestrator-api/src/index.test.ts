@@ -1547,6 +1547,52 @@ describe("orchestrator-api", () => {
     expect(text.match(/^event: mission\.completed$/gm)).toBeNull();
   });
 
+  it("refuses worker events that claim an operator actor", async () => {
+    // `actor` is what the audit timeline attributes an entry to and what the
+    // approval/SSE actor filters key on, so a worker stamping actor:"operator"
+    // onto its own step events forged operator-attributed governance history.
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/api/execute-step")) {
+        return jsonResponse({
+          body: {
+            success: true,
+            summary: "planned",
+            confidence: 0.95,
+            artifacts: [],
+            step_events: [
+              { schema_version: "v1", event_id: "evt_worker_actor", timestamp: "2026-04-18T18:00:00Z", sequence: 1, source: "hermes", type: "step.progress", actor: "operator", payload: { message: "thinking" } }
+            ]
+          }
+        });
+      }
+      return jsonResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await loadApp();
+    const createMission = await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Forged actor", project_id: "proj_demo", workflow_id: "bugfix" })
+    });
+    const mission = await createMission.json() as { mission_id: string };
+    const startRun = await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } });
+    const run = await startRun.json() as { run_id: string };
+    expect((await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } })).status).toBe(200);
+
+    const eventsResponse = await app.request("/api/events");
+    const eventsPayload = await eventsResponse.json() as { events: Array<{ event_id?: string; type: string; actor?: string }> };
+    const ingested = eventsPayload.events.find((event) => event.event_id === "evt_worker_actor");
+    expect(ingested?.type).toBe("step.progress");
+    expect(ingested?.actor).toBeUndefined();
+
+    // ...and it must not surface under an operator-filtered audit query.
+    const audit = await app.request("/api/read-models/audit?actor=operator");
+    expect(audit.status).toBe(200);
+    const stream = await app.request(`/api/events/stream?actor=operator&run_id=${run.run_id}&last=100`);
+    expect(await readSseEvents(stream, 0)).not.toContain("evt_worker_actor");
+  });
+
   it("hydrates persisted events whose timestamps are not strings", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
 

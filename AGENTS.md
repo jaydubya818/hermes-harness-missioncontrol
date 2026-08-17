@@ -49,7 +49,9 @@ Running `pnpm -r test` on a clean checkout without building packages first fails
   `normalizeEventRecord` is the choke point: event ids must stay plain bounded tokens
   (they are echoed into the SSE `id:` line), timestamps must be coerced to strings
   (hydration sorts them with `localeCompare`), and mission/run/step/execution ids are
-  re-scoped to the dispatch. Keep new ingestion paths behind it.
+  re-scoped to the dispatch while `actor` is cleared (worker events are never operator
+  actions, and `actor` drives audit attribution and the actor filters). Keep new
+  ingestion paths behind it.
 - The canonical event taxonomy lives in `packages/contracts` as `CANONICAL_EVENT_TYPES`;
   add new types there, not in per-service copies.
 - Markdown vault files are parsed line-anchored ("- " entries, "### " candidates,
