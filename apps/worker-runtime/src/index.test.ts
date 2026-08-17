@@ -814,6 +814,41 @@ describe("worker-runtime", () => {
     }
   });
 
+  it("reports non-string identifiers and repo_path as policy violations", async () => {
+    // A truthy non-string got past the identifier guard and only failed later
+    // inside resolve()/assertSafeSegment, surfacing a raw Node TypeError
+    // ("the \"paths[0]\" argument must be of type string") as the step summary
+    // with error_code tool.failed instead of a policy violation.
+    const cases: Array<{ overrides: Record<string, unknown>; violation_kind: string }> = [
+      { overrides: { run_id: { evil: true } }, violation_kind: "missing_execution_identifiers" },
+      { overrides: { step_id: 7 }, violation_kind: "missing_execution_identifiers" },
+      { overrides: { repo_path: { evil: true } }, violation_kind: "invalid_repo_path" },
+      { overrides: { repo_path: 42 }, violation_kind: "invalid_repo_path" },
+    ];
+
+    for (const { overrides, violation_kind } of cases) {
+      const response = await app.request("/api/execute-step", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mission_id: "mis_types",
+          run_id: "run_types",
+          step_id: "step_plan",
+          execution_id: "exec_types",
+          kind: "plan",
+          branch_name: "hermes/run_types",
+          envelope: buildEnvelope(),
+          ...overrides
+        })
+      });
+      const payload = await response.json() as { summary?: string; error_code?: string; step_events?: Array<{ type: string; payload?: { violation_kind?: string } }> };
+      expect(response.status).toBe(400);
+      expect(payload.error_code).toBe("policy.violation");
+      expect(payload.summary).not.toMatch(/paths\[0\]/);
+      expect(payload.step_events?.some((event) => event.type === "policy.violation" && event.payload?.violation_kind === violation_kind)).toBe(true);
+    }
+  });
+
   it("removes the run output root only when remove_outputs is requested", async () => {
     const runId = "run_cleanup_outputs";
     const outputRoot = join(process.cwd(), "../../data/worker-runs", runId);

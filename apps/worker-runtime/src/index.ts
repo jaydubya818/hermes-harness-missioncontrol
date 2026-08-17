@@ -254,12 +254,18 @@ const MAX_TIMEOUT_SECONDS = Math.floor((2 ** 31 - 1) / 1000);
 
 function validateEnvelope(req: StepRequest) {
   const envelope = req.envelope;
-  if (!req.mission_id || !req.run_id || !req.step_id || !req.execution_id) {
-    throw new WorkerExecutionError("invalid execution envelope: mission_id, run_id, step_id, and execution_id are required", {
-      statusCode: 400,
-      eventType: "policy.violation",
-      payload: { violation_kind: "missing_execution_identifiers" },
-    });
+  // Truthiness alone let non-string identifiers through: run_id/step_id then
+  // reached assertSafeSegment, whose regex coerces ({} tests as
+  // "[object Object]"), and the resulting bare Error surfaced as a generic
+  // tool failure instead of the policy violation it is.
+  for (const field of ["mission_id", "run_id", "step_id", "execution_id"] as const) {
+    if (typeof req[field] !== "string" || !req[field]) {
+      throw new WorkerExecutionError("invalid execution envelope: mission_id, run_id, step_id, and execution_id are required", {
+        statusCode: 400,
+        eventType: "policy.violation",
+        payload: { violation_kind: "missing_execution_identifiers", field },
+      });
+    }
   }
   // actionForKind/toolNameForKind and the execute() dispatcher all fall
   // through to the deploy path for unrecognized kinds, so an unknown kind
@@ -351,7 +357,12 @@ function validateEnvelope(req: StepRequest) {
   if (req.branch_name !== undefined && (typeof req.branch_name !== "string" || !req.branch_name.trim() || req.branch_name.startsWith("-") || !req.branch_name.startsWith("hermes/"))) {
     throw new WorkerExecutionError("invalid step request: branch_name must be a non-empty hermes/-prefixed branch that does not start with '-'", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "invalid_branch_name", branch_name: req.branch_name } });
   }
-  if (req.repo_path) {
+  if (req.repo_path !== undefined && req.repo_path !== null) {
+    // resolve() on a non-string throws a bare TypeError whose message ("the
+    // \"paths[0]\" argument must be of type string") became the step summary.
+    if (typeof req.repo_path !== "string" || !req.repo_path) {
+      throw new WorkerExecutionError("invalid step request: repo_path must be a non-empty string when provided", { statusCode: 400, eventType: "policy.violation", payload: { violation_kind: "invalid_repo_path" } });
+    }
     const repoPath = resolve(req.repo_path);
     try {
       relativeWithin(repoRoot, repoPath);
