@@ -883,23 +883,30 @@ const AUDIT_EVENT_TITLES: Record<string, { kind: string; title: string }> = {
 };
 
 function buildAuditReadModel(query: Record<string, string | undefined> = {}) {
-  const timeline = state.events.map((event: any) => {
+  // Filter before materializing. Every mission/run/step detail read model
+  // calls this, and the console polls all of them every three seconds, so
+  // mapping the full retained window (500 events) into timeline objects and
+  // then discarding all but the handful that match a mission_id/run_id was
+  // ~500 short-lived allocations per call for nothing.
+  const timeline = state.events.flatMap((event: any) => {
+    if (query.mission_id && event.mission_id !== query.mission_id) return [];
+    if (query.run_id && event.run_id !== query.run_id) return [];
+    if (query.step_id && event.step_id !== query.step_id) return [];
+    if (query.event_type && event.type !== query.event_type) return [];
+    const occurred_at = event.ts ?? event.timestamp ?? "";
+    if (!inDateRange(occurred_at, query.from, query.to)) return [];
     const meta = AUDIT_EVENT_TITLES[event.type] ?? { kind: "event", title: String(event.type ?? "Event") };
-    return {
+    if (query.kind && meta.kind !== query.kind) return [];
+    return [{
       kind: meta.kind,
       title: meta.title,
       event_type: event.type,
-      occurred_at: event.ts ?? event.timestamp ?? "",
+      occurred_at,
       mission_id: event.mission_id,
       run_id: event.run_id,
       step_id: event.step_id
-    };
-  }).filter((event) => (!query.mission_id || event.mission_id === query.mission_id)
-    && (!query.run_id || event.run_id === query.run_id)
-    && (!query.step_id || event.step_id === query.step_id)
-    && (!query.kind || event.kind === query.kind)
-    && (!query.event_type || event.event_type === query.event_type)
-    && inDateRange(event.occurred_at, query.from, query.to));
+    }];
+  });
 
   const page = paginateItems(sortTimeline(timeline, query.sort), query);
   return {
