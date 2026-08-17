@@ -2267,6 +2267,50 @@ describe("orchestrator-api", () => {
     );
   });
 
+  it("keeps the run output root when a swept terminal run still has recorded artifacts", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ body: { ok: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-sweep-artifacts-"));
+    const stateFile = join(stateDir, "state.json");
+    const worktreesRoot = join(stateDir, "worktrees");
+    const runsRoot = join(stateDir, "worker-runs");
+    process.env.WORKTREE_ROOT = worktreesRoot;
+    process.env.WORKER_RUNTIME_ROOT = runsRoot;
+
+    mkdirSync(join(worktreesRoot, "run_kept"), { recursive: true });
+    mkdirSync(join(runsRoot, "run_kept", "plan"), { recursive: true });
+
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [{ mission_id: "mis_kept", title: "Kept", objective: "Kept", project_id: "proj_demo", workflow: "bugfix", repo_path: "/repo/kept", status: "completed", active_run_id: "run_kept", summary: "done", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z" }],
+      runs: [{
+        run_id: "run_kept", mission_id: "mis_kept", workflow_id: "bugfix", status: "completed", current_step_index: 0, current_step_id: "plan",
+        created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z",
+        steps: [{ step_id: "plan", title: "Plan", kind: "plan", risk: "low", approval_mode: "on_policy_trigger", state: "completed", artifacts: [{ artifact_id: "art_1", kind: "plan", label: "plan", uri: `file://${join(runsRoot, "run_kept", "plan", "plan.md")}` }] }]
+      }],
+      approvals: [],
+      events: [],
+      audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const response = await app.request("/api/maintenance/sweep-orphans", { method: "POST", headers: { "content-type": "application/json" } });
+    const payload = await response.json() as { removed_run_ids: string[] };
+
+    expect(response.status).toBe(200);
+    expect(payload.removed_run_ids).toEqual(["run_kept"]);
+    // The worktree and branch are dead, but the artifacts read model still
+    // links into the output root, so it must survive the sweep.
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/cleanup-run"),
+      expect.objectContaining({ body: JSON.stringify({ run_id: "run_kept", source_repo: "/repo/kept", branch_name: "hermes/run_kept", remove_outputs: false }) })
+    );
+
+    const artifacts = await app.request("/api/read-models/artifacts");
+    const artifactsPayload = await artifacts.json() as { artifacts: Array<{ ref: string }> };
+    expect(artifactsPayload.artifacts).toHaveLength(1);
+  });
+
   it("continues sweeping remaining orphans when one cleanup fails", async () => {
     const fetchMock = vi.fn(async (_url: string, init?: { body?: string }) => {
       const body = init?.body ? JSON.parse(init.body) as { run_id?: string } : {};

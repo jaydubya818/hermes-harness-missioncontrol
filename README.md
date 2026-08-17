@@ -224,7 +224,7 @@ Cleanup
 - terminal runs trigger worker cleanup
 - run branches and worktree bookkeeping are pruned even when the worktree directory is already gone (deletion is restricted to `hermes/` run branches)
 - unexpected git cleanup failures (worktree remove, branch delete) are logged and returned as `warnings` on the cleanup response instead of a silent `ok`
-- `POST /api/maintenance/sweep-orphans` prunes orphaned worktree/output roots
+- `POST /api/maintenance/sweep-orphans` prunes orphaned worktree/output roots; the output root is kept for any swept run that still has recorded artifacts, since the artifacts read model links into it
 - `ORPHAN_SWEEP_INTERVAL_MS` enables periodic sweep outside normal request flow
 
 ## Key APIs

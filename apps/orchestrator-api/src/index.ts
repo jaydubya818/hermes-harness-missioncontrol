@@ -1263,11 +1263,17 @@ async function sweepOrphanedExecutionWorkspaces() {
 
     const run = runsById.get(runId);
     const mission = run ? getMissionForRun(run) : undefined;
+    // Orphans are gone from active use, so ask the worker to prune the run
+    // output root too (normal terminal cleanup keeps it because recorded
+    // artifacts reference files inside it). A terminal run that is still in
+    // state is only half-orphaned: its worktree and branch are dead, but the
+    // artifacts read model still hands operators `file://` links into that
+    // output root, and sweeping it left every one of them pointing at a
+    // deleted file. Keep the outputs exactly when something still references
+    // them.
+    const hasRecordedArtifacts = !!run && run.steps.some((step) => step.artifacts.length > 0);
     try {
-      // Orphans are gone from active use, so ask the worker to prune the
-      // run output root too (normal terminal cleanup keeps it because
-      // recorded artifacts reference files inside it).
-      await requestWorkerCleanup(runId, mission, null, true);
+      await requestWorkerCleanup(runId, mission, null, !hasRecordedArtifacts);
       removed_run_ids.push(runId);
     } catch (err) {
       // One broken workspace must not abort the rest of the sweep.
