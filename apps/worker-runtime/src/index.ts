@@ -587,9 +587,28 @@ const executionAbort = new AsyncLocalStorage<AbortSignal>();
 // loopback control-plane APIs with full operator privileges.
 const SECRET_ENV_KEYS = ["HARNESS_OPERATOR_TOKEN", "VITE_OPERATOR_TOKEN"];
 
-export function sanitizedChildEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+// The same argument applies to every other credential the operator happens
+// to export: a `pnpm test` in a sandboxed repo runs arbitrary code, and
+// GITHUB_TOKEN / AWS_SECRET_ACCESS_KEY / OPENAI_API_KEY are as damaging as
+// the operator token. Strip credential-shaped names too. Whole-env
+// allowlisting is not an option here (installs and test runners need PATH,
+// HOME, LANG, CI, ... and the set is repo-specific), so match on the naming
+// convention and give operators an explicit escape hatch for the variables
+// their pipelines genuinely need (e.g. NPM_TOKEN for a private registry).
+const SECRET_ENV_PATTERN = /(^|_)(TOKEN|SECRET|PASSWORD|PASSWD|APIKEY|API_KEY|ACCESS_KEY|PRIVATE_KEY|CREDENTIALS?|SESSION_KEY)(_|$)/i;
+const childEnvAllowList = new Set(
+  (process.env.WORKER_CHILD_ENV_ALLOW ?? "").split(",").map((name) => name.trim()).filter(Boolean)
+);
+
+export function sanitizedChildEnv(env: NodeJS.ProcessEnv = process.env, allow: ReadonlySet<string> = childEnvAllowList): NodeJS.ProcessEnv {
   const copy: NodeJS.ProcessEnv = { ...env };
   for (const key of SECRET_ENV_KEYS) delete copy[key];
+  for (const key of Object.keys(copy)) {
+    // The operator token is never overridable: it is this service's own
+    // authorization boundary, not a pipeline credential.
+    if (allow.has(key)) continue;
+    if (SECRET_ENV_PATTERN.test(key)) delete copy[key];
+  }
   return copy;
 }
 

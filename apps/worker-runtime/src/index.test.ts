@@ -258,6 +258,47 @@ describe("worker-runtime", () => {
     expect(process.env.HARNESS_OPERATOR_TOKEN).toBe(before);
   });
 
+  it("strips credential-shaped variables from the child environment", () => {
+    // Test/install scripts in the sandboxed repo are repo-controlled code;
+    // every credential the operator exported is as reachable as the operator
+    // token was.
+    const env = sanitizedChildEnv({
+      PATH: "/usr/bin",
+      HOME: "/home/operator",
+      CI: "1",
+      GITHUB_TOKEN: "ghp_secret",
+      AWS_SECRET_ACCESS_KEY: "aws-secret",
+      AWS_ACCESS_KEY_ID: "aws-id",
+      OPENAI_API_KEY: "sk-secret",
+      DB_PASSWORD: "hunter2",
+      SSH_PRIVATE_KEY: "-----BEGIN",
+      NPM_TOKEN: "npm-secret",
+      // Not credential-shaped: substrings alone must not trip the filter.
+      TOKENIZER_CACHE: "/tmp/tok",
+      SECRETARIAT: "keep-me",
+    });
+    for (const stripped of ["GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "AWS_ACCESS_KEY_ID", "OPENAI_API_KEY", "DB_PASSWORD", "SSH_PRIVATE_KEY", "NPM_TOKEN"]) {
+      expect(env[stripped]).toBeUndefined();
+    }
+    expect(env.PATH).toBe("/usr/bin");
+    expect(env.HOME).toBe("/home/operator");
+    expect(env.CI).toBe("1");
+    expect(env.TOKENIZER_CACHE).toBe("/tmp/tok");
+    expect(env.SECRETARIAT).toBe("keep-me");
+  });
+
+  it("honours the child-env allow list but never for the operator token", () => {
+    const env = sanitizedChildEnv(
+      { NPM_TOKEN: "npm-secret", GITHUB_TOKEN: "ghp_secret", HARNESS_OPERATOR_TOKEN: "prod-secret" },
+      new Set(["NPM_TOKEN", "HARNESS_OPERATOR_TOKEN"])
+    );
+    expect(env.NPM_TOKEN).toBe("npm-secret");
+    expect(env.GITHUB_TOKEN).toBeUndefined();
+    // The operator token guards this service's own API; it is not an
+    // opt-in-able pipeline credential.
+    expect(env.HARNESS_OPERATOR_TOKEN).toBeUndefined();
+  });
+
   it("rejects repo paths outside the allowed root", () => {
     expect(() => assertSafeRepoPath(join(allowedRepoRoot, "..", "not-allowed"))).toThrow(/allowed root/);
   });

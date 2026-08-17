@@ -199,7 +199,7 @@ Governed execution envelope
 - MissionControl computes the boundary first
 - worker validates again before doing anything
 - no permissive fallback
-- spawned repo commands (installs, test scripts, deploy planning) run with operator credentials stripped from their environment, so repo-controlled scripts cannot replay `HARNESS_OPERATOR_TOKEN` against the loopback APIs
+- spawned repo commands (installs, test scripts, deploy planning) run with operator credentials stripped from their environment, so repo-controlled scripts cannot replay `HARNESS_OPERATOR_TOKEN` against the loopback APIs; credential-shaped variables (`*_TOKEN`, `*_SECRET`, `*_API_KEY`, `*_ACCESS_KEY`, `*_PASSWORD`, `*_PRIVATE_KEY`, ...) are stripped too, and `WORKER_CHILD_ENV_ALLOW` re-admits the specific ones a pipeline needs
 - run branches are namespaced under `hermes/`; the worker refuses to create, force-reset, or delete branches outside that namespace
 
 Authoritative read models
@@ -277,6 +277,7 @@ Most important env vars:
 - `ALLOWED_REPO_ROOT` — root boundary for repo/worktree paths
 - `ORPHAN_SWEEP_INTERVAL_MS` — optional periodic orphan cleanup cadence
 - `WORKER_MAX_CONCURRENT_EXECUTIONS` — cap on concurrent worker step executions; further dispatches get `429` (default 4, 0 disables)
+- `WORKER_CHILD_ENV_ALLOW` — comma-separated env var names to keep in spawned repo commands despite the credential-name filter (e.g. `NPM_TOKEN`); `HARNESS_OPERATOR_TOKEN`/`VITE_OPERATOR_TOKEN` are always stripped
 - `DEPLOY_ADAPTER` — `auto | noop-canary | vercel | render`
 - `DEPLOY_BASE_URL` — base URL used in deploy-plan metadata
 
