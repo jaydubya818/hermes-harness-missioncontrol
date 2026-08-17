@@ -143,6 +143,18 @@ describe("orchestrator-api", () => {
     });
     expect(badWorkflow.status).toBe(400);
 
+    // WORKFLOW_LIBRARY is a plain object, so an `in` check also accepted
+    // Object.prototype members; the mission was created and its first start
+    // then 500'd on `template.map is not a function`.
+    for (const inherited of ["toString", "constructor", "valueOf", "__proto__"]) {
+      const prototypeWorkflow = await app.request("/api/missions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "Prototype", project_id: "proj_demo", workflow_id: inherited })
+      });
+      expect(prototypeWorkflow.status).toBe(400);
+    }
+
     const missions = await app.request("/api/missions");
     const missionsPayload = await missions.json() as { missions: unknown[] };
     expect(missionsPayload.missions).toHaveLength(0);

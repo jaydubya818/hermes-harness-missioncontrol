@@ -17,6 +17,16 @@ import {
 } from "./index.js";
 
 describe("workflow-engine", () => {
+  it("falls back to bugfix for inherited object keys instead of throwing", () => {
+    // WORKFLOW_LIBRARY[workflow_id] also resolves Object.prototype members,
+    // so "toString" yielded a function that `?? bugfix` never replaced and
+    // template.map() threw a bare TypeError.
+    for (const inherited of ["toString", "constructor", "valueOf"]) {
+      const run = createWorkflowRun("run_proto", "mis_proto", inherited);
+      expect(run.steps.map((step) => step.step_id)).toEqual(["plan", "implement", "test", "review", "deploy"]);
+    }
+  });
+
   it("creates contract-shaped steps and advances a workflow", () => {
     const run = createWorkflowRun("run_demo", "mis_demo", "bugfix");
     expect(run.steps.length).toBeGreaterThan(0);

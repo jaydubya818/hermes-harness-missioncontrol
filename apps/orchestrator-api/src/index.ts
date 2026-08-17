@@ -1561,7 +1561,9 @@ app.post("/api/missions", async (c) => {
   if (typeof body.project_id !== "string" || !body.project_id.startsWith("proj_")) return c.json({ error: "project_id must start with proj_" }, 400);
   // createWorkflowRun silently falls back to the bugfix workflow for unknown
   // ids, so a typo here would run the wrong workflow without any signal.
-  if (body.workflow_id !== undefined && (typeof body.workflow_id !== "string" || !(body.workflow_id in WORKFLOW_LIBRARY))) {
+  // `in` walks the prototype chain, so "toString"/"constructor" passed this
+  // check and then resolved to a function inside createWorkflowRun.
+  if (body.workflow_id !== undefined && (typeof body.workflow_id !== "string" || !Object.hasOwn(WORKFLOW_LIBRARY, body.workflow_id))) {
     return c.json({ error: `workflow_id must be one of: ${Object.keys(WORKFLOW_LIBRARY).join(", ")}` }, 400);
   }
   // repo_path/workspace_root feed resolve() when the execution envelope is

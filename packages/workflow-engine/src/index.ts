@@ -76,7 +76,11 @@ function buildStep(template: WorkflowStepTemplate): WorkflowRunStep {
 
 export function createWorkflowRun(run_id: `run_${string}`, mission_id: `mis_${string}`, workflow_id: string): WorkflowRun {
   const now = new Date().toISOString();
-  const template = WORKFLOW_LIBRARY[workflow_id] ?? WORKFLOW_LIBRARY.bugfix;
+  // WORKFLOW_LIBRARY is a plain object, so a bare index lookup also resolves
+  // Object.prototype members: "toString" yields a function, `?? bugfix` never
+  // fires, and template.map() then throws a bare TypeError. Only own keys are
+  // workflows.
+  const template = Object.hasOwn(WORKFLOW_LIBRARY, workflow_id) ? WORKFLOW_LIBRARY[workflow_id]! : WORKFLOW_LIBRARY.bugfix!;
   const run: WorkflowRun = {
     run_id,
     mission_id,
