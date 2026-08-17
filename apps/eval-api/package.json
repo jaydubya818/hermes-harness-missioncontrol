@@ -12,8 +12,8 @@
   "dependencies": {
     "@hermes-harness-with-missioncontrol/eval-core": "workspace:*",
     "@hermes-harness-with-missioncontrol/state-store": "workspace:*",
-    "@hono/node-server": "^2.1.0",
-    "hono": "^4.13.1"
+    "@hono/node-server": "^2.1.1",
+    "hono": "^4.13.2"
   },
   "devDependencies": {
     "tsx": "^4.23.12",
