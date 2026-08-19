@@ -57,6 +57,41 @@ class EventSource(str, Enum):
     HERMES = 'hermes'
     MISSIONCONTROL = 'missioncontrol'
 
+class CanonicalEventType(str, Enum):
+    MISSION_CREATED = 'mission.created'
+    MISSION_UPDATED = 'mission.updated'
+    MISSION_PAUSED = 'mission.paused'
+    MISSION_RUNNING = 'mission.running'
+    MISSION_CANCELLED = 'mission.cancelled'
+    MISSION_COMPLETED = 'mission.completed'
+    RUN_STARTED = 'run.started'
+    RUN_RUNNING = 'run.running'
+    RUN_PAUSED = 'run.paused'
+    RUN_COMPLETED = 'run.completed'
+    RUN_FAILED = 'run.failed'
+    RUN_CANCELLED = 'run.cancelled'
+    STEP_STARTED = 'step.started'
+    STEP_PROGRESS = 'step.progress'
+    STEP_BLOCKED = 'step.blocked'
+    STEP_PAUSED = 'step.paused'
+    STEP_RESUMED = 'step.resumed'
+    STEP_COMPLETED = 'step.completed'
+    STEP_FAILED = 'step.failed'
+    STEP_CANCELLED = 'step.cancelled'
+    STEP_RETRIED = 'step.retried'
+    TOOL_STARTED = 'tool.started'
+    TOOL_COMPLETED = 'tool.completed'
+    TOOL_FAILED = 'tool.failed'
+    ARTIFACT_CREATED = 'artifact.created'
+    APPROVAL_REQUESTED = 'approval.requested'
+    APPROVAL_RESOLVED = 'approval.resolved'
+    EVAL_STARTED = 'eval.started'
+    EVAL_COMPLETED = 'eval.completed'
+    EVAL_FAILED = 'eval.failed'
+    POLICY_VIOLATION = 'policy.violation'
+    EXECUTION_TIMEOUT = 'execution.timeout'
+    EXECUTION_BUDGET_EXCEEDED = 'execution.budget_exceeded'
+
 class Mission(BaseModel):
     model_config = ConfigDict(extra='forbid')
     mission_id: str
@@ -188,7 +223,7 @@ class EventEnvelope(BaseModel):
     timestamp: str
     sequence: int
     source: EventSource
-    type: str
+    type: CanonicalEventType
     mission_id: str
     run_id: str | None = None
     step_id: str | None = None

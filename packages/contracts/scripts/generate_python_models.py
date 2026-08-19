@@ -19,6 +19,14 @@ ENUM_NAMES = [
     "EventSource",
 ]
 
+# Inline string enums that models declare in place rather than via $ref.
+# Without this the property degrades to a bare `str` in the generated models,
+# so a Python consumer of the contracts accepts any event type at all -- the
+# exact validation the canonical taxonomy exists to provide.
+INLINE_ENUMS = {
+    ("EventEnvelope", "type"): "CanonicalEventType",
+}
+
 MODEL_ORDER = [
     "Mission",
     "Run",
@@ -75,13 +83,18 @@ def main() -> None:
         "",
     ]
 
-    for enum_name in ENUM_NAMES:
-        enum_values = schemas[enum_name]["enum"]
-        lines.append(f"class {enum_name}(str, Enum):")
-        for value in enum_values:
+    def emit_enum(name: str, values: list[str]) -> None:
+        lines.append(f"class {name}(str, Enum):")
+        for value in values:
             member = value.upper().replace(".", "_").replace("-", "_")
             lines.append(f"    {member} = {value!r}")
         lines.append("")
+
+    for enum_name in ENUM_NAMES:
+        emit_enum(enum_name, schemas[enum_name]["enum"])
+
+    for (model_name, prop_name), enum_name in INLINE_ENUMS.items():
+        emit_enum(enum_name, schemas[model_name]["properties"][prop_name]["enum"])
 
     for model_name in MODEL_ORDER:
         schema = schemas[model_name]
@@ -94,7 +107,7 @@ def main() -> None:
             lines.append("")
             continue
         for prop_name, prop_schema in props.items():
-            py_type = resolve_type(prop_schema)
+            py_type = INLINE_ENUMS.get((model_name, prop_name)) or resolve_type(prop_schema)
             py_type = optionalize(py_type, prop_name in required)
             default = "" if prop_name in required else " = None"
             lines.append(f"    {prop_name}: {py_type}{default}")
