@@ -15,6 +15,54 @@ describe("writeback", () => {
     vi.unmock("node:fs/promises");
   });
 
+  it("flushes vault contents to disk before the rename publishes them", async () => {
+    // Without the fsync a crash between write and rename can publish a
+    // truncated markdown file over the previous version of an agent's
+    // memory. Records which temp files were synced before being renamed.
+    const synced: string[] = [];
+    const renamedBeforeSync: string[] = [];
+    vi.doMock("node:fs/promises", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("node:fs/promises")>();
+      return {
+        ...actual,
+        open: async (path: Parameters<typeof actual.open>[0], ...rest: unknown[]) => {
+          const handle = await (actual.open as (...args: unknown[]) => Promise<Awaited<ReturnType<typeof actual.open>>>)(path, ...rest);
+          const sync = handle.sync.bind(handle);
+          handle.sync = async () => {
+            synced.push(String(path));
+            return sync();
+          };
+          return handle;
+        },
+        rename: async (from: string, to: string) => {
+          if (!synced.includes(String(from))) renamedBeforeSync.push(String(from));
+          return actual.rename(from, to);
+        },
+      };
+    });
+
+    const { closeTask, promoteLearning } = await loadWritebackModule();
+    const root = mkdtempSync(join(tmpdir(), "writeback-fsync-"));
+    await closeTask(root, {
+      agent_id: "agent_demo",
+      project_id: "proj_demo",
+      outcome: "success",
+      summary: "durable summary",
+      gotchas: [{ title: "g", body: "b" }]
+    });
+    await promoteLearning(root, {
+      item_id: "disc_1",
+      target_path: "wiki/projects/proj_demo/promoted-disc_1.md",
+      promotion_kind: "standard",
+      promoted_by: "agent_demo"
+    });
+
+    expect(synced.length).toBeGreaterThan(0);
+    // Backup renames (path -> .bak) are not staged writes, so only temp
+    // files are expected to have been synced first.
+    expect(renamedBeforeSync.filter((path) => path.endsWith(".tmp"))).toEqual([]);
+  });
+
   it("writes task logs and learned memory", async () => {
     const { closeTask } = await loadWritebackModule();
     const root = mkdtempSync(join(tmpdir(), "writeback-"));

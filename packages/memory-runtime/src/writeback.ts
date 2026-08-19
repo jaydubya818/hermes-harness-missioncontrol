@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, rename, access, rm } from "node:fs/promises";
+import { mkdir, open, readFile, rename, access, rm } from "node:fs/promises";
 import { dirname, join, resolve, relative } from "node:path";
 import { makeId, type CloseTaskRequest, type CloseTaskResponse, type PromoteLearningRequest, type PromoteLearningResponse } from "@hermes-harness-with-missioncontrol/shared-types";
 
@@ -27,11 +27,27 @@ async function exists(path: string) {
   }
 }
 
+// write-then-rename is only atomic against a *reader*: without an fsync the
+// rename can reach disk before the contents do, so a crash between the two
+// leaves a valid-looking but truncated (or empty) markdown file where the
+// previous version used to be. The vault is the durable record of what an
+// agent learned, so flush the contents before the rename publishes them --
+// the same guarantee packages/state-store gives the JSON state files.
+async function writeFileDurably(path: string, content: string) {
+  const handle = await open(path, "w");
+  try {
+    await handle.writeFile(content, "utf8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
 async function writeTextAtomically(path: string, content: string) {
   await mkdir(dirname(path), { recursive: true });
   const tmpPath = join(dirname(path), `.${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
   try {
-    await writeFile(tmpPath, content, "utf8");
+    await writeFileDurably(tmpPath, content);
     await rename(tmpPath, path);
   } catch (error) {
     // Do not leave orphaned .tmp files in the vault when the write fails.
@@ -46,7 +62,7 @@ async function commitTextBatchAtomically(writes: PendingWrite[]) {
   const staged = await Promise.all(writes.map(async ({ path, content }) => {
     await mkdir(dirname(path), { recursive: true });
     const tmpPath = join(dirname(path), `.${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
-    await writeFile(tmpPath, content, "utf8");
+    await writeFileDurably(tmpPath, content);
     return { path, tmpPath, backupPath: join(dirname(path), `.${Date.now()}-${Math.random().toString(36).slice(2)}.bak`) };
   }));
 

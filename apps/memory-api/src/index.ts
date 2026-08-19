@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { access, readdir, readFile, stat, writeFile, mkdir, rename, rm } from "node:fs/promises";
+import { access, open, readdir, readFile, stat, mkdir, rename, rm } from "node:fs/promises";
 import { timingSafeEqual } from "node:crypto";
 import { dirname, join, resolve, relative } from "node:path";
 import { loadContextBundle, closeTask, promoteLearning } from "@hermes-harness-with-missioncontrol/memory-runtime";
@@ -137,7 +137,16 @@ async function writeTextAtomically(path: string, content: string) {
   await mkdir(dir, { recursive: true });
   const tmp = join(dir, `.${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
   try {
-    await writeFile(tmp, content, "utf8");
+    // Flush the contents before the rename publishes them: without the
+    // fsync a crash between write and rename can leave a truncated bus.md
+    // where the previous version used to be. Mirrors packages/state-store.
+    const handle = await open(tmp, "w");
+    try {
+      await handle.writeFile(content, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
     await rename(tmp, path);
   } catch (error) {
     // Do not leave orphaned .tmp files in the wiki when the write fails.
