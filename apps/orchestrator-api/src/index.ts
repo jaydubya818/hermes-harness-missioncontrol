@@ -151,6 +151,16 @@ function normalizeApproval(approval: Approval): Approval {
 
 const CANONICAL_EVENT_TYPE_SET = new Set<string>(CANONICAL_EVENT_TYPES);
 
+// This service is the only place that holds both copies of the taxonomy:
+// it validates ingested events against the contracts list, then stores and
+// re-emits them as shared-types HarnessEvent. Assignable both ways means the
+// two are identical, so adding a type to only one of them fails `pnpm
+// typecheck` instead of producing events the ingestion path accepts at
+// runtime but no consumer can represent (or vice versa).
+const canonicalTypesAreHarnessEvents: HarnessEvent["type"][] = [...CANONICAL_EVENT_TYPES];
+const harnessEventTypesAreCanonical: (typeof CANONICAL_EVENT_TYPES)[number][] = canonicalTypesAreHarnessEvents;
+void harnessEventTypesAreCanonical;
+
 const LEGACY_EVENT_TYPE_MAP: Record<string, HarnessEvent["type"]> = {
   "approval.granted": "approval.resolved",
   "approval.rejected": "approval.resolved",

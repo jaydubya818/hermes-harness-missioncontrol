@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   CANONICAL_EVENT_TYPES,
   StepKind,
@@ -16,6 +17,39 @@ import {
   type ExecutionEnvelope,
   type StepExecutionRequest,
 } from "./index.js";
+import type { components } from "./index.js";
+
+// The canonical taxonomy is duplicated by necessity: it is a TS runtime list
+// here, an inline enum in schema/openapi.yaml (which the TS and Python model
+// generators read), and a union in the generated types. Compile-time guard
+// for the generated-types copy -- assignable both ways means the two sets are
+// identical, so adding an event type to only one of them stops `pnpm
+// typecheck` instead of silently shipping a type no consumer can express.
+type SchemaEventType = components["schemas"]["EventEnvelope"]["type"];
+const _canonicalCoversSchema: SchemaEventType[] = [...CANONICAL_EVENT_TYPES];
+const _schemaCoversCanonical: CanonicalEventType[] = _canonicalCoversSchema;
+void _schemaCoversCanonical;
+
+// Pulls the EventEnvelope.type enum straight out of the YAML the generators
+// consume, without adding a YAML parser dependency to this package: find the
+// enum block under EventEnvelope's `type` property and read its list items.
+function readSchemaEventTypes(): string[] {
+  const yaml = readFileSync(new URL("../schema/openapi.yaml", import.meta.url), "utf8");
+  const lines = yaml.split("\n");
+  const envelopeAt = lines.indexOf("    EventEnvelope:");
+  if (envelopeAt === -1) throw new Error("EventEnvelope schema not found in openapi.yaml");
+  const typeAt = lines.indexOf("        type:", envelopeAt);
+  if (typeAt === -1) throw new Error("EventEnvelope.type property not found in openapi.yaml");
+  const enumAt = lines.indexOf("          enum:", typeAt);
+  if (enumAt === -1) throw new Error("EventEnvelope.type enum not found in openapi.yaml");
+  const values: string[] = [];
+  for (const line of lines.slice(enumAt + 1)) {
+    const match = /^ {12}- (\S+)$/.exec(line);
+    if (!match) break;
+    values.push(match[1]!);
+  }
+  return values;
+}
 
 describe("contracts package exports", () => {
   it("exports canonical enums", () => {
@@ -35,6 +69,13 @@ describe("contracts package exports", () => {
     }
     const asType: CanonicalEventType = "step.completed";
     expect(CANONICAL_EVENT_TYPES).toContain(asType);
+  });
+
+  it("keeps the OpenAPI event enum in step with the canonical taxonomy", () => {
+    // openapi.yaml is what generate:ts and generate:py read, so a type added
+    // to only one of the two copies ships a schema no generated client can
+    // express (the Python models would reject the event outright).
+    expect([...readSchemaEventTypes()].sort()).toEqual([...CANONICAL_EVENT_TYPES].sort());
   });
 
   it("supports canonical contract shapes", () => {
