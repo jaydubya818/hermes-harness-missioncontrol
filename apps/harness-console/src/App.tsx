@@ -159,6 +159,10 @@ function Missions() {
   const [title, setTitle] = useState("Fix duplicate webhook jobs");
   const [objective, setObjective] = useState("");
   const [repoPath, setRepoPath] = useState("/Users/jaywest/projects/Hermes-harness-with-missioncontrol");
+  // project_id decides which project wiki the orchestrator's memory
+  // writeback and discovery bus entries land in, so it has to be an operator
+  // input; hardcoding it sent every mission's memory to proj_demo.
+  const [projectId, setProjectId] = useState("proj_demo");
   const [workflowId, setWorkflowId] = useState("bugfix");
   const { data: workflows } = useSWR(`${ORCH}/api/read-models/workflows`, fetcher);
   const workflowOptions: string[] = (workflows?.workflows ?? []).map((workflow: any) => workflow.workflow_id);
@@ -234,7 +238,7 @@ function Missions() {
         headers: { "content-type": "application/json" },
         // The server rejects empty-but-present optional fields; only send the
         // objective when the operator typed one (it defaults to the title).
-        body: JSON.stringify({ title, project_id: "proj_demo", workflow_id: workflowId, repo_path: repoPath, ...(objective.trim() ? { objective: objective.trim() } : {}) })
+        body: JSON.stringify({ title, project_id: projectId.trim(), workflow_id: workflowId, repo_path: repoPath, ...(objective.trim() ? { objective: objective.trim() } : {}) })
       });
       await refreshAll();
     }, "Mission created.");
@@ -294,6 +298,7 @@ function Missions() {
           <input value={title} onChange={(event) => setTitle(event.target.value)} style={{ flex: 1, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
           <input value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="Objective (optional, defaults to the title)" style={{ flex: 1, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
           <input value={repoPath} onChange={(event) => setRepoPath(event.target.value)} style={{ flex: 1, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+          <input value={projectId} onChange={(event) => setProjectId(event.target.value)} placeholder="project_id (proj_...)" style={{ flex: 1, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
           <select value={workflowId} onChange={(event) => setWorkflowId(event.target.value)} style={{ borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }}>
             {(workflowOptions.length ? workflowOptions : ["bugfix"]).map((id) => <option key={id} value={id}>{id}</option>)}
           </select>
