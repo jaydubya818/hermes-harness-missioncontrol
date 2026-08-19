@@ -51,28 +51,44 @@ export function summarize(records: EvalRecord[]): EvalSummary {
     };
   }
 
-  const successes = records.filter((r) => r.outcome === "success").length;
-  const failures  = records.filter((r) => r.outcome === "failure").length;
   // Records reach summarize() from persisted state and from the eval-api
   // request body. Validation only runs on the POST path, so a state file
   // written by an older build (or hand-edited) can carry a string or NaN
   // here, and one such record turned every cost/average in the summary into
   // NaN -- serialized as null, which the console renders as $0.00 with no
-  // hint that the numbers are wrong. Ignore non-finite values instead.
-  const cost      = records.reduce((sum, r) => sum + (isFiniteNumber(r.cost_usd) ? r.cost_usd : 0), 0);
-  const approvals = records.reduce((sum, r) => sum + (isFiniteNumber(r.approval_count) ? r.approval_count : 0), 0);
+  // hint that the numbers are wrong. Ignore non-finite values instead, and
+  // for the optional fields average only over records that carry a usable
+  // number (`!= null` alone let a string or NaN through).
+  //
+  // The console polls /api/evals every few seconds and the record log only
+  // grows, so accumulate every tally in one pass instead of the eleven
+  // separate traversals (three filters, two reduces, four filters, four
+  // averaging reduces) this used to make over the full set.
+  let successes = 0;
+  let failures = 0;
+  let cost = 0;
+  let approvals = 0;
+  let confidenceSum = 0;
+  let confidenceCount = 0;
+  let efficiencySum = 0;
+  let efficiencyCount = 0;
+  let riskSum = 0;
+  let riskCount = 0;
+  let durationSum = 0;
+  let durationCount = 0;
 
-  // Optional fields: only average over records that carry a usable number.
-  // `!= null` alone let a string or NaN through and poisoned the average.
-  const withConfidence  = records.filter((r) => isFiniteNumber(r.confidence));
-  const withEfficiency  = records.filter((r) => isFiniteNumber(r.efficiency_score));
-  const withRisk        = records.filter((r) => isFiniteNumber(r.risk_score));
-  const withDuration    = records.filter((r) => isFiniteNumber(r.duration_ms));
-
-  function avg(arr: EvalRecord[], key: keyof EvalRecord): number {
-    if (arr.length === 0) return 0;
-    return arr.reduce((sum, r) => sum + (r[key] as number), 0) / arr.length;
+  for (const record of records) {
+    if (record.outcome === "success") successes += 1;
+    else if (record.outcome === "failure") failures += 1;
+    if (isFiniteNumber(record.cost_usd)) cost += record.cost_usd;
+    if (isFiniteNumber(record.approval_count)) approvals += record.approval_count;
+    if (isFiniteNumber(record.confidence)) { confidenceSum += record.confidence; confidenceCount += 1; }
+    if (isFiniteNumber(record.efficiency_score)) { efficiencySum += record.efficiency_score; efficiencyCount += 1; }
+    if (isFiniteNumber(record.risk_score)) { riskSum += record.risk_score; riskCount += 1; }
+    if (isFiniteNumber(record.duration_ms)) { durationSum += record.duration_ms; durationCount += 1; }
   }
+
+  const avg = (sum: number, count: number) => count === 0 ? 0 : sum / count;
 
   return {
     total_runs:          total,
@@ -81,9 +97,9 @@ export function summarize(records: EvalRecord[]): EvalSummary {
     total_approvals:     approvals,
     total_cost_usd:      Math.round(cost * 1000) / 1000,
     average_cost_usd:    Math.round((cost / total) * 1000) / 1000,
-    average_confidence:  Math.round(avg(withConfidence, "confidence") * 100) / 100,
-    average_efficiency:  Math.round(avg(withEfficiency, "efficiency_score") * 100) / 100,
-    average_risk_score:  Math.round(avg(withRisk,       "risk_score")  * 100) / 100,
-    average_duration_ms: Math.round(avg(withDuration,   "duration_ms")),
+    average_confidence:  Math.round(avg(confidenceSum, confidenceCount) * 100) / 100,
+    average_efficiency:  Math.round(avg(efficiencySum, efficiencyCount) * 100) / 100,
+    average_risk_score:  Math.round(avg(riskSum,       riskCount)       * 100) / 100,
+    average_duration_ms: Math.round(avg(durationSum,   durationCount)),
   };
 }
