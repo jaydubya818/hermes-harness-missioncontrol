@@ -20,6 +20,17 @@ export function encodePathSegments(path: string) {
   return path.split("/").map(encodeURIComponent).join("/");
 }
 
+// The operator identity sent with approval decisions. It lands in the audit
+// trail (`resolved_by`, the approval.resolved event actor) and drives the
+// actor filters, so it must be the person actually operating this console --
+// not a build-time constant. Blank means "unset": the request omits `actor`
+// and the orchestrator falls back to its own "operator" default rather than
+// recording an empty attribution.
+export function normalizeOperatorActor(raw: string | null | undefined): string | undefined {
+  const actor = (raw ?? "").trim();
+  return actor || undefined;
+}
+
 export async function readApiResponse(response: Response) {
   const text = await response.text();
   try {

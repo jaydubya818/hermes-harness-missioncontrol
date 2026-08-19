@@ -3,7 +3,7 @@ import useSWR, { mutate } from "swr";
 import { CANONICAL_EVENT_TYPES } from "@hermes-harness-with-missioncontrol/contracts";
 import { CapacityBar, CostCard, Panel, Sparkline, StatusRow } from "@hermes-harness-with-missioncontrol/ui-kit";
 import { CommandPalette } from "./CommandPalette.js";
-import { createTrailingThrottle, encodePathSegments, readApiResponse, withQuery } from "./api.js";
+import { createTrailingThrottle, encodePathSegments, normalizeOperatorActor, readApiResponse, withQuery } from "./api.js";
 
 const tabs = ["Overview", "Missions", "Agents", "Memory", "Code", "Audit", "Settings"] as const;
 type Tab = (typeof tabs)[number];
@@ -16,6 +16,10 @@ function getOperatorToken() {
   // so a token pasted with a trailing newline or space fails auth with no
   // visible difference in Settings.
   return (window.localStorage.getItem("harness.operatorToken") ?? import.meta.env.VITE_OPERATOR_TOKEN ?? "").trim();
+}
+
+function getOperatorActor() {
+  return normalizeOperatorActor(window.localStorage.getItem("harness.operatorActor"));
 }
 
 // The APIs reject state-changing requests that do not declare a JSON
@@ -275,7 +279,9 @@ function Missions() {
       await authJson(`${ORCH}/api/approvals/${approvalId}/respond`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ decision, actor: "jay" })
+        // Attribution comes from the console's configured operator identity;
+        // omitted when unset so the orchestrator applies its own default.
+        body: JSON.stringify({ decision, ...(getOperatorActor() ? { actor: getOperatorActor() } : {}) })
       });
       await refreshAll();
     }, `Approval ${decision}.`);
@@ -791,12 +797,14 @@ function Audit() {
 
 function Settings() {
   const [token, setToken] = useState(getOperatorToken());
+  const [actor, setActor] = useState(getOperatorActor() ?? "");
   // Render the server's actual workflow catalog instead of a hardcoded list
   // that drifts as workflows are added.
   const { data: workflows } = useSWR(`${ORCH}/api/read-models/workflows`, fetcher);
   const workflowIds: string[] = (workflows?.workflows ?? []).map((workflow: any) => workflow.workflow_id);
   function saveToken() {
     window.localStorage.setItem("harness.operatorToken", token.trim());
+    window.localStorage.setItem("harness.operatorActor", actor.trim());
     mutate(() => true);
   }
   return (
@@ -808,8 +816,11 @@ function Settings() {
         <div style={{ height: 16 }} />
         <div style={{ color: "#94a3b8", marginBottom: 8 }}>Operator bearer token</div>
         <input type="password" autoComplete="off" value={token} onChange={(event) => setToken(event.target.value)} placeholder="optional HARNESS_OPERATOR_TOKEN" style={{ width: "100%", borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+        <div style={{ height: 16 }} />
+        <div style={{ color: "#94a3b8", marginBottom: 8 }}>Operator identity (audit attribution)</div>
+        <input value={actor} onChange={(event) => setActor(event.target.value)} placeholder="defaults to &quot;operator&quot;" style={{ width: "100%", borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
         <div style={{ height: 8 }} />
-        <Button onClick={saveToken}>Save token</Button>
+        <Button onClick={saveToken}>Save</Button>
       </Panel>
     </div>
   );

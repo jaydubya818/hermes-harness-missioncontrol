@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createTrailingThrottle, encodePathSegments, filterCommands, readApiResponse, withQuery } from "./api.js";
+import { createTrailingThrottle, encodePathSegments, filterCommands, normalizeOperatorActor, readApiResponse, withQuery } from "./api.js";
 
 describe("withQuery", () => {
   it("returns the bare url when no params are set", () => {
@@ -118,5 +118,19 @@ describe("createTrailingThrottle", () => {
     throttled.cancel();
     vi.advanceTimersByTime(2000);
     expect(fn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("normalizeOperatorActor", () => {
+  it("trims the stored identity", () => {
+    expect(normalizeOperatorActor("  jay  ")).toBe("jay");
+  });
+
+  it("treats missing or blank identities as unset so the server default applies", () => {
+    // Sending actor: "" would record an empty attribution in the audit
+    // trail instead of the orchestrator's "operator" fallback.
+    expect(normalizeOperatorActor(null)).toBeUndefined();
+    expect(normalizeOperatorActor(undefined)).toBeUndefined();
+    expect(normalizeOperatorActor("   ")).toBeUndefined();
   });
 });
