@@ -68,6 +68,21 @@ function isSafeId(value: unknown): value is string {
   return /^[a-zA-Z0-9_\-./]+$/.test(value) && !value.includes("..") && !value.startsWith("/");
 }
 
+// Wiki article slugs and section paths address real files on disk, and real
+// markdown filenames contain spaces, unicode and other characters that the
+// id charset above rejects. The docs browser therefore listed (and search
+// returned) files that 400'd with "unsafe slug" the moment an operator
+// opened them. Containment is already enforced by safeWikiPath, so validate
+// only the things that make a path unsafe or unusable: traversal segments,
+// absolute/backslash paths and control characters.
+function isSafeWikiPath(value: unknown): value is string {
+  if (typeof value !== "string" || !value) return false;
+  if (/[\u0000-\u001f\u007f\\]/.test(value)) return false;
+  if (value.startsWith("/")) return false;
+  const segments = value.split("/");
+  return segments.every((segment) => segment !== "" && segment !== "." && segment !== "..");
+}
+
 function requireOperator(c: any) {
   if (!operatorToken) return null;
   const auth = Buffer.from(c.req.header("authorization") ?? "");
@@ -455,7 +470,7 @@ app.get("/api/memory/articles", async (c) => {
   const authError = requireOperator(c);
   if (authError) return authError;
   const section = c.req.query("section");
-  if (section && !isSafeId(section)) return c.json({ error: "unsafe section" }, 400);
+  if (section && !isSafeWikiPath(section)) return c.json({ error: "unsafe section" }, 400);
   try {
     const base = section ? safeWikiPath(...section.split("/")) : safeWikiPath();
     // Hide dotfiles (in-flight atomic-write temp files, editor droppings)
@@ -477,7 +492,7 @@ app.get("/api/memory/articles/:slug{.+}", async (c) => {
   const authError = requireOperator(c);
   if (authError) return authError;
   const slug = c.req.param("slug");
-  if (!isSafeId(slug)) return c.json({ error: "unsafe slug" }, 400);
+  if (!isSafeWikiPath(slug)) return c.json({ error: "unsafe slug" }, 400);
   try {
     const fullPath = safeWikiPath(...slug.split("/"));
     const content = await readText(fullPath);

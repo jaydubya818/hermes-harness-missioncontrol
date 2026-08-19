@@ -449,7 +449,48 @@ describe("memory-api", () => {
 
   it("rejects unsafe article slugs", async () => {
     const app = await loadApp();
-    const res = await app.request("/api/memory/articles/..%2F..%2Fetc");
-    expect(res.status).toBe(400);
+    for (const slug of ["..%2F..%2Fetc", "%2Fetc%2Fpasswd", "agents//hot.md", "agents/.%2Fhot.md"]) {
+      const res = await app.request(`/api/memory/articles/${slug}`);
+      expect(res.status, slug).toBe(400);
+    }
+    // An unencoded traversal is collapsed by URL normalization before it
+    // reaches the route, so it 404s instead; either way it must not resolve.
+    const normalized = await app.request("/api/memory/articles/agents/../../etc");
+    expect(normalized.status).not.toBe(200);
+  });
+
+  it("serves articles whose filenames contain spaces or unicode", async () => {
+    // The listing and search endpoints surface every markdown file in the
+    // vault, including ones the id charset rejects; opening them used to
+    // 400 with "unsafe slug" even though safeWikiPath already contains them.
+    const vault = makeVault();
+    writeFileSync(join(vault, "wiki", "projects", "proj_demo", "my notes.md"), "hello spaces");
+    writeFileSync(join(vault, "wiki", "projects", "proj_demo", "caf\u00e9.md"), "unicode body");
+    const app = await loadApp({ vaultRoot: vault });
+
+    const listed = await app.request("/api/memory/articles?section=projects/proj_demo");
+    expect(await listed.json()).toMatchObject({ files: ["caf\u00e9.md", "my notes.md", "standards.md"] });
+
+    const spaced = await app.request(`/api/memory/articles/projects/proj_demo/${encodeURIComponent("my notes.md")}`);
+    expect(spaced.status).toBe(200);
+    expect(await spaced.json()).toMatchObject({ content: "hello spaces" });
+
+    const unicode = await app.request(`/api/memory/articles/projects/proj_demo/${encodeURIComponent("caf\u00e9.md")}`);
+    expect(unicode.status).toBe(200);
+    expect(await unicode.json()).toMatchObject({ content: "unicode body" });
+  });
+
+  it("rejects unsafe article sections while allowing spaced section names", async () => {
+    const vault = makeVault();
+    mkdirSync(join(vault, "wiki", "projects", "my project"), { recursive: true });
+    writeFileSync(join(vault, "wiki", "projects", "my project", "notes.md"), "body");
+    const app = await loadApp({ vaultRoot: vault });
+
+    const traversal = await app.request("/api/memory/articles?section=projects/../..");
+    expect(traversal.status).toBe(400);
+
+    const spaced = await app.request(`/api/memory/articles?section=projects/${encodeURIComponent("my project")}`);
+    expect(spaced.status).toBe(200);
+    expect(await spaced.json()).toMatchObject({ files: ["notes.md"] });
   });
 });
