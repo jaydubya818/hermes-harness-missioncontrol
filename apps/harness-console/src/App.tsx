@@ -573,7 +573,11 @@ function Memory() {
         </Panel>
         <Panel title="Article Viewer">
           <div style={{ color: "#94a3b8", marginBottom: 8 }}>{selectedArticle}</div>
-          {article?.content ? <pre style={{ whiteSpace: "pre-wrap" }}>{article.content}</pre> : <div>Select an article.</div>}
+          {/* memory-api answers an existing-but-empty article with 200 and
+              content: ""; keying the render off the body would hide it
+              behind the "no selection" state. The fetcher throws on 404, so
+              a loaded response means the article really exists. */}
+          {article ? <pre style={{ whiteSpace: "pre-wrap" }}>{article.content || "(empty article)"}</pre> : <div>Select an article.</div>}
         </Panel>
       </div>
     </div>
