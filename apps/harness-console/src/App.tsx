@@ -466,7 +466,13 @@ function Agents() {
 
 function Memory() {
   const { data: project } = useSWR(`${MEM}/api/memory/projects/proj_demo/summary`, fetcher, { refreshInterval: 10000 });
-  const { data: search } = useSWR(`${MEM}/api/memory/search?q=autonomy`, fetcher, { refreshInterval: 10000 });
+  // The search endpoint walks the whole wiki and anchors its snippets on the
+  // match, but the panel used to pin the query to the literal string
+  // "autonomy" -- every other term in the vault was unreachable from here.
+  // Debounced so typing does not refetch on every keystroke.
+  const [searchQuery, setSearchQuery] = useState("autonomy");
+  const debouncedQuery = useDebouncedValue(searchQuery, 400);
+  const { data: search } = useSWR(withQuery(`${MEM}/api/memory/search`, { q: debouncedQuery.trim() || undefined }), fetcher, { refreshInterval: 10000 });
   const { data: rewrites } = useSWR(`${MEM}/api/memory/agents/agent_demo/rewrite-candidates`, fetcher, { refreshInterval: 10000 });
   const [writeback, setWriteback] = useState<any>(null);
   const [promotion, setPromotion] = useState<any>(null);
@@ -535,7 +541,10 @@ function Memory() {
           <StatusRow label="Recipes" value={(project?.recipes ?? []).join(", ") || "none"} />
           <StatusRow label="Active rewrites" value={(rewrites?.items ?? []).length ?? 0} />
         </Panel>
-        <Panel title="Knowledge Search">{(search?.results ?? []).length === 0 ? <div>No results.</div> : <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(search.results, null, 2)}</pre>}</Panel>
+        <Panel title="Knowledge Search">
+          <input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search the vault (blank lists everything)" style={{ width: "100%", borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12, marginBottom: 12 }} />
+          {(search?.results ?? []).length === 0 ? <div>No results.</div> : <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(search.results, null, 2)}</pre>}
+        </Panel>
       </div>
       <Panel title="Writeback + Promotion Flow">
         <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
