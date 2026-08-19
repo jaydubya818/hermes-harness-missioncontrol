@@ -179,6 +179,11 @@ async function readPromotedBy(path: string): Promise<string | null> {
   }
   const cached = promotionAttributionCache.get(path);
   if (cached && cached.mtimeMs === mtimeMs) return cached.promotedBy;
+  // Each scan is capped at PROMOTION_SCAN_MAX_FILES, but the cache itself
+  // was not: renamed or deleted promotions are never re-stat'ed, so a
+  // long-lived process accumulated an entry for every promoted file it ever
+  // saw. Bound it the same way the search content cache below is bounded.
+  if (promotionAttributionCache.size >= PROMOTION_SCAN_MAX_FILES * 4) promotionAttributionCache.clear();
   const content = await readText(path);
   // Line-anchored match: matching anywhere in the line would credit agent_1
   // with promotions made by agent_10.
