@@ -281,7 +281,7 @@ Most important env vars:
 - `ALLOWED_REPO_ROOT` — root boundary for repo/worktree paths
 - `ORPHAN_SWEEP_INTERVAL_MS` — optional periodic orphan cleanup cadence
 - `WORKER_MAX_CONCURRENT_EXECUTIONS` — cap on concurrent worker step executions; further dispatches get `429` (default 4, 0 disables)
-- `WORKER_CHILD_ENV_ALLOW` — comma-separated env var names to keep in spawned repo commands despite the credential-name filter (e.g. `NPM_TOKEN`); `HARNESS_OPERATOR_TOKEN`/`VITE_OPERATOR_TOKEN` are always stripped
+- `WORKER_CHILD_ENV_ALLOW` — comma-separated env var names to keep in spawned repo commands despite the credential filter (e.g. `NPM_TOKEN`, `SSH_AUTH_SOCK` for a git+ssh dependency). The filter strips credential-shaped names (`*_TOKEN`, `*_SECRET`, `*_API_KEY`, ...) plus agent sockets and credential-file pointers that are not credential-shaped (`SSH_AUTH_SOCK`, `GPG_AGENT_INFO`, `KUBECONFIG`, `NETRC`, `AWS_SHARED_CREDENTIALS_FILE`, `DOCKER_HOST`, ...); `HARNESS_OPERATOR_TOKEN`/`VITE_OPERATOR_TOKEN` are always stripped and cannot be allow-listed
 - `DEPLOY_ADAPTER` — `auto | noop-canary | vercel | render`
 - `DEPLOY_BASE_URL` — base URL used in deploy-plan metadata
 

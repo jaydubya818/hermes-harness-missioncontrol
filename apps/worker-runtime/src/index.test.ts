@@ -287,6 +287,30 @@ describe("worker-runtime", () => {
     expect(env.SECRETARIAT).toBe("keep-me");
   });
 
+  it("strips credential-bearing variables that are not credential-shaped", () => {
+    // Naming conventions miss the worst ones: a forwarded ssh/gpg agent
+    // socket lets a repo-controlled test script use the operator's keys, and
+    // KUBECONFIG / NETRC point straight at credential files.
+    const env = sanitizedChildEnv({
+      PATH: "/usr/bin",
+      SSH_AUTH_SOCK: "/tmp/ssh-agent.sock",
+      GPG_AGENT_INFO: "/tmp/gpg",
+      KUBECONFIG: "/home/operator/.kube/config",
+      NETRC: "/home/operator/.netrc",
+      AWS_SHARED_CREDENTIALS_FILE: "/home/operator/.aws/credentials",
+      DOCKER_HOST: "unix:///var/run/docker.sock",
+    });
+    for (const stripped of ["SSH_AUTH_SOCK", "GPG_AGENT_INFO", "KUBECONFIG", "NETRC", "AWS_SHARED_CREDENTIALS_FILE", "DOCKER_HOST"]) {
+      expect(env[stripped]).toBeUndefined();
+    }
+    expect(env.PATH).toBe("/usr/bin");
+
+    // Unlike the operator token these are real build inputs for some
+    // pipelines, so the allow list still applies.
+    const allowed = sanitizedChildEnv({ SSH_AUTH_SOCK: "/tmp/ssh-agent.sock" }, new Set(["SSH_AUTH_SOCK"]));
+    expect(allowed.SSH_AUTH_SOCK).toBe("/tmp/ssh-agent.sock");
+  });
+
   it("honours the child-env allow list but never for the operator token", () => {
     const env = sanitizedChildEnv(
       { NPM_TOKEN: "npm-secret", GITHUB_TOKEN: "ghp_secret", HARNESS_OPERATOR_TOKEN: "prod-secret" },

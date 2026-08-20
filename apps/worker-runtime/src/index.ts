@@ -607,6 +607,27 @@ const SECRET_ENV_KEYS = ["HARNESS_OPERATOR_TOKEN", "VITE_OPERATOR_TOKEN"];
 // convention and give operators an explicit escape hatch for the variables
 // their pipelines genuinely need (e.g. NPM_TOKEN for a private registry).
 const SECRET_ENV_PATTERN = /(^|_)(TOKEN|SECRET|PASSWORD|PASSWD|APIKEY|API_KEY|ACCESS_KEY|PRIVATE_KEY|CREDENTIALS?|SESSION_KEY)(_|$)/i;
+
+// Naming conventions only catch variables that *look* like credentials. The
+// most damaging ones in a developer environment do not: SSH_AUTH_SOCK and
+// GPG_AGENT_INFO hand a spawned `pnpm test` live use of the operator's
+// forwarded ssh/gpg agent (enough to push to any repo those keys reach), and
+// KUBECONFIG / AWS_SHARED_CREDENTIALS_FILE / NETRC point straight at
+// credential files. Strip them by name. Unlike the operator token these are
+// legitimate build inputs for some pipelines (a git+ssh dependency in an
+// install step), so they stay opt-in-able via WORKER_CHILD_ENV_ALLOW.
+const SECRET_ENV_NAMES = new Set([
+  "SSH_AUTH_SOCK",
+  "SSH_AGENT_PID",
+  "GPG_AGENT_INFO",
+  "GNUPGHOME",
+  "KUBECONFIG",
+  "NETRC",
+  "AWS_SHARED_CREDENTIALS_FILE",
+  "AWS_WEB_IDENTITY_TOKEN_FILE",
+  "DOCKER_HOST",
+]);
+
 const childEnvAllowList = new Set(
   (process.env.WORKER_CHILD_ENV_ALLOW ?? "").split(",").map((name) => name.trim()).filter(Boolean)
 );
@@ -618,7 +639,7 @@ export function sanitizedChildEnv(env: NodeJS.ProcessEnv = process.env, allow: R
     // The operator token is never overridable: it is this service's own
     // authorization boundary, not a pipeline credential.
     if (allow.has(key)) continue;
-    if (SECRET_ENV_PATTERN.test(key)) delete copy[key];
+    if (SECRET_ENV_NAMES.has(key) || SECRET_ENV_PATTERN.test(key)) delete copy[key];
   }
   return copy;
 }
