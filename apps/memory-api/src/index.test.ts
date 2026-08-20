@@ -317,6 +317,22 @@ describe("memory-api", () => {
     expect(leafPayload.directories).toEqual([]);
   });
 
+  it("404s a section that does not exist instead of listing nothing", async () => {
+    const app = await loadApp({ vaultRoot: makeVault() });
+    // An empty 200 is indistinguishable from a genuinely empty section, so a
+    // typo'd path rendered as "no articles" in the docs browser.
+    const missing = await app.request("/api/memory/articles?section=projects/proj_nope");
+    expect(missing.status).toBe(404);
+
+    // A section pointing at an article is a client mistake, not an empty
+    // directory.
+    const file = await app.request("/api/memory/articles?section=projects/proj_demo/standards.md");
+    expect(file.status).toBe(400);
+
+    const real = await app.request("/api/memory/articles?section=projects/proj_demo");
+    expect(real.status).toBe(200);
+  });
+
   it("rejects bus channels outside the contract union", async () => {
     const app = await loadApp({ vaultRoot: makeVault() });
     const res = await app.request("/api/memory/bus/publish", {

@@ -487,6 +487,18 @@ app.get("/api/memory/articles", async (c) => {
   if (section && !isSafeWikiPath(section)) return c.json({ error: "unsafe section" }, 400);
   try {
     const base = section ? safeWikiPath(...section.split("/")) : safeWikiPath();
+    // listDirEntries swallows every readdir failure, so a typo'd section and
+    // a section pointing at a file both answered 200 with empty lists --
+    // indistinguishable from a genuinely empty section, and the docs browser
+    // rendered "no articles" for a path that does not exist. The article
+    // endpoint already 404s; make the listing agree.
+    let baseStat;
+    try {
+      baseStat = await stat(base);
+    } catch {
+      return c.json({ error: "section not found" }, 404);
+    }
+    if (!baseStat.isDirectory()) return c.json({ error: "section is not a directory" }, 400);
     // Hide dotfiles (in-flight atomic-write temp files, editor droppings)
     // from the docs browser, matching what search indexes. Subdirectories
     // are listed separately: they are sections to descend into, not

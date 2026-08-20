@@ -479,7 +479,7 @@ function Memory() {
   const [memoryError, setMemoryError] = useState<string | null>(null);
   const [section, setSection] = useState("projects/proj_demo");
   const [selectedArticle, setSelectedArticle] = useState("projects/proj_demo/standards.md");
-  const { data: articles } = useSWR(`${MEM}/api/memory/articles?section=${encodeURIComponent(section)}`, fetcher, { refreshInterval: 10000 });
+  const { data: articles, error: articlesError } = useSWR(`${MEM}/api/memory/articles?section=${encodeURIComponent(section)}`, fetcher, { refreshInterval: 10000 });
   const { data: article } = useSWR(selectedArticle ? `${MEM}/api/memory/articles/${encodePathSegments(selectedArticle)}` : null, fetcher, { refreshInterval: 10000 });
 
   async function closeTaskWriteback() {
@@ -570,6 +570,9 @@ function Memory() {
             <input value={section} onChange={(event) => setSection(event.target.value)} style={{ flex: 1, borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
             <Button onClick={() => mutate(`${MEM}/api/memory/articles?section=${encodeURIComponent(section)}`)}>Load</Button>
           </div>
+          {/* memory-api 404s a section that does not exist; without this the
+              docs browser rendered a typo'd path as an empty section. */}
+          {articlesError && <div style={{ color: "#fca5a5", fontSize: 13, marginBottom: 12 }}>Section unavailable: {articlesError.message}</div>}
           <div style={{ display: "grid", gap: 8 }}>
             {section && <Button onClick={() => setSection(section.split("/").slice(0, -1).join("/"))} style={{ textAlign: "left", color: "#94a3b8" }}>../</Button>}
             {(articles?.directories ?? []).map((dir: string) => (
