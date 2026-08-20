@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import {
   CANONICAL_EVENT_TYPES,
+  EventSource,
+  MissionState,
+  RunState,
   StepKind,
   StepState,
   ApprovalMode,
@@ -51,6 +54,19 @@ function readSchemaEventTypes(): string[] {
   return values;
 }
 
+// The named enum schemas are written as inline flow sequences
+// (`enum: [pending, running, ...]`) directly under `<Name>:`; read the list
+// so each one can be compared against its TypeScript counterpart.
+function readSchemaEnum(name: string): string[] {
+  const yaml = readFileSync(new URL("../schema/openapi.yaml", import.meta.url), "utf8");
+  const lines = yaml.split("\n");
+  const schemaAt = lines.indexOf(`    ${name}:`);
+  if (schemaAt === -1) throw new Error(`${name} schema not found in openapi.yaml`);
+  const enumLine = lines.slice(schemaAt + 1, schemaAt + 4).find((line) => line.trimStart().startsWith("enum: ["));
+  if (!enumLine) throw new Error(`${name} enum not found in openapi.yaml`);
+  return enumLine.slice(enumLine.indexOf("[") + 1, enumLine.lastIndexOf("]")).split(",").map((value) => value.trim()).filter(Boolean);
+}
+
 describe("contracts package exports", () => {
   it("exports canonical enums", () => {
     expect(StepKind.Implement).toBe("implement");
@@ -76,6 +92,26 @@ describe("contracts package exports", () => {
     // to only one of the two copies ships a schema no generated client can
     // express (the Python models would reject the event outright).
     expect([...readSchemaEventTypes()].sort()).toEqual([...CANONICAL_EVENT_TYPES].sort());
+  });
+
+  it("keeps every named OpenAPI enum in step with its TypeScript source", () => {
+    // Same drift problem the event taxonomy already guards against, one level
+    // up: enums.ts is what the services import, openapi.yaml is what
+    // generate:ts and generate:py read. A state added to only one of them
+    // ships generated models that reject a value the runtime happily emits
+    // (the Python StepState enum would raise on it), and nothing failed.
+    const enums: Array<[string, Record<string, string>]> = [
+      ["MissionState", MissionState],
+      ["RunState", RunState],
+      ["StepKind", StepKind],
+      ["StepState", StepState],
+      ["ApprovalMode", ApprovalMode],
+      ["FinalOutcome", FinalOutcome],
+      ["EventSource", EventSource],
+    ];
+    for (const [name, source] of enums) {
+      expect([name, readSchemaEnum(name)]).toEqual([name, Object.values(source)]);
+    }
   });
 
   it("supports canonical contract shapes", () => {
