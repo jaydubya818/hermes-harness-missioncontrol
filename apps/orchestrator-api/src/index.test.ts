@@ -1501,6 +1501,43 @@ describe("orchestrator-api", () => {
     await reconnect.body!.cancel();
   });
 
+  it("fails the run when the worker returns a malformed execution result", async () => {
+    // The shape checks run after the step already executed, so a bare 500
+    // here left the run `running` with no step.failed, no eval and no
+    // worktree cleanup -- unrecoverable short of an operator interrupt.
+    const malformedBodies = [
+      { success: true, summary: "planned", confidence: 0.95 },
+      { success: true, summary: "planned", confidence: 0.95, artifacts: [null] },
+      { success: true, summary: "planned", confidence: 0.95, artifacts: [{ type: "plan" }] },
+      { success: true, summary: "planned", confidence: 0.95, artifacts: [], step_events: "not-an-array" },
+    ];
+
+    for (const body of malformedBodies) {
+      const cleanupCalls: string[] = [];
+      vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+        if (url.includes("/api/cleanup-run")) cleanupCalls.push(url);
+        return url.includes("/api/execute-step") ? jsonResponse({ body }) : jsonResponse();
+      }));
+
+      const app = await loadApp();
+      const mission = await (await app.request("/api/missions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "Malformed worker", project_id: "proj_demo", workflow_id: "bugfix" })
+      })).json();
+      const run = await (await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } })).json();
+
+      const dispatched = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } });
+      expect(dispatched.status).toBe(502);
+      expect((await dispatched.json()).error).toMatch(/malformed execution result/);
+
+      const stored = (await (await app.request("/api/runs")).json()).runs.find((item: any) => item.run_id === run.run_id);
+      expect(stored.status).toBe("failed");
+      expect(stored.steps[0].state).toBe("failed");
+      expect(cleanupCalls.length).toBeGreaterThan(0);
+    }
+  });
+
   it("bounds inlined artifact content so persisted state cannot grow without limit", async () => {
     process.env.MAX_ARTIFACT_CONTENT_BYTES = "64";
     const oversized = "x".repeat(4096);

@@ -1427,6 +1427,38 @@ async function failRun(run: WorkflowRun, stepId: string, summary: string, execut
   await persist();
 }
 
+// step_events crosses a service boundary, so it is untrusted like everything
+// else the worker sends. `for (const event of execution.step_events ?? [])`
+// throws on any non-iterable value, and it runs *after* the step already
+// executed -- a 500 there strands the run mid-step with nothing recorded.
+function workerStepEvents(execution: WorkerExecution | undefined | null): Array<Record<string, unknown>> {
+  return Array.isArray(execution?.step_events) ? execution.step_events : [];
+}
+
+// The worker result drives artifact attachment, the policy gate and the
+// lifecycle transition, and none of it tolerated a malformed body: a
+// response without an `artifacts` array threw "execution.artifacts is not
+// iterable" inside the dispatch handler, which Hono turned into a bare 500
+// *after* the step had run. The run stayed `running` with no step.failed, no
+// eval and no worktree cleanup -- unrecoverable short of an operator
+// interrupt. Reject a body that cannot be applied instead, so the caller's
+// existing catch path fails the run properly.
+function assertWorkerExecutionShape(payload: WorkerExecution): void {
+  const invalid = (reason: string) => {
+    const error = new Error(`worker returned a malformed execution result: ${reason}`) as Error & { statusCode?: number };
+    error.statusCode = 502;
+    return error;
+  };
+  if (typeof payload.summary !== "string") throw invalid("summary must be a string");
+  if (!Array.isArray(payload.artifacts)) throw invalid("artifacts must be an array");
+  for (const artifact of payload.artifacts) {
+    if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) throw invalid("every artifact must be an object");
+    if (typeof artifact.type !== "string" || !artifact.type) throw invalid("every artifact needs a non-empty string type");
+    if (typeof artifact.uri !== "string" || !artifact.uri) throw invalid("every artifact needs a non-empty string uri");
+  }
+  if (payload.step_events !== undefined && !Array.isArray(payload.step_events)) throw invalid("step_events must be an array when present");
+}
+
 async function fetchWorkerExecution(request: StepExecutionRequest): Promise<WorkerExecution> {
   const response = await fetch(`${workerApi}/api/execute-step`, {
     method: "POST",
@@ -1454,6 +1486,7 @@ async function fetchWorkerExecution(request: StepExecutionRequest): Promise<Work
     error.errorCode = payload.error_code;
     throw error;
   }
+  assertWorkerExecutionShape(payload);
   payload.execution_id ??= request.execution_id;
   return payload;
 }
@@ -1741,7 +1774,7 @@ function isDispatchStale(run: WorkflowRun, step: WorkflowRun["steps"][number], e
 async function discardStaleDispatch(run: WorkflowRun, step: WorkflowRun["steps"][number], executionId: string, execution: WorkerExecution | undefined, c: any) {
   const summary = `worker result for ${step.step_id} discarded: run state changed during dispatch (step now ${step.state}${step.execution_id === executionId ? "" : ", execution superseded"})`;
   const scope: DispatchScope = { mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id, execution_id: executionId };
-  for (const event of execution?.step_events ?? []) {
+  for (const event of workerStepEvents(execution)) {
     recordExternalEvent(event, scope);
   }
   recordEvent({ type: "step.progress", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id as `step_${string}`, execution_id: executionId, payload: { message: summary, discarded_execution_id: executionId, step_state: step.state } as any });
@@ -1797,7 +1830,7 @@ app.post("/api/runs/:id/execute-current", async (c) => {
     if (isDispatchStale(run, step, request.execution_id)) {
       return discardStaleDispatch(run, step, request.execution_id, workerExecution, c);
     }
-    for (const event of workerExecution?.step_events ?? []) {
+    for (const event of workerStepEvents(workerExecution)) {
       recordExternalEvent(event, { mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id, execution_id: request.execution_id });
     }
     const summary = String(error instanceof Error ? error.message : error);
@@ -1827,7 +1860,7 @@ app.post("/api/runs/:id/execute-current", async (c) => {
     attachArtifact(run, step.step_id, artifactRef);
     recordEvent({ type: "artifact.created", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id as `step_${string}`, execution_id: execution.execution_id, payload: { artifact_id: artifactId, kind: artifact.type, label: artifact.type, uri: artifact.uri, metadata: artifact.metadata } as any });
   }
-  for (const event of execution.step_events ?? []) {
+  for (const event of workerStepEvents(execution)) {
     recordExternalEvent(event, { mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id, execution_id: request.execution_id });
   }
 
