@@ -1711,6 +1711,47 @@ describe("orchestrator-api", () => {
     expect(payload.events.some((event) => event.event_id === "evt_string")).toBe(true);
   });
 
+  it("drops unusable persisted missions, runs and approvals instead of 500ing every request", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-bad-records-"));
+    const stateFile = join(stateDir, "state.json");
+    // ensureLoaded() runs on every request, so a state file written by an
+    // older build -- a run with no `steps` array, a null approval entry --
+    // used to throw during hydration and 500 the whole service forever.
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [
+        null,
+        { mission_id: "mis_good", title: "Good", project_id: "proj_demo", workflow: "bugfix", status: "pending", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z" }
+      ],
+      runs: [
+        { run_id: "run_broken", mission_id: "mis_good", workflow_id: "bugfix", status: "running", current_step_index: 0 },
+        { run_id: "run_good", mission_id: "mis_good", workflow_id: "bugfix", status: "running", current_step_index: 0, steps: [], created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z" }
+      ],
+      approvals: [
+        null,
+        { approval_id: "approval_good", mission_id: "mis_good", run_id: "run_good", step_id: "plan", status: "pending", reason: "needs review" }
+      ],
+      events: [],
+      audit: [],
+      processed_event_ids: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+
+    const missions = await app.request("/api/missions");
+    expect(missions.status).toBe(200);
+    expect((await missions.json()).missions.map((mission: any) => mission.mission_id)).toEqual(["mis_good"]);
+
+    const runs = await app.request("/api/runs");
+    expect(runs.status).toBe(200);
+    expect((await runs.json()).runs.map((run: any) => run.run_id)).toEqual(["run_good"]);
+
+    const approvals = await app.request("/api/approvals");
+    expect(approvals.status).toBe(200);
+    expect((await approvals.json()).approvals.map((approval: any) => approval.approval_id)).toEqual(["approval_good"]);
+  });
+
   it("hydrates persisted state exactly once for concurrent first requests", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
 

@@ -455,12 +455,48 @@ async function ensureLoaded() {
   await hydration;
 }
 
+// ensureLoaded() runs on every request, so anything that throws during
+// hydration turns the whole service into a permanent 500 loop -- there is no
+// way back short of editing the state file by hand. The persisted event
+// replay below already drops individual bad records for that reason; the
+// mission/run/approval collections got the same treatment only after a
+// state file written by an older build (a run without a `steps` array, a
+// null approval entry) bricked the orchestrator on restart. Drop the record
+// that cannot be rehydrated and keep the rest of the state.
+function rehydrateRecords<T>(kind: string, loaded: unknown, rehydrate: (record: any) => T): T[] {
+  if (!Array.isArray(loaded)) return [];
+  const kept: T[] = [];
+  for (const record of loaded) {
+    if (!record || typeof record !== "object") {
+      console.warn(`[orchestrator] skipping unusable persisted ${kind}: not an object`);
+      continue;
+    }
+    try {
+      kept.push(rehydrate(record));
+    } catch (err) {
+      console.warn(`[orchestrator] skipping unusable persisted ${kind}:`, err instanceof Error ? err.message : err);
+    }
+  }
+  return kept;
+}
+
 async function hydrateState() {
   if (initialized) return;
   const loaded = await loadJsonFile<OrchestratorState>(stateFile, state);
-  state.missions.splice(0, state.missions.length, ...(loaded.missions ?? []));
-  state.runs.splice(0, state.runs.length, ...((loaded.runs ?? []).map((run) => syncRunState(run as WorkflowRun))));
-  state.approvals.splice(0, state.approvals.length, ...((loaded.approvals ?? []).map((approval) => normalizeApproval(approval as Approval))));
+  state.missions.splice(0, state.missions.length, ...rehydrateRecords<Mission>("mission", loaded.missions, (mission) => {
+    if (typeof mission.mission_id !== "string" || !mission.mission_id) throw new Error("mission_id must be a non-empty string");
+    return mission as Mission;
+  }));
+  state.runs.splice(0, state.runs.length, ...rehydrateRecords<WorkflowRun>("run", loaded.runs, (run) => {
+    if (typeof run.run_id !== "string" || !run.run_id) throw new Error("run_id must be a non-empty string");
+    // syncRunState (and every read model) indexes run.steps directly.
+    if (!Array.isArray(run.steps)) throw new Error(`run ${run.run_id} has no steps array`);
+    return syncRunState(run as WorkflowRun);
+  }));
+  state.approvals.splice(0, state.approvals.length, ...rehydrateRecords<Approval>("approval", loaded.approvals, (approval) => {
+    if (typeof approval.approval_id !== "string" || !approval.approval_id) throw new Error("approval_id must be a non-empty string");
+    return normalizeApproval(approval as Approval);
+  }));
   state.events.splice(0, state.events.length);
   state.audit.splice(0, state.audit.length);
   state.processed_event_ids.splice(0, state.processed_event_ids.length);
