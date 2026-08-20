@@ -524,6 +524,30 @@ describe("worker-runtime", () => {
     }
   });
 
+  it("ignores a bootstrap cache file that is not an object", async () => {
+    const run = promisify(execFile);
+    const sourceRepo = join(sandboxRoot, "bad-cache-source-repo");
+    await mkdir(join(sourceRepo, "node_modules"), { recursive: true });
+    await writeFile(join(sourceRepo, "package.json"), JSON.stringify({ name: "bad-cache-repo" }), "utf8");
+    await run("git", ["-C", sourceRepo, "init", "-q"]);
+    await run("git", ["-C", sourceRepo, "add", "package.json"]);
+    await run("git", ["-C", sourceRepo, "-c", "user.email=test@example.com", "-c", "user.name=test", "commit", "-q", "-m", "init"]);
+
+    const workspace = join(sandboxRoot, "bad-cache-workspace");
+    await mkdir(workspace, { recursive: true });
+
+    // Valid JSON of the wrong shape (a truncated write, a hand-edit) parses
+    // fine, so loadJsonFile handed it straight back and the next
+    // `cache[cacheKey]` threw an opaque TypeError on every step execution.
+    const cacheFile = process.env.WORKSPACE_CACHE_FILE!;
+    await mkdir(dirname(cacheFile), { recursive: true });
+    await writeFile(cacheFile, "null", "utf8");
+
+    await expect(bootstrapWorkspaceDependencies(workspace, sourceRepo)).resolves.toMatchObject({ reused: false });
+    const rewritten = JSON.parse(await readFile(cacheFile, "utf8")) as Record<string, { repo_path: string }>;
+    expect(rewritten[Buffer.from(sourceRepo).toString("base64url")]?.repo_path).toBe(sourceRepo);
+  });
+
   it("hydrates workspaces whose node_modules symlink is dangling instead of crashing", async () => {
     const run = promisify(execFile);
     const sourceRepo = join(sandboxRoot, "dangling-source-repo");

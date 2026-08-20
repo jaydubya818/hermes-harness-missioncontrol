@@ -659,7 +659,17 @@ async function runCmd(cmd: string, args: string[], cwd: string, timeoutMs = DEFA
 }
 
 async function readCache(): Promise<BootstrapCache> {
-  return loadJsonFile<BootstrapCache>(cacheFile, {});
+  // loadJsonFile only falls back when the file is missing or unparseable. A
+  // valid JSON value of the wrong shape (`null`, an array, a bare number --
+  // a truncated write, a hand-edit) still came back as-is, and the very next
+  // `cache[cacheKey]` threw a bare TypeError that surfaced as an opaque tool
+  // failure on every step execution until the file was deleted.
+  const loaded = await loadJsonFile<BootstrapCache>(cacheFile, {});
+  if (!loaded || typeof loaded !== "object" || Array.isArray(loaded)) {
+    console.warn(`[worker] bootstrap cache ${cacheFile} is not an object; ignoring it`);
+    return {};
+  }
+  return loaded;
 }
 
 // The bootstrap cache is a shared read-modify-write JSON file. Two
