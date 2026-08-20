@@ -86,10 +86,23 @@ async function hydrateState() {
     initialized = true;
     return;
   }
-  records.splice(0, records.length, ...loaded.map((record) => ({
-    ...record,
-    eval_id: record.eval_id ?? `eval_${randomUUID().replace(/-/g, "").slice(0, 12)}`
-  })));
+  // ensureLoaded() runs on every request, so one unusable entry (a null left
+  // by a hand-edit, a value of the wrong shape from an older build) used to
+  // throw here and turn every request into a 500 loop with no way back short
+  // of editing the state file. Drop what cannot be rehydrated and keep the
+  // rest, matching how orchestrator-api hydrates its own state.
+  const usable: EvalRecord[] = [];
+  for (const record of loaded) {
+    if (!record || typeof record !== "object" || Array.isArray(record)) {
+      console.warn(`eval-api: skipping unusable persisted record in ${stateFile}`);
+      continue;
+    }
+    usable.push({
+      ...record,
+      eval_id: record.eval_id ?? `eval_${randomUUID().replace(/-/g, "").slice(0, 12)}`
+    });
+  }
+  records.splice(0, records.length, ...usable);
   initialized = true;
 }
 

@@ -33,6 +33,24 @@ describe("eval-api", () => {
     process.env.VITEST = "1";
   });
 
+  it("drops unusable persisted records instead of 500ing every request", async () => {
+    const stateFile = join(mkdtempSync(join(tmpdir(), "eval-bad-records-")), "state.json");
+    // ensureLoaded() runs on every request, so a null entry left by a
+    // hand-edit used to throw during hydration and 500 the service forever.
+    writeFileSync(stateFile, JSON.stringify([
+      null,
+      "not-a-record",
+      { eval_id: "eval_good", mission_id: "mis_demo", run_id: "run_a", outcome: "success", cost_usd: 0.5, approval_count: 0, artifact_count: 1, created_at: "2026-04-18T19:00:00.000Z" }
+    ], null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const response = await app.request("/api/evals");
+    expect(response.status).toBe(200);
+    const payload = await response.json() as { records: Array<{ eval_id?: string }>; summary: { total_runs: number } };
+    expect(payload.records.map((record) => record.eval_id)).toEqual(["eval_good"]);
+    expect(payload.summary.total_runs).toBe(1);
+  });
+
   it("assigns eval ids and supports filtered paginated reads", async () => {
     const app = await loadApp();
 
