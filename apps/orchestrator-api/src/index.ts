@@ -38,6 +38,29 @@ const sseMaxSubscribers = Number(process.env.SSE_MAX_SUBSCRIBERS ?? "64");
 // and Last-Event-ID resumes it from the retained window. Set to 0 to disable.
 const sseMaxQueuedEvents = Number(process.env.SSE_MAX_QUEUED_EVENTS ?? "512");
 const allowedRepoRoot = resolve(process.env.ALLOWED_REPO_ROOT ?? "/Users/jaywest/projects");
+
+// Worker artifacts inline their whole payload: a test step's artifact content
+// is the target repo's entire test output (bounded only by the envelope's
+// 5 MiB output budget), and a review artifact is the full diff. Every byte is
+// then retained three times over -- on the step artifact in state.runs, in the
+// step.completed/step.failed event payload, and again in the audit copy of
+// that event -- and persist() re-serializes all of it after every single
+// mutation, so one noisy test run permanently inflated every later state
+// write. The artifact uri always points at the file the worker wrote, so keep
+// a bounded preview here instead of a second full copy. Set to 0 to retain
+// artifact content in full.
+const maxArtifactContentBytes = Number(process.env.MAX_ARTIFACT_CONTENT_BYTES ?? String(16 * 1024));
+
+function boundArtifactContent(content: unknown): string | undefined {
+  if (typeof content !== "string") return undefined;
+  if (!Number.isFinite(maxArtifactContentBytes) || maxArtifactContentBytes <= 0) return content;
+  if (Buffer.byteLength(content, "utf8") <= maxArtifactContentBytes) return content;
+  // Slice on the byte buffer so the cap is a real byte bound, then drop a
+  // trailing partial UTF-8 sequence rather than emitting a replacement char.
+  const kept = Buffer.from(content, "utf8").subarray(0, maxArtifactContentBytes).toString("utf8").replace(/\uFFFD+$/, "");
+  return `${kept}\n[truncated: artifact content exceeds MAX_ARTIFACT_CONTENT_BYTES=${maxArtifactContentBytes}; full content at the artifact uri]`;
+}
+
 const operatorToken = process.env.HARNESS_OPERATOR_TOKEN;
 // Sidecar calls run inside lifecycle handlers; without a bound, one
 // unresponsive service hangs the mission forever. Failures are already
@@ -1750,6 +1773,13 @@ app.post("/api/runs/:id/execute-current", async (c) => {
     return discardStaleDispatch(run, step, request.execution_id, execution, c);
   }
 
+  // Bound the inlined content before anything stores or echoes it, so the
+  // step artifact, the step.completed/step.failed payloads and the dispatch
+  // response all carry the same bounded preview.
+  for (const artifact of execution.artifacts) {
+    artifact.content = boundArtifactContent(artifact.content);
+  }
+
   for (let index = 0; index < execution.artifacts.length; index += 1) {
     const artifact = execution.artifacts[index]!;
     const artifactId = artifact.artifact_id ?? `art_${execution.execution_id}_${index + 1}`;
@@ -1956,7 +1986,7 @@ app.post("/api/runs/:id/artifacts", async (c) => {
   }
   const existing = step.artifacts.find((item) => item.artifact_id === body.artifact_id);
   if (existing) return c.json(existing);
-  const artifact = { artifact_id: body.artifact_id ?? makeId("art"), type: body.type, kind: body.type, label: body.type, uri: body.uri ?? `artifact://${run.run_id}/${body.step_id}/${body.type}`, content: body.content, metadata: body.metadata, created_at: new Date().toISOString() };
+  const artifact = { artifact_id: body.artifact_id ?? makeId("art"), type: body.type, kind: body.type, label: body.type, uri: body.uri ?? `artifact://${run.run_id}/${body.step_id}/${body.type}`, content: boundArtifactContent(body.content), metadata: body.metadata, created_at: new Date().toISOString() };
   attachArtifact(run, body.step_id, artifact);
   recordEvent({ type: "artifact.created", ts: new Date().toISOString(), mission_id: run.mission_id, run_id: run.run_id, step_id: body.step_id as `step_${string}`, payload: { artifact_id: artifact.artifact_id, kind: artifact.kind, label: artifact.label, uri: artifact.uri, metadata: artifact.metadata } as any });
   await persist();

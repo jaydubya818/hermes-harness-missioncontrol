@@ -54,6 +54,7 @@ describe("orchestrator-api", () => {
     delete process.env.SSE_MAX_SUBSCRIBERS;
     delete process.env.SSE_MAX_QUEUED_EVENTS;
     delete process.env.MAX_REQUEST_BODY_BYTES;
+    delete process.env.MAX_ARTIFACT_CONTENT_BYTES;
     process.env.VITEST = "1";
   });
 
@@ -1498,6 +1499,71 @@ describe("orchestrator-api", () => {
     const reconnect = await app.request("/api/events/stream?last=0");
     expect(reconnect.status).toBe(200);
     await reconnect.body!.cancel();
+  });
+
+  it("bounds inlined artifact content so persisted state cannot grow without limit", async () => {
+    process.env.MAX_ARTIFACT_CONTENT_BYTES = "64";
+    const oversized = "x".repeat(4096);
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/api/execute-step")) {
+        return jsonResponse({
+          body: {
+            success: true,
+            summary: "planned",
+            confidence: 0.95,
+            artifacts: [{ artifact_id: "art_big", type: "plan", uri: "file:///tmp/plan.md", content: oversized }]
+          }
+        });
+      }
+      return jsonResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await loadApp();
+    const mission = await (await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Bound artifact content", project_id: "proj_demo", workflow_id: "bugfix" })
+    })).json();
+    const run = await (await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } })).json();
+    const dispatched = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } });
+    expect(dispatched.status).toBe(200);
+
+    const stored = (await (await app.request("/api/runs")).json()).runs
+      .find((item: any) => item.run_id === run.run_id)
+      .steps.find((step: any) => step.step_id === "plan")
+      .artifacts[0];
+    expect(stored.uri).toBe("file:///tmp/plan.md");
+    expect(stored.content.length).toBeLessThan(oversized.length);
+    expect(stored.content).toContain("[truncated:");
+
+    // The duplicate copy inside the step.completed event payload is bounded
+    // too: that is the one the audit trail retains 1000 of.
+    const events = (await (await app.request("/api/events")).json()).events;
+    const completed = events.find((event: any) => event.type === "step.completed");
+    expect(completed.payload.execution.artifacts[0].content).toBe(stored.content);
+
+    delete process.env.MAX_ARTIFACT_CONTENT_BYTES;
+  });
+
+  it("keeps artifact content intact when the bound is disabled", async () => {
+    process.env.MAX_ARTIFACT_CONTENT_BYTES = "0";
+    const app = await loadApp();
+    const mission = await (await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Unbounded artifact content", project_id: "proj_demo", workflow_id: "bugfix" })
+    })).json();
+    const run = await (await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } })).json();
+    const content = "y".repeat(4096);
+    const attached = await app.request(`/api/runs/${run.run_id}/artifacts`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ step_id: "plan", type: "diff", content })
+    });
+    expect(attached.status).toBe(201);
+    expect((await attached.json()).content).toBe(content);
+    delete process.env.MAX_ARTIFACT_CONTENT_BYTES;
   });
 
   it("releases the SSE slot when the request aborted before the stream started", async () => {
