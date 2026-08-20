@@ -1513,7 +1513,15 @@ app.get("/api/events/stream", async (c) => {
         }, sseHeartbeatMs);
         heartbeat.unref?.();
       }
-      c.req.raw.signal?.addEventListener("abort", close, { once: true });
+      const requestSignal = c.req.raw.signal;
+      requestSignal?.addEventListener("abort", close, { once: true });
+      // addEventListener on an already-aborted signal never fires, so a
+      // client that disconnected while ensureLoaded() was still reading the
+      // state file left a subscriber nobody would ever close: it stayed in
+      // eventSubscribers, kept its heartbeat timer, was fanned out to on
+      // every recorded event, and permanently consumed a slot against
+      // SSE_MAX_SUBSCRIBERS. Close it here instead.
+      if (requestSignal?.aborted) close();
     },
     cancel() {
       close();

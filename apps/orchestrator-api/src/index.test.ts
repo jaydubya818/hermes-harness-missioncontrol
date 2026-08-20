@@ -1500,6 +1500,27 @@ describe("orchestrator-api", () => {
     await reconnect.body!.cancel();
   });
 
+  it("releases the SSE slot when the request aborted before the stream started", async () => {
+    // ensureLoaded() reads the state file before the stream is constructed,
+    // so a client that disconnects in that window leaves an already-aborted
+    // request signal. addEventListener never fires on one, so the subscriber
+    // used to stay registered forever and burn a slot against the cap.
+    process.env.SSE_MAX_SUBSCRIBERS = "1";
+    process.env.SSE_HEARTBEAT_MS = "0";
+    const app = await loadApp();
+
+    const aborted = new AbortController();
+    aborted.abort();
+    const dropped = await app.request("/api/events/stream?last=0", { signal: aborted.signal });
+    expect(dropped.status).toBe(200);
+
+    // No cancel() here: nothing consumes the body of a request whose client
+    // already went away, so only the abort handling can free the slot.
+    const reconnect = await app.request("/api/events/stream?last=0");
+    expect(reconnect.status).toBe(200);
+    await reconnect.body!.cancel();
+  });
+
   it("refuses worker event ids that would forge extra SSE frames", async () => {
     // event_id lands verbatim in the SSE `id:` line, so a newline inside one
     // used to let the worker append arbitrary frames of its own.
