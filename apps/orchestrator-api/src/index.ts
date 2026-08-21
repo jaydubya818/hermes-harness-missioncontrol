@@ -804,6 +804,14 @@ function toApprovalOperatorView(approval: Approval) {
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
 function inDateRange(value: string | undefined, from?: string, to?: string) {
+  // No bounds means no filtering: every read model calls this unconditionally,
+  // so returning false for a record with no timestamp used to hide it from the
+  // unfiltered view too. An artifact persisted before created_at stamping, on a
+  // step that never started, in a run with no updated_at, resolves to undefined
+  // here and vanished from /api/read-models/artifacts entirely. With a bound
+  // present a timestampless record still cannot be shown to be in range, so it
+  // stays excluded.
+  if (!from && !to) return true;
   if (!value) return false;
   if (from && value < from) return false;
   if (to && (DATE_ONLY.test(to) ? value.slice(0, to.length) : value) > to) return false;

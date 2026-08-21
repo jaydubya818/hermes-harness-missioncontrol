@@ -1462,6 +1462,39 @@ describe("orchestrator-api", () => {
     expect(exactPayload.timeline).toHaveLength(0);
   });
 
+  it("keeps a record with no resolvable timestamp in the unfiltered read model", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    // Persisted before artifacts carried created_at, on a step that never
+    // started, in a run with no updated_at: every fallback the artifacts read
+    // model tries resolves to undefined. The date-range predicate runs on
+    // every request, so an undefined timestamp used to hide the artifact from
+    // the unfiltered view rather than only from a date-filtered one.
+    const stateFile = join(mkdtempSync(join(tmpdir(), "orch-no-ts-")), "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [{ mission_id: "mis_legacy", title: "Legacy", project_id: "proj_demo", workflow: "bugfix", status: "running", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z" }],
+      runs: [{
+        run_id: "run_legacy", mission_id: "mis_legacy", workflow_id: "bugfix", status: "running",
+        created_at: "2026-04-11T00:00:00.000Z",
+        steps: [{ step_id: "step_legacy", kind: "implement", risk: "low", state: "pending", artifacts: [{ artifact_id: "art_legacy", kind: "diff", label: "diff", uri: "artifact://legacy" }] }]
+      }],
+      approvals: [], events: [], audit: [], processed_event_ids: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const unfiltered = await app.request("/api/read-models/artifacts");
+    const payload = await unfiltered.json() as { artifacts: Array<{ artifact_id: string }> };
+
+    expect(unfiltered.status).toBe(200);
+    expect(payload.artifacts.map((item) => item.artifact_id)).toEqual(["art_legacy"]);
+
+    // An explicit bound still excludes it: a record with no timestamp cannot
+    // be shown to fall inside the requested window.
+    const filtered = await app.request("/api/read-models/artifacts?from=2026-04-11");
+    const filteredPayload = await filtered.json() as { artifacts: unknown[] };
+    expect(filteredPayload.artifacts).toHaveLength(0);
+  });
+
   it("drops SSE subscribers that stop draining their stream", async () => {
     process.env.SSE_MAX_QUEUED_EVENTS = "2";
     // One slot only, so the reconnect below also proves the dropped
