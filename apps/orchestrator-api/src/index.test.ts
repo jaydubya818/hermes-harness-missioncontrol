@@ -411,6 +411,102 @@ describe("orchestrator-api", () => {
     expect(payload.execution_result?.recommended_next_step).toBe("implement");
   });
 
+  it("carries the worker's reported confidence onto the step instead of losing it in the summary prose", async () => {
+    // The dispatch handler consumed execution.confidence for the policy gate
+    // and then dropped it: the step kept only execution.summary as notes, and
+    // the eval scorer recovered a confidence by regex-scraping that prose.
+    // The summary names a number only on the approval path, so on the normal
+    // completed path the scrape missed and the scorer substituted a state
+    // constant -- publishing an eval confidence no worker had produced.
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/api/execute-step")) {
+        return jsonResponse({
+          body: {
+            success: true,
+            summary: "Executed repo-aware test command", // names no confidence
+            confidence: 0.88,
+            artifacts: []
+          }
+        });
+      }
+      return jsonResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await loadApp();
+    const mission = await (await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Confidence", project_id: "proj_demo", workflow_id: "bugfix" })
+    })).json() as { mission_id: string };
+    const run = await (await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } })).json() as { run_id: string };
+
+    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } });
+    expect(execute.status).toBe(200);
+    const payload = await execute.json() as { run: { steps: Array<{ step_id: string; notes?: string; worker_confidence?: number }> } };
+
+    const planStep = payload.run.steps.find((step) => step.step_id === "plan")!;
+    expect(planStep.worker_confidence).toBe(0.88);
+    // The prose still carries no number, which is exactly why the scrape was
+    // never a usable channel for it.
+    expect(planStep.notes).toBe("Executed repo-aware test command");
+    expect(planStep.notes).not.toMatch(/0\.88/);
+  });
+
+  it("leaves worker_confidence unset and warns when the worker reports no usable confidence", async () => {
+    // Absent is not 0.5. The policy gate substitutes 0.5 to stay fail-safe,
+    // but recording that substitution on the step would publish an invented
+    // number to the eval surface as if it had been measured.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/api/execute-step")) {
+        return jsonResponse({ body: { success: true, summary: "done", artifacts: [] } });
+      }
+      return jsonResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await loadApp();
+    const mission = await (await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "No confidence", project_id: "proj_demo", workflow_id: "bugfix" })
+    })).json() as { mission_id: string };
+    const run = await (await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } })).json() as { run_id: string };
+
+    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } });
+    const payload = await execute.json() as { run: { steps: Array<{ step_id: string; worker_confidence?: number }> }; policy?: { confidence_score: number } };
+
+    expect(payload.run.steps.find((step) => step.step_id === "plan")!.worker_confidence).toBeUndefined();
+    // The gate still applied its fail-safe default, so the drop is visible
+    // without changing the decision it drives.
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("carried no usable confidence"));
+  });
+
+  it("clears worker_confidence when a step is retried so the scorer cannot report the previous attempt", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/api/execute-step")) {
+        return jsonResponse({ ok: false, status: 400, body: { success: false, summary: "Test command failed", confidence: 0.25, artifacts: [] } });
+      }
+      return jsonResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await loadApp();
+    const mission = await (await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Retry", project_id: "proj_demo", workflow_id: "bugfix" })
+    })).json() as { mission_id: string };
+    const run = await (await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } })).json() as { run_id: string };
+
+    await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } });
+    const retried = await app.request(`/api/runs/${run.run_id}/retry-step`, { method: "POST", headers: { "content-type": "application/json" } });
+    expect(retried.status).toBe(200);
+    const payload = await retried.json() as { run: { steps: Array<{ step_id: string; worker_confidence?: number }> } };
+    expect(payload.run.steps.find((step) => step.step_id === "plan")!.worker_confidence).toBeUndefined();
+  });
+
   it("rejects mission creation for repo paths outside the allowed root even when they embed it as a substring", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
     const allowedRoot = mkdtempSync(join(tmpdir(), "orch-allowed-"));

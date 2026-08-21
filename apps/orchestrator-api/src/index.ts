@@ -1850,6 +1850,26 @@ app.post("/api/runs/:id/execute-current", async (c) => {
     return discardStaleDispatch(run, step, request.execution_id, execution, c);
   }
 
+  // The worker reports a per-execution confidence, and the policy gate below
+  // consumes it. It used to stop there: the step recorded only
+  // `execution.summary` as free-text notes, and the eval scorer recovered a
+  // confidence by regex-scraping those notes. The summary names a number
+  // only on the approval path, so on every other path the scrape missed and
+  // the scorer substituted a state constant -- publishing an
+  // `EvalRecord.confidence` that no worker had produced. Keep the reported
+  // value in its own field so the number crossing into the eval surface is
+  // the number the worker actually sent.
+  const reportedConfidence = execution.confidence;
+  if (typeof reportedConfidence === "number" && Number.isFinite(reportedConfidence)) {
+    step.worker_confidence = Math.min(1, Math.max(0, reportedConfidence));
+  } else {
+    // Absent is not the same as 0.5. The policy gate substitutes 0.5 to stay
+    // fail-safe, but the step keeps no confidence at all so the eval surface
+    // does not report a substituted number as a measured one.
+    step.worker_confidence = undefined;
+    console.warn(`[orchestrator] worker result for ${step.step_id} carried no usable confidence (got ${JSON.stringify(reportedConfidence)}); the policy gate will use its 0.5 default`);
+  }
+
   // Bound the inlined content before anything stores or echoes it, so the
   // step artifact, the step.completed/step.failed payloads and the dispatch
   // response all carry the same bounded preview.

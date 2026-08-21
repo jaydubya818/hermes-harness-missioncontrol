@@ -223,4 +223,44 @@ describe("scoreRun", () => {
     const result = scoreRun({ run: makeRun(), approvals: [] });
     expect(result.artifact_count).toBe(1); // only implement step has 1 artifact
   });
+
+  it("scores the confidence the worker reported instead of a state constant", () => {
+    // The worker's number used to reach the scorer only if it happened to
+    // appear inside the free-text `notes`. It does not on the completed
+    // path, so a 0.95 execution and a 0.25 execution both scored the
+    // "completed" constant of 0.85 and the eval record published a number no
+    // worker had produced.
+    const scoreWith = (confidence: number | undefined) => {
+      const run = makeRun();
+      for (const step of run.steps) {
+        step.state = "completed";
+        step.worker_confidence = confidence;
+        step.notes = "Executed repo-aware test command"; // worker prose, names no number
+      }
+      return scoreRun({ run, approvals: [] }).confidence;
+    };
+
+    expect(scoreWith(0.95)).toBe(0.95);
+    expect(scoreWith(0.25)).toBe(0.25);
+    expect(scoreWith(0.95)).not.toBe(scoreWith(0.25));
+    // No reported confidence still falls back to the state constant rather
+    // than inventing a number, so absent stays distinguishable.
+    expect(scoreWith(undefined)).toBe(0.85);
+  });
+
+  it("ignores an unusable worker_confidence rather than scoring NaN", () => {
+    // The field is persisted state and crosses a service boundary, so it can
+    // arrive as a string, NaN or out of range from an older build or a
+    // hand-edited state file.
+    for (const bad of [Number.NaN, Infinity, -0.5, 1.5, "0.9" as unknown as number]) {
+      const run = makeRun();
+      for (const step of run.steps) {
+        step.state = "completed";
+        step.worker_confidence = bad;
+      }
+      const scored = scoreRun({ run, approvals: [] });
+      expect(Number.isFinite(scored.confidence)).toBe(true);
+      expect(scored.confidence).toBe(0.85);
+    }
+  });
 });

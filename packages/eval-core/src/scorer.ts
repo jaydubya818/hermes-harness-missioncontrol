@@ -59,8 +59,25 @@ function stepCost(step: WorkflowRun["steps"][number]): number {
   return (stepDurationMs(step) / 60_000) * rate;
 }
 
-/** Extract confidence from step notes ("confidence: 0.85") or estimate from state. */
+/**
+ * Confidence for a step, best source first.
+ *
+ * The worker reports a real number per execution (0.88 for a passing test
+ * command, 0.25 for a failing one, ...). That number used to reach this
+ * function only if it happened to appear inside `step.notes`, which holds the
+ * worker's free-text summary -- and the summary names a confidence only on
+ * the approval path. On every other path the regex missed and the state
+ * constant below was used instead, so a 0.95 execution and a 0.25 execution
+ * both scored 0.85 and `EvalRecord.confidence` reported a number no worker
+ * had produced. The orchestrator now carries the value in its own field, so
+ * read that first; the notes scrape stays as a fallback for runs persisted
+ * before the field existed.
+ */
 function stepConfidence(step: WorkflowRun["steps"][number]): number {
+  const reported = step.worker_confidence;
+  if (typeof reported === "number" && Number.isFinite(reported) && reported >= 0 && reported <= 1) {
+    return reported;
+  }
   if (step.notes) {
     const match = step.notes.match(/confidence[:\s]+([0-9.]+)/i);
     if (match) {
