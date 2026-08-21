@@ -64,6 +64,13 @@ type CommandResult = {
   stdout: string;
   stderr: string;
   exitCode: number;
+  /**
+   * Why the command did not complete normally. Absent means the process ran
+   * and chose `exitCode` itself, which is the only case where a non-zero
+   * status is evidence about the repo rather than about this worker's own
+   * environment.
+   */
+  failure_kind?: "spawn_failed" | "timed_out" | "aborted";
 };
 
 type BootstrapCacheEntry = {
@@ -650,10 +657,22 @@ async function runCmd(cmd: string, args: string[], cwd: string, timeoutMs = DEFA
     const { stdout, stderr } = await execFileAsync(cmd, args, { cwd, env: sanitizedChildEnv(), maxBuffer: 1024 * 1024 * 25, timeout: timeoutMs, killSignal: "SIGKILL", signal });
     return { stdout, stderr, exitCode: 0 };
   } catch (error: any) {
+    // "The runner is not installed", "the runner was killed at the timeout"
+    // and "the runner ran and reported failures" all arrive here, and all
+    // three used to flatten to exitCode 1. Only the third says anything
+    // about the repo; the other two say this worker could not do the job.
+    // Classify them so callers (and the operator reading the step) can tell
+    // an unrunnable command from a failing one.
+    const failure_kind: CommandResult["failure_kind"] =
+      error?.name === "AbortError" || error?.code === "ABORT_ERR" ? "aborted"
+      : error?.killed === true || error?.signal ? "timed_out"
+      : typeof error?.code !== "number" ? "spawn_failed"
+      : undefined;
     return {
       stdout: error?.stdout ?? "",
       stderr: error?.stderr ?? String(error?.message ?? error),
-      exitCode: typeof error?.code === "number" ? error.code : 1
+      exitCode: typeof error?.code === "number" ? error.code : 1,
+      ...(failure_kind ? { failure_kind } : {})
     };
   }
 }
@@ -937,6 +956,7 @@ async function runTests(workspace: WorkspaceContext) {
   let report = "";
   let success = false;
   let exitCode = 0;
+  let failureKind: CommandResult["failure_kind"];
 
   if (!detected) {
     report = "No known test runner detected.";
@@ -945,13 +965,36 @@ async function runTests(workspace: WorkspaceContext) {
     report = [`Command: ${detected.label}`, "", result.stdout, result.stderr].filter(Boolean).join("\n").trim();
     success = result.exitCode === 0;
     exitCode = result.exitCode;
+    failureKind = result.failure_kind;
   }
+
+  // "Test command failed" used to cover three different worlds: the suite ran
+  // and reported failures, the runner was not installed, and the runner was
+  // killed at the envelope timeout. Only the first is evidence about the
+  // repo. Reporting the other two as a test failure sends the operator to
+  // debug code that was never exercised, and -- now that the step's
+  // confidence reaches the eval record -- files that mistake as a measured
+  // low-confidence result. Name the real cause instead, and keep the
+  // confidence for an unrunnable command low: the step produced no
+  // information about the repo at all.
+  const summary =
+    success ? "Executed repo-aware test command"
+    : !detected ? "No test command detected"
+    : failureKind === "spawn_failed" ? `Test runner could not be started: ${detected.label}`
+    : failureKind === "timed_out" ? `Test command timed out after ${workspace.envelope.timeout_seconds}s: ${detected.label}`
+    : failureKind === "aborted" ? `Test command aborted: ${detected.label}`
+    : "Test command failed";
+  const confidence =
+    success ? 0.88
+    : !detected ? 0.4
+    : failureKind ? 0.1
+    : 0.25;
 
   const artifactPath = join(workspace.workdir, "test-report.txt");
   await writeFile(artifactPath, `${report}\n`, "utf8");
   return {
-    summary: success ? "Executed repo-aware test command" : detected ? "Test command failed" : "No test command detected",
-    confidence: success ? 0.88 : detected ? 0.25 : 0.4,
+    summary,
+    confidence,
     success,
     artifacts: [{
       type: "test-report",
@@ -961,6 +1004,8 @@ async function runTests(workspace: WorkspaceContext) {
         framework: detected?.framework,
         command: detected?.label,
         exit_code: exitCode,
+        // Absent when the command ran and chose its own exit code.
+        failure_kind: failureKind,
         repo_workspace: workspace.repoWorkspace,
         sandbox_cache: workspace.sandbox_cache
       }
@@ -1351,4 +1396,4 @@ if (!process.env.VITEST) {
   console.log(`[worker] allowed repo root: ${allowedRepoRoot}`);
 }
 
-export { app, ensureWorkspace, detectTestCommand, bootstrapWorkspaceDependencies, assertAllowedRepoWrite, parseChangedFiles };
+export { app, ensureWorkspace, detectTestCommand, bootstrapWorkspaceDependencies, assertAllowedRepoWrite, parseChangedFiles, runCmd };
