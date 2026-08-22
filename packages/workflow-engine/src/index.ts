@@ -25,6 +25,15 @@ export interface WorkflowArtifact extends ArtifactRef {
 export interface WorkflowRunStep extends Step {
   risk: "low" | "medium" | "high";
   artifacts: WorkflowArtifact[];
+  /**
+   * The confidence the worker reported for the execution that settled this
+   * step, clamped to 0-1. Carried as its own field rather than left inside
+   * `notes`: the eval scorer consumes this number, and `notes` holds the
+   * worker's free-text summary, which only mentions a confidence on the
+   * approval path. Absent means the worker did not report one -- distinct
+   * from a reported 0.
+   */
+  worker_confidence?: number;
 }
 
 export interface WorkflowRun extends Run {
@@ -211,6 +220,10 @@ export function retryCurrentStep(run: WorkflowRun, notes?: string): WorkflowRun 
   current.started_at = undefined;
   current.completed_at = undefined;
   current.execution_id = undefined;
+  // The retry is a fresh execution, so the previous attempt's confidence no
+  // longer describes this step; leaving it would let the scorer report a
+  // stale number as if the new execution had produced it.
+  current.worker_confidence = undefined;
   return transitionCurrentStep(run, "running", { notes, approval_id: null, blocked_reason: undefined });
 }
 

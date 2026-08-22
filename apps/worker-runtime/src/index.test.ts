@@ -3,7 +3,7 @@ import { access, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promise
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { dirname, join, resolve } from "node:path";
-import { app, assertAllowedRepoWrite, assertSafeRepoPath, bootstrapWorkspaceDependencies, cleanupRun, detectTestCommand, ensureWorkspace, parseChangedFiles, sanitizedChildEnv } from "./index.js";
+import { app, assertAllowedRepoWrite, assertSafeRepoPath, bootstrapWorkspaceDependencies, cleanupRun, detectTestCommand, ensureWorkspace, parseChangedFiles, runCmd, sanitizedChildEnv } from "./index.js";
 
 // Keep in sync with the ALLOWED_REPO_ROOT default in vitest.config.ts.
 const allowedRepoRoot = resolve(process.env.ALLOWED_REPO_ROOT ?? "/Users/jaywest/projects");
@@ -356,6 +356,32 @@ describe("worker-runtime", () => {
     await writeFile(join(repo, "bun.lock"), "{}\n", "utf8");
 
     await expect(detectTestCommand(repo)).resolves.toEqual({ cmd: "bun", args: ["run", "test"], label: "bun run test", framework: "node-bun" });
+  });
+
+  it("tells an unrunnable command apart from one that ran and failed", async () => {
+    // All three of these used to return exitCode 1 and nothing else, so a
+    // missing test runner and a timed-out suite were indistinguishable from
+    // a suite that ran and reported real failures. Only the last is evidence
+    // about the repo; reporting the other two as a test failure sends the
+    // operator to debug code that never executed.
+    await mkdir(sandboxRoot, { recursive: true });
+
+    const ranAndFailed = await runCmd("sh", ["-c", "echo 'FAIL: 3 tests failed' >&2; exit 1"], sandboxRoot);
+    expect(ranAndFailed.exitCode).toBe(1);
+    expect(ranAndFailed.failure_kind).toBeUndefined();
+
+    const notInstalled = await runCmd("hermes-definitely-not-a-real-test-runner", ["test"], sandboxRoot);
+    expect(notInstalled.exitCode).not.toBe(0);
+    expect(notInstalled.failure_kind).toBe("spawn_failed");
+
+    const timedOut = await runCmd("sh", ["-c", "sleep 30"], sandboxRoot, 250);
+    expect(timedOut.exitCode).not.toBe(0);
+    expect(timedOut.failure_kind).toBe("timed_out");
+
+    // A clean run still carries no failure classification.
+    const passed = await runCmd("sh", ["-c", "exit 0"], sandboxRoot);
+    expect(passed.exitCode).toBe(0);
+    expect(passed.failure_kind).toBeUndefined();
   });
 
   it("refuses write-capable steps for non-git repos", async () => {

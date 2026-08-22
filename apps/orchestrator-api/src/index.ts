@@ -804,6 +804,14 @@ function toApprovalOperatorView(approval: Approval) {
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
 function inDateRange(value: string | undefined, from?: string, to?: string) {
+  // No bounds means no filtering: every read model calls this unconditionally,
+  // so returning false for a record with no timestamp used to hide it from the
+  // unfiltered view too. An artifact persisted before created_at stamping, on a
+  // step that never started, in a run with no updated_at, resolves to undefined
+  // here and vanished from /api/read-models/artifacts entirely. With a bound
+  // present a timestampless record still cannot be shown to be in range, so it
+  // stays excluded.
+  if (!from && !to) return true;
   if (!value) return false;
   if (from && value < from) return false;
   if (to && (DATE_ONLY.test(to) ? value.slice(0, to.length) : value) > to) return false;
@@ -1840,6 +1848,26 @@ app.post("/api/runs/:id/execute-current", async (c) => {
 
   if (isDispatchStale(run, step, request.execution_id)) {
     return discardStaleDispatch(run, step, request.execution_id, execution, c);
+  }
+
+  // The worker reports a per-execution confidence, and the policy gate below
+  // consumes it. It used to stop there: the step recorded only
+  // `execution.summary` as free-text notes, and the eval scorer recovered a
+  // confidence by regex-scraping those notes. The summary names a number
+  // only on the approval path, so on every other path the scrape missed and
+  // the scorer substituted a state constant -- publishing an
+  // `EvalRecord.confidence` that no worker had produced. Keep the reported
+  // value in its own field so the number crossing into the eval surface is
+  // the number the worker actually sent.
+  const reportedConfidence = execution.confidence;
+  if (typeof reportedConfidence === "number" && Number.isFinite(reportedConfidence)) {
+    step.worker_confidence = Math.min(1, Math.max(0, reportedConfidence));
+  } else {
+    // Absent is not the same as 0.5. The policy gate substitutes 0.5 to stay
+    // fail-safe, but the step keeps no confidence at all so the eval surface
+    // does not report a substituted number as a measured one.
+    step.worker_confidence = undefined;
+    console.warn(`[orchestrator] worker result for ${step.step_id} carried no usable confidence (got ${JSON.stringify(reportedConfidence)}); the policy gate will use its 0.5 default`);
   }
 
   // Bound the inlined content before anything stores or echoes it, so the

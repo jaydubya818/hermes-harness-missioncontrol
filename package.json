@@ -16,7 +16,7 @@
     "dev:reset-state": "rm -f data/orchestrator-state.json data/eval-state.json"
   },
   "devDependencies": {
-    "@types/node": "^24.13.3",
+    "@types/node": "^22.19.2",
     "typescript": "^5.9.3",
     "vitest": "^3.2.7"
   }

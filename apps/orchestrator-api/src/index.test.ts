@@ -411,6 +411,102 @@ describe("orchestrator-api", () => {
     expect(payload.execution_result?.recommended_next_step).toBe("implement");
   });
 
+  it("carries the worker's reported confidence onto the step instead of losing it in the summary prose", async () => {
+    // The dispatch handler consumed execution.confidence for the policy gate
+    // and then dropped it: the step kept only execution.summary as notes, and
+    // the eval scorer recovered a confidence by regex-scraping that prose.
+    // The summary names a number only on the approval path, so on the normal
+    // completed path the scrape missed and the scorer substituted a state
+    // constant -- publishing an eval confidence no worker had produced.
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/api/execute-step")) {
+        return jsonResponse({
+          body: {
+            success: true,
+            summary: "Executed repo-aware test command", // names no confidence
+            confidence: 0.88,
+            artifacts: []
+          }
+        });
+      }
+      return jsonResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await loadApp();
+    const mission = await (await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Confidence", project_id: "proj_demo", workflow_id: "bugfix" })
+    })).json() as { mission_id: string };
+    const run = await (await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } })).json() as { run_id: string };
+
+    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } });
+    expect(execute.status).toBe(200);
+    const payload = await execute.json() as { run: { steps: Array<{ step_id: string; notes?: string; worker_confidence?: number }> } };
+
+    const planStep = payload.run.steps.find((step) => step.step_id === "plan")!;
+    expect(planStep.worker_confidence).toBe(0.88);
+    // The prose still carries no number, which is exactly why the scrape was
+    // never a usable channel for it.
+    expect(planStep.notes).toBe("Executed repo-aware test command");
+    expect(planStep.notes).not.toMatch(/0\.88/);
+  });
+
+  it("leaves worker_confidence unset and warns when the worker reports no usable confidence", async () => {
+    // Absent is not 0.5. The policy gate substitutes 0.5 to stay fail-safe,
+    // but recording that substitution on the step would publish an invented
+    // number to the eval surface as if it had been measured.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/api/execute-step")) {
+        return jsonResponse({ body: { success: true, summary: "done", artifacts: [] } });
+      }
+      return jsonResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await loadApp();
+    const mission = await (await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "No confidence", project_id: "proj_demo", workflow_id: "bugfix" })
+    })).json() as { mission_id: string };
+    const run = await (await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } })).json() as { run_id: string };
+
+    const execute = await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } });
+    const payload = await execute.json() as { run: { steps: Array<{ step_id: string; worker_confidence?: number }> }; policy?: { confidence_score: number } };
+
+    expect(payload.run.steps.find((step) => step.step_id === "plan")!.worker_confidence).toBeUndefined();
+    // The gate still applied its fail-safe default, so the drop is visible
+    // without changing the decision it drives.
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("carried no usable confidence"));
+  });
+
+  it("clears worker_confidence when a step is retried so the scorer cannot report the previous attempt", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/api/execute-step")) {
+        return jsonResponse({ ok: false, status: 400, body: { success: false, summary: "Test command failed", confidence: 0.25, artifacts: [] } });
+      }
+      return jsonResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await loadApp();
+    const mission = await (await app.request("/api/missions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Retry", project_id: "proj_demo", workflow_id: "bugfix" })
+    })).json() as { mission_id: string };
+    const run = await (await app.request(`/api/missions/${mission.mission_id}/start`, { method: "POST", headers: { "content-type": "application/json" } })).json() as { run_id: string };
+
+    await app.request(`/api/runs/${run.run_id}/execute-current`, { method: "POST", headers: { "content-type": "application/json" } });
+    const retried = await app.request(`/api/runs/${run.run_id}/retry-step`, { method: "POST", headers: { "content-type": "application/json" } });
+    expect(retried.status).toBe(200);
+    const payload = await retried.json() as { run: { steps: Array<{ step_id: string; worker_confidence?: number }> } };
+    expect(payload.run.steps.find((step) => step.step_id === "plan")!.worker_confidence).toBeUndefined();
+  });
+
   it("rejects mission creation for repo paths outside the allowed root even when they embed it as a substring", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
     const allowedRoot = mkdtempSync(join(tmpdir(), "orch-allowed-"));
@@ -1460,6 +1556,39 @@ describe("orchestrator-api", () => {
     const exact = await app.request("/api/read-models/audit?to=2026-04-11T09:00:00.000Z");
     const exactPayload = await exact.json() as { timeline: Array<{ occurred_at: string }> };
     expect(exactPayload.timeline).toHaveLength(0);
+  });
+
+  it("keeps a record with no resolvable timestamp in the unfiltered read model", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    // Persisted before artifacts carried created_at, on a step that never
+    // started, in a run with no updated_at: every fallback the artifacts read
+    // model tries resolves to undefined. The date-range predicate runs on
+    // every request, so an undefined timestamp used to hide the artifact from
+    // the unfiltered view rather than only from a date-filtered one.
+    const stateFile = join(mkdtempSync(join(tmpdir(), "orch-no-ts-")), "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [{ mission_id: "mis_legacy", title: "Legacy", project_id: "proj_demo", workflow: "bugfix", status: "running", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z" }],
+      runs: [{
+        run_id: "run_legacy", mission_id: "mis_legacy", workflow_id: "bugfix", status: "running",
+        created_at: "2026-04-11T00:00:00.000Z",
+        steps: [{ step_id: "step_legacy", kind: "implement", risk: "low", state: "pending", artifacts: [{ artifact_id: "art_legacy", kind: "diff", label: "diff", uri: "artifact://legacy" }] }]
+      }],
+      approvals: [], events: [], audit: [], processed_event_ids: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const unfiltered = await app.request("/api/read-models/artifacts");
+    const payload = await unfiltered.json() as { artifacts: Array<{ artifact_id: string }> };
+
+    expect(unfiltered.status).toBe(200);
+    expect(payload.artifacts.map((item) => item.artifact_id)).toEqual(["art_legacy"]);
+
+    // An explicit bound still excludes it: a record with no timestamp cannot
+    // be shown to fall inside the requested window.
+    const filtered = await app.request("/api/read-models/artifacts?from=2026-04-11");
+    const filteredPayload = await filtered.json() as { artifacts: unknown[] };
+    expect(filteredPayload.artifacts).toHaveLength(0);
   });
 
   it("drops SSE subscribers that stop draining their stream", async () => {
