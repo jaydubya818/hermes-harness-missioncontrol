@@ -929,6 +929,65 @@ describe("orchestrator-api", () => {
     expect(missionsPayload.missions[0]?.status).toBe("cancelled");
   });
 
+  it("rejects retry-step for a cancelled step instead of resurrecting the terminal run", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-retry-cancelled-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [{
+        mission_id: "mis_demo",
+        title: "Cancelled",
+        objective: "Cancelled",
+        project_id: "proj_demo",
+        workflow: "bugfix",
+        status: "cancelled",
+        active_run_id: "run_demo",
+        summary: "operator cancelled run",
+        created_at: "2026-04-11T00:00:00.000Z",
+        updated_at: "2026-04-11T00:00:00.000Z"
+      }],
+      runs: [{
+        run_id: "run_demo",
+        mission_id: "mis_demo",
+        workflow_id: "bugfix",
+        status: "cancelled",
+        current_step_index: 0,
+        current_step_id: "plan",
+        created_at: "2026-04-11T00:00:00.000Z",
+        updated_at: "2026-04-11T00:00:00.000Z",
+        steps: [
+          { step_id: "plan", title: "Plan fix", kind: "plan", risk: "low", approval_mode: "on_policy_trigger", state: "cancelled", artifacts: [], started_at: "2026-04-11T00:00:00.000Z", completed_at: "2026-04-11T00:01:00.000Z" },
+          { step_id: "implement", title: "Implement patch", kind: "implement", risk: "medium", approval_mode: "on_policy_trigger", state: "pending", artifacts: [] },
+          { step_id: "test", title: "Run tests", kind: "test", risk: "low", approval_mode: "on_policy_trigger", state: "pending", artifacts: [] },
+          { step_id: "review", title: "Review diff", kind: "review", risk: "medium", approval_mode: "on_policy_trigger", state: "pending", artifacts: [] },
+          { step_id: "deploy", title: "Canary deploy", kind: "deploy", risk: "high", approval_mode: "on_policy_trigger", state: "pending", artifacts: [] }
+        ]
+      }],
+      approvals: [],
+      events: [],
+      audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const response = await app.request("/api/runs/run_demo/retry-step", { method: "POST", headers: { "content-type": "application/json" } });
+    expect(response.status).toBe(409);
+
+    // The run stays terminal, so execute-current keeps refusing it: without
+    // this guard retry-step is a trivial bypass of that refusal.
+    const runsResponse = await app.request("/api/runs");
+    const runsPayload = await runsResponse.json() as { runs: Array<{ status: string; steps: Array<{ state: string }> }> };
+    expect(runsPayload.runs[0]?.status).toBe("cancelled");
+    expect(runsPayload.runs[0]?.steps[0]?.state).toBe("cancelled");
+
+    const executeResponse = await app.request("/api/runs/run_demo/execute-current", { method: "POST", headers: { "content-type": "application/json" } });
+    expect(executeResponse.status).toBe(409);
+
+    const missionsResponse = await app.request("/api/missions");
+    const missionsPayload = await missionsResponse.json() as { missions: Array<{ status: string }> };
+    expect(missionsPayload.missions[0]?.status).toBe("cancelled");
+  });
+
   it("records approval.resolved for approved decisions and clears active run approval visibility", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
 
