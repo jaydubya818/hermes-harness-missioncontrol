@@ -1959,7 +1959,16 @@ app.post("/api/runs/:id/retry-step", async (c) => {
   if (!run) return c.json({ error: "run not found" }, 404);
   const mission = getMissionForRun(run);
   const current = getCurrentStep(run);
-  if (!current || !["failed", "paused", "cancelled", "blocked", "awaiting_approval"].includes(current.state)) return c.json({ error: "current step not retryable" }, 409);
+  // A cancelled step is a terminal operator decision, not a retryable
+  // blocker: /cancel and /cancel-step already recorded the run's eval and
+  // released its worktree and branch. retryCurrentStep still accepts
+  // "cancelled" as a prior state, so retrying flipped the run back to
+  // `running` -- reviving a run that /execute-current explicitly refuses
+  // ("run not executable") and that /artifacts refuses as terminal, and
+  // queuing a second eval for the same run against a workspace that no
+  // longer exists. Manual step-complete already refuses cancelled steps for
+  // the same reason; this route was the one gap left.
+  if (!current || !["failed", "paused", "blocked", "awaiting_approval"].includes(current.state)) return c.json({ error: "current step not retryable" }, 409);
   // Retrying an awaiting-approval step supersedes its pending approval;
   // without resolving it, the approval sits in the operator queue forever
   // (any later respond hits the staleness guard).
