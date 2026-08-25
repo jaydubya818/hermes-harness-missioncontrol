@@ -3,7 +3,7 @@ import useSWR, { mutate } from "swr";
 import { CANONICAL_EVENT_TYPES } from "@hermes-harness-with-missioncontrol/contracts";
 import { CapacityBar, CostCard, Panel, Sparkline, StatusRow } from "@hermes-harness-with-missioncontrol/ui-kit";
 import { CommandPalette } from "./CommandPalette.js";
-import { createTrailingThrottle, encodePathSegments, normalizeOperatorActor, readApiResponse, withQuery } from "./api.js";
+import { createTrailingThrottle, encodePathSegments, isStepRetryable, normalizeOperatorActor, readApiResponse, withQuery } from "./api.js";
 
 const tabs = ["Overview", "Missions", "Agents", "Memory", "Code", "Audit", "Settings"] as const;
 type Tab = (typeof tabs)[number];
@@ -354,7 +354,7 @@ function Missions() {
                     {step.step_id === run.current_step_id && <>
                       {step.state === "running" && <Button onClick={() => controlRun(run.run_id, "interrupt-step", "Step interrupted.")}>Interrupt</Button>}
                       {step.state === "paused" && <Button onClick={() => controlRun(run.run_id, "resume-step", "Step resumed.")}>Resume</Button>}
-                      {["paused", "failed", "blocked", "awaiting_approval", "cancelled"].includes(step.state) && <Button onClick={() => controlRun(run.run_id, "retry-step", "Step retried.")}>Retry</Button>}
+                      {isStepRetryable(step.state) && <Button onClick={() => controlRun(run.run_id, "retry-step", "Step retried.")}>Retry</Button>}
                       {!["completed", "failed", "cancelled"].includes(step.state) && <Button onClick={() => controlRun(run.run_id, "cancel-step", "Step cancelled.")} style={{ background: "#3f0d19" }}>Cancel step</Button>}
                     </>}
                     <Button onClick={() => setSelectedRunId(run.run_id)} style={{ background: selectedRunId === run.run_id ? "#111827" : "transparent" }}>Inspect run</Button>
