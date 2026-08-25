@@ -1977,6 +1977,22 @@ describe("orchestrator-api", () => {
     expect((await approvals.json()).approvals.map((approval: any) => approval.approval_id)).toEqual(["approval_good"]);
   });
 
+  it("starts from empty state when the persisted state file is not an object", async () => {
+    // Same class as the per-record guards above, one level up: loadJsonFile
+    // only falls back for a missing or unparseable file, so a state file
+    // holding a valid-but-wrong-shaped JSON value ("null", an array) reached
+    // hydration intact and the first property read threw. ensureLoaded()
+    // runs on every request, so that 500'd the service permanently.
+    for (const persisted of ["null", "[]", "42", '"state"']) {
+      const stateFile = join(mkdtempSync(join(tmpdir(), "orch-bad-state-")), "state.json");
+      writeFileSync(stateFile, persisted, "utf8");
+      const app = await loadApp(stateFile);
+      const missions = await app.request("/api/missions");
+      expect(missions.status, `persisted state ${persisted}`).toBe(200);
+      expect((await missions.json()).missions).toEqual([]);
+    }
+  });
+
   it("hydrates persisted state exactly once for concurrent first requests", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
 

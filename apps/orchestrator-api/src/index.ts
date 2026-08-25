@@ -482,7 +482,18 @@ function rehydrateRecords<T>(kind: string, loaded: unknown, rehydrate: (record: 
 
 async function hydrateState() {
   if (initialized) return;
-  const loaded = await loadJsonFile<OrchestratorState>(stateFile, state);
+  const persisted = await loadJsonFile<OrchestratorState>(stateFile, state);
+  // loadJsonFile only falls back when the file is missing or unparseable. A
+  // valid JSON value of the wrong shape -- `null` above all, but also an
+  // array or a bare primitive -- came back as-is, and the very first
+  // `persisted.missions` below threw. ensureLoaded() runs on every request,
+  // so that turned the whole service into a permanent 500 loop with no way
+  // back short of deleting the state file by hand: exactly the failure mode
+  // the per-record guards below exist to prevent. eval-api and the worker's
+  // bootstrap cache already check this; the orchestrator was the gap.
+  const loaded = persisted && typeof persisted === "object" && !Array.isArray(persisted)
+    ? persisted
+    : (console.warn(`[orchestrator] persisted state in ${stateFile} is not an object; starting from empty state`), {} as Partial<OrchestratorState>);
   state.missions.splice(0, state.missions.length, ...rehydrateRecords<Mission>("mission", loaded.missions, (mission) => {
     if (typeof mission.mission_id !== "string" || !mission.mission_id) throw new Error("mission_id must be a non-empty string");
     return mission as Mission;
