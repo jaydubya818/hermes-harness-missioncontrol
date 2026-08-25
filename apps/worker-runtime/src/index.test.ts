@@ -950,3 +950,22 @@ describe("worker-runtime", () => {
     await expect(access(outputRoot)).rejects.toThrow();
   });
 });
+
+describe("worker-runtime operator token configuration", () => {
+  // A HARNESS_OPERATOR_TOKEN that is present but blank used to make
+  // requireOperator() treat auth as disabled and serve every route --
+  // including step dispatch, which spawns commands inside the allowed repo
+  // root -- unauthenticated. Startup now refuses that configuration rather
+  // than failing open on it.
+  it("refuses to start when HARNESS_OPERATOR_TOKEN is set but blank", async () => {
+    const { assertOperatorTokenUsable } = await import("./index.js");
+    expect(() => assertOperatorTokenUsable({ HARNESS_OPERATOR_TOKEN: "" })).toThrow(/set but blank/);
+    expect(() => assertOperatorTokenUsable({ HARNESS_OPERATOR_TOKEN: "   " })).toThrow(/set but blank/);
+  });
+
+  it("leaves an unset token (auth off) and a real token alone", async () => {
+    const { assertOperatorTokenUsable } = await import("./index.js");
+    expect(() => assertOperatorTokenUsable({})).not.toThrow();
+    expect(() => assertOperatorTokenUsable({ HARNESS_OPERATOR_TOKEN: "s3cret" })).not.toThrow();
+  });
+});

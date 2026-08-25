@@ -3437,3 +3437,22 @@ describe("orchestrator-api", () => {
     expect(approvals.approvals.find((item) => item.approval_id === "approval_demo")?.status).toBe("rejected");
   });
 });
+
+describe("orchestrator-api operator token configuration", () => {
+  // A HARNESS_OPERATOR_TOKEN that is present but blank used to make
+  // requireOperator() and requireOperatorForStream() treat auth as disabled
+  // and serve every route -- including the SSE event stream and every
+  // mutating lifecycle route -- unauthenticated. Startup now refuses that
+  // configuration rather than failing open on it.
+  it("refuses to start when HARNESS_OPERATOR_TOKEN is set but blank", async () => {
+    const { assertOperatorTokenUsable } = await import("./index.js");
+    expect(() => assertOperatorTokenUsable({ HARNESS_OPERATOR_TOKEN: "" })).toThrow(/set but blank/);
+    expect(() => assertOperatorTokenUsable({ HARNESS_OPERATOR_TOKEN: "   " })).toThrow(/set but blank/);
+  });
+
+  it("leaves an unset token (auth off) and a real token alone", async () => {
+    const { assertOperatorTokenUsable } = await import("./index.js");
+    expect(() => assertOperatorTokenUsable({})).not.toThrow();
+    expect(() => assertOperatorTokenUsable({ HARNESS_OPERATOR_TOKEN: "s3cret" })).not.toThrow();
+  });
+});
