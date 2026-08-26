@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createTrailingThrottle, encodePathSegments, filterCommands, normalizeOperatorActor, readApiResponse, withQuery } from "./api.js";
+import { createTrailingThrottle, encodePathSegments, filterCommands, isStepRetryable, normalizeOperatorActor, readApiResponse, RETRYABLE_STEP_STATES, withQuery } from "./api.js";
 
 describe("withQuery", () => {
   it("returns the bare url when no params are set", () => {
@@ -132,5 +132,31 @@ describe("normalizeOperatorActor", () => {
     expect(normalizeOperatorActor(null)).toBeUndefined();
     expect(normalizeOperatorActor(undefined)).toBeUndefined();
     expect(normalizeOperatorActor("   ")).toBeUndefined();
+  });
+});
+
+describe("isStepRetryable", () => {
+  it("offers Retry for exactly the states POST /api/runs/:id/retry-step accepts", () => {
+    // Pinned against the orchestrator route's own guard:
+    //   if (!current || !["failed", "paused", "blocked", "awaiting_approval"]
+    //       .includes(current.state)) return 409 "current step not retryable"
+    expect([...RETRYABLE_STEP_STATES].sort()).toEqual(["awaiting_approval", "blocked", "failed", "paused"]);
+    for (const state of ["paused", "failed", "blocked", "awaiting_approval"]) {
+      expect(isStepRetryable(state), state).toBe(true);
+    }
+  });
+
+  it("does not offer Retry on a cancelled step", () => {
+    // Cancel is a close-out: /cancel and /cancel-step have already recorded
+    // the run's eval and released its worktree and branch, and the route
+    // 409s. Rendering the button anyway gave the operator a control whose
+    // only outcome was "current step not retryable".
+    expect(isStepRetryable("cancelled")).toBe(false);
+  });
+
+  it("does not offer Retry on running, pending, completed or missing states", () => {
+    for (const state of ["running", "pending", "completed", undefined]) {
+      expect(isStepRetryable(state), String(state)).toBe(false);
+    }
   });
 });

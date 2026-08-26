@@ -40,6 +40,20 @@ export async function readApiResponse(response: Response) {
   }
 }
 
+// Step states that POST /api/runs/:id/retry-step accepts. Kept here (not
+// inline in the run card) so it is unit-testable, and deliberately without
+// "cancelled": since the orchestrator closed the retry-step resurrection hole
+// the route 409s a cancelled step ("current step not retryable"), so the
+// console was rendering a Retry button whose only possible outcome was an
+// error toast. Cancel is a close-out -- it has already recorded the run's
+// eval and released its worktree and branch -- so there is nothing to retry.
+// Mirrors the route's own list; keep the two in step.
+export const RETRYABLE_STEP_STATES = ["paused", "failed", "blocked", "awaiting_approval"] as const;
+
+export function isStepRetryable(state: string | undefined): boolean {
+  return !!state && (RETRYABLE_STEP_STATES as readonly string[]).includes(state);
+}
+
 export function filterCommands<T extends { id: string; label: string }>(commands: T[], query: string): T[] {
   const q = query.trim().toLowerCase();
   if (!q) return commands;
