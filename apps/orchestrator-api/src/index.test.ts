@@ -1643,11 +1643,22 @@ describe("orchestrator-api", () => {
     expect(unfiltered.status).toBe(200);
     expect(payload.artifacts.map((item) => item.artifact_id)).toEqual(["art_legacy"]);
 
-    // An explicit bound still excludes it: a record with no timestamp cannot
-    // be shown to fall inside the requested window.
+    // Hydration normalization backfills run.updated_at from created_at, and
+    // that is the last fallback in this read model's chain -- so this record
+    // now DOES resolve a timestamp and an in-range bound includes it. The
+    // "timestampless record excluded by an explicit bound" half of
+    // inDateRange can no longer be reached through a persisted run (events
+    // and approvals are timestamp-normalized at hydration too); it is still
+    // pinned by the unfiltered assertion above, which is the half the
+    // 2026-04-11 fix actually changed.
     const filtered = await app.request("/api/read-models/artifacts?from=2026-04-11");
-    const filteredPayload = await filtered.json() as { artifacts: unknown[] };
-    expect(filteredPayload.artifacts).toHaveLength(0);
+    const filteredPayload = await filtered.json() as { artifacts: Array<{ artifact_id: string }> };
+    expect(filteredPayload.artifacts.map((item) => item.artifact_id)).toEqual(["art_legacy"]);
+
+    // An out-of-range bound still excludes it.
+    const outOfRange = await app.request("/api/read-models/artifacts?from=2026-05-01");
+    const outOfRangePayload = await outOfRange.json() as { artifacts: unknown[] };
+    expect(outOfRangePayload.artifacts).toHaveLength(0);
   });
 
   it("drops SSE subscribers that stop draining their stream", async () => {
@@ -1975,6 +1986,74 @@ describe("orchestrator-api", () => {
     const approvals = await app.request("/api/approvals");
     expect(approvals.status).toBe(200);
     expect((await approvals.json()).approvals.map((approval: any) => approval.approval_id)).toEqual(["approval_good"]);
+  });
+
+  it("backfills timestamps and artifact ids when hydrating a legacy persisted run", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateFile = join(mkdtempSync(join(tmpdir(), "orch-legacy-run-")), "state.json");
+    // A run written before these fields were stamped: no run `updated_at`, a
+    // settled step with neither `started_at` nor `completed_at`, and an
+    // attached artifact with no `artifact_id`. rehydrateRecords validates
+    // only `run_id` and that `steps` is an array, so all three survived --
+    // every read model then papered over the missing timestamps with its own
+    // `?? ""` fallback, and the artifact dedupe below matched `undefined`.
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [
+        { mission_id: "mis_legacy", title: "Legacy", project_id: "proj_demo", workflow: "bugfix", status: "running", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z" }
+      ],
+      runs: [
+        {
+          run_id: "run_legacy",
+          mission_id: "mis_legacy",
+          workflow_id: "bugfix",
+          status: "running",
+          current_step_index: 1,
+          created_at: "2026-04-11T00:00:00.000Z",
+          steps: [
+            { step_id: "plan", title: "Plan fix", kind: "plan", state: "completed", approval_mode: "on_policy_trigger", risk: "low", artifacts: [{ kind: "plan-doc", label: "plan-doc", uri: "artifact://run_legacy/plan/plan-doc" }] },
+            { step_id: "implement", title: "Implement patch", kind: "implement", state: "pending", approval_mode: "on_policy_trigger", risk: "medium", artifacts: [] }
+          ]
+        }
+      ],
+      approvals: [],
+      events: [],
+      audit: [],
+      processed_event_ids: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+
+    const runs = await app.request("/api/runs");
+    expect(runs.status).toBe(200);
+    const run = (await runs.json()).runs.find((item: any) => item.run_id === "run_legacy");
+    expect(run.updated_at).toBe("2026-04-11T00:00:00.000Z");
+    const [plan, implement] = run.steps;
+    expect(plan.started_at).toBe("2026-04-11T00:00:00.000Z");
+    expect(plan.completed_at).toBe("2026-04-11T00:00:00.000Z");
+    expect(plan.artifacts[0].artifact_id).toMatch(/^art_/);
+    // syncRunState derives run.started_at from the first started step, so it
+    // only lands because normalization ran first.
+    expect(run.started_at).toBe("2026-04-11T00:00:00.000Z");
+    // A pending step has not started and has not settled: nothing is
+    // invented for it.
+    expect(implement.started_at).toBeUndefined();
+    expect(implement.completed_at).toBeUndefined();
+
+    // The dedupe lookup in POST /api/runs/:id/artifacts runs before an id is
+    // assigned, so an id-less persisted artifact used to match a body that
+    // omits `artifact_id` (`undefined === undefined`) and answer 200 with the
+    // stale artifact instead of creating the new one.
+    const hydratedArtifactId = plan.artifacts[0].artifact_id;
+    const attach = await app.request("/api/runs/run_legacy/artifacts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ step_id: "plan", type: "test-report" })
+    });
+    expect(attach.status).toBe(201);
+    const created = await attach.json();
+    expect(created.artifact_id).not.toBe(hydratedArtifactId);
+    expect(created.type).toBe("test-report");
   });
 
   it("starts from empty state when the persisted state file is not an object", async () => {

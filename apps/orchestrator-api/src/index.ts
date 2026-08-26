@@ -164,6 +164,48 @@ let initialized = false;
 const processedEventIdSet = new Set<string>();
 let maxEventSequence = 0;
 
+// transitionCurrentStep stamps `started_at` as a step leaves pending and
+// `completed_at` as it settles, so these are the states in which each field
+// is meaningful on a persisted step. A pending/ready step has not started
+// and gets nothing invented for it.
+const STARTED_STEP_STATES = new Set<string>(["running", "blocked", "awaiting_approval", "paused", "failed", "completed", "cancelled"]);
+const SETTLED_STEP_STATES = new Set<string>(["failed", "completed", "cancelled"]);
+
+// A run written by an older build can be missing fields every live write path
+// stamps today, and rehydrateRecords validates only `run_id` and that `steps`
+// is an array. Two consequences, both of which are cheaper to fix once here
+// than at each read site: every read model invented its own `?? ""` fallback
+// for a missing timestamp (which is how the artifacts date-filter bug hid),
+// and an artifact persisted without an `artifact_id` made the dedupe lookup
+// in `POST /api/runs/:id/artifacts` match `undefined === undefined`, so the
+// first attach that omitted an id returned the stale artifact instead of
+// creating a new one. Fallbacks are derived from the run rather than from the
+// wall clock so a restart does not re-stamp a different value each time.
+function normalizePersistedRun(run: WorkflowRun, hydratedAt: string): WorkflowRun {
+  if (typeof run.updated_at !== "string" || !run.updated_at) {
+    run.updated_at = typeof run.created_at === "string" && run.created_at ? run.created_at : hydratedAt;
+  }
+  for (const step of run.steps) {
+    if (!step || typeof step !== "object") continue;
+    if (STARTED_STEP_STATES.has(step.state) && (typeof step.started_at !== "string" || !step.started_at)) {
+      step.started_at = run.updated_at;
+    }
+    if (SETTLED_STEP_STATES.has(step.state) && (typeof step.completed_at !== "string" || !step.completed_at)) {
+      step.completed_at = run.updated_at;
+    }
+    // A step persisted without an artifacts array already survives hydration
+    // today; dropping the whole run over it here would be a new behaviour.
+    if (!Array.isArray(step.artifacts)) continue;
+    for (const artifact of step.artifacts) {
+      if (!artifact || typeof artifact !== "object") continue;
+      if (typeof artifact.artifact_id !== "string" || !artifact.artifact_id) {
+        artifact.artifact_id = makeId("art");
+      }
+    }
+  }
+  return run;
+}
+
 function normalizeApproval(approval: Approval): Approval {
   return {
     ...approval,
@@ -482,6 +524,7 @@ function rehydrateRecords<T>(kind: string, loaded: unknown, rehydrate: (record: 
 
 async function hydrateState() {
   if (initialized) return;
+  const hydratedAt = new Date().toISOString();
   const persisted = await loadJsonFile<OrchestratorState>(stateFile, state);
   // loadJsonFile only falls back when the file is missing or unparseable. A
   // valid JSON value of the wrong shape -- `null` above all, but also an
@@ -502,7 +545,9 @@ async function hydrateState() {
     if (typeof run.run_id !== "string" || !run.run_id) throw new Error("run_id must be a non-empty string");
     // syncRunState (and every read model) indexes run.steps directly.
     if (!Array.isArray(run.steps)) throw new Error(`run ${run.run_id} has no steps array`);
-    return syncRunState(run as WorkflowRun);
+    // Normalize before syncRunState so it sees the backfilled step
+    // timestamps when it derives run.started_at / run.completed_at.
+    return syncRunState(normalizePersistedRun(run as WorkflowRun, hydratedAt));
   }));
   state.approvals.splice(0, state.approvals.length, ...rehydrateRecords<Approval>("approval", loaded.approvals, (approval) => {
     if (typeof approval.approval_id !== "string" || !approval.approval_id) throw new Error("approval_id must be a non-empty string");
