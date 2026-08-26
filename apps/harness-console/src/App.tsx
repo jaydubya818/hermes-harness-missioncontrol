@@ -3,7 +3,7 @@ import useSWR, { mutate } from "swr";
 import { CANONICAL_EVENT_TYPES } from "@hermes-harness-with-missioncontrol/contracts";
 import { CapacityBar, CostCard, Panel, Sparkline, StatusRow } from "@hermes-harness-with-missioncontrol/ui-kit";
 import { CommandPalette } from "./CommandPalette.js";
-import { createTrailingThrottle, encodePathSegments, isStepRetryable, normalizeOperatorActor, readApiResponse, withQuery } from "./api.js";
+import { createTrailingThrottle, encodePathSegments, isCurrentStepActionable, isStepRetryable, normalizeOperatorActor, readApiResponse, withQuery } from "./api.js";
 
 const tabs = ["Overview", "Missions", "Agents", "Memory", "Code", "Audit", "Settings"] as const;
 type Tab = (typeof tabs)[number];
@@ -350,7 +350,7 @@ function Missions() {
                   {step.blocked_reason && <div style={{ color: "#fbbf24", fontSize: 12, marginTop: 6 }}>{step.blocked_reason}</div>}
                   {step.latest_artifact_uri && <div style={{ color: "#7dd3fc", fontSize: 12, marginTop: 6 }}>Latest artifact: {step.latest_artifact_uri}</div>}
                   <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {step.state === "running" && <><Button onClick={() => executeCurrent(run.run_id)}>Execute current step</Button><Button onClick={() => completeStep(run.run_id, step.step_id)}>Mark step complete</Button></>}
+                    {isCurrentStepActionable(step, run) && <><Button onClick={() => executeCurrent(run.run_id)}>Execute current step</Button><Button onClick={() => completeStep(run.run_id, step.step_id)}>Mark step complete</Button></>}
                     {step.step_id === run.current_step_id && <>
                       {step.state === "running" && <Button onClick={() => controlRun(run.run_id, "interrupt-step", "Step interrupted.")}>Interrupt</Button>}
                       {step.state === "paused" && <Button onClick={() => controlRun(run.run_id, "resume-step", "Step resumed.")}>Resume</Button>}

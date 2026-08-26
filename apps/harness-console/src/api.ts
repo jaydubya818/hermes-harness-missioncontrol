@@ -54,6 +54,25 @@ export function isStepRetryable(state: string | undefined): boolean {
   return !!state && (RETRYABLE_STEP_STATES as readonly string[]).includes(state);
 }
 
+// Gates the run card's two dispatch controls, "Execute current step" and
+// "Mark step complete". Both act on the run's *current* step:
+// `/execute-current` takes only a run_id and ignores the step the button was
+// rendered under, and `/steps/:stepId/complete` 409s "step is not current
+// runnable step" for anything else. Rendered for any `running` step, the
+// first silently acts on a different step than the operator pointed at and
+// the second can only ever produce an error toast -- the same shape as the
+// 2026-08-25 Retry finding. The sibling Interrupt/Resume/Retry/Cancel-step
+// controls already carry this condition inline; it lives here instead so it
+// is unit-testable (App.tsx has no test coverage, and a JSX condition cannot
+// be pinned against the routes it mirrors). The explicit step_id check
+// matters: two undefined ids must not compare equal into a match.
+export function isCurrentStepActionable(
+  step: { step_id?: string; state?: string },
+  run: { current_step_id?: string }
+): boolean {
+  return step.state === "running" && !!step.step_id && step.step_id === run.current_step_id;
+}
+
 export function filterCommands<T extends { id: string; label: string }>(commands: T[], query: string): T[] {
   const q = query.trim().toLowerCase();
   if (!q) return commands;

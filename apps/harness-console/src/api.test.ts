@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createTrailingThrottle, encodePathSegments, filterCommands, isStepRetryable, normalizeOperatorActor, readApiResponse, RETRYABLE_STEP_STATES, withQuery } from "./api.js";
+import { createTrailingThrottle, encodePathSegments, filterCommands, isCurrentStepActionable, isStepRetryable, normalizeOperatorActor, readApiResponse, RETRYABLE_STEP_STATES, withQuery } from "./api.js";
 
 describe("withQuery", () => {
   it("returns the bare url when no params are set", () => {
@@ -158,5 +158,37 @@ describe("isStepRetryable", () => {
     for (const state of ["running", "pending", "completed", undefined]) {
       expect(isStepRetryable(state), String(state)).toBe(false);
     }
+  });
+});
+
+
+describe("isCurrentStepActionable", () => {
+  it("offers the dispatch controls on a running current step", () => {
+    expect(isCurrentStepActionable({ step_id: "implement", state: "running" }, { current_step_id: "implement" })).toBe(true);
+  });
+
+  it("does not offer them on a running step that is not the run's current step", () => {
+    // executeCurrent() posts to /api/runs/:id/execute-current, which takes
+    // only a run_id: rendered under a non-current step the button silently
+    // dispatches a different step than the operator pointed at. The sibling
+    // Interrupt/Resume/Retry/Cancel-step controls already gate on this same
+    // condition. Reachable through persisted state -- rehydrateRecords
+    // validates only run_id and that steps is an array -- so a run can hold a
+    // running step that current_step_index has moved past.
+    expect(isCurrentStepActionable({ step_id: "plan", state: "running" }, { current_step_id: "implement" })).toBe(false);
+  });
+
+  it("does not offer them on a current step that is not running", () => {
+    // /steps/:stepId/complete 409s "step is not current runnable step", and
+    // /execute-current refuses a run that is not running.
+    for (const state of ["pending", "paused", "awaiting_approval", "blocked", "completed", "failed", "cancelled", undefined]) {
+      expect(isCurrentStepActionable({ step_id: "implement", state }, { current_step_id: "implement" }), String(state)).toBe(false);
+    }
+  });
+
+  it("does not match a step with no id against a run with no current step", () => {
+    // Same `undefined === undefined` trap the orchestrator's artifact dedupe
+    // fell into: a persisted step with no step_id must not read as current.
+    expect(isCurrentStepActionable({ state: "running" }, {})).toBe(false);
   });
 });
