@@ -307,6 +307,35 @@ describe("eval-api", () => {
     expect(payload.summary.average_confidence).toBe(0.9);
   });
 
+  it("rejects ratio scoring fields above 1 instead of reporting an impossible average", async () => {
+    const app = await loadApp();
+
+    // confidence, efficiency_score and risk_score are 0-1 ratios. Only the
+    // non-negative check existed, so confidence: 500 was stored and
+    // average_confidence came back as 500 -- a value no scorer can produce.
+    for (const field of ["confidence", "efficiency_score", "risk_score"]) {
+      const response = await app.request("/api/evals", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mission_id: "mis_demo", run_id: "run_a", outcome: "success", cost_usd: 0.1, [field]: 500 })
+      });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: `${field} must be between 0 and 1` });
+    }
+
+    // The bounds themselves stay valid, and counts/durations are unbounded.
+    const bounds = await app.request("/api/evals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mission_id: "mis_demo", run_id: "run_a", outcome: "success", cost_usd: 0.1, confidence: 1, efficiency_score: 0, risk_score: 1, duration_ms: 900000, artifact_count: 12 })
+    });
+    expect(bounds.status).toBe(201);
+
+    const listing = await app.request("/api/evals");
+    const payload = await listing.json() as { summary: { total_runs: number; average_confidence: number } };
+    expect(payload.summary.total_runs).toBe(1);
+    expect(payload.summary.average_confidence).toBe(1);
+  });
 
   it("hydrates state exactly once across concurrent first requests", async () => {
     let loadCalls = 0;

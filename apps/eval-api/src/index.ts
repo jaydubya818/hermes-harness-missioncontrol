@@ -59,6 +59,16 @@ app.use("*", async (c, next) => {
 });
 
 const OPTIONAL_NUMERIC_FIELDS = ["approval_count", "artifact_count", "duration_ms", "confidence", "efficiency_score", "risk_score"] as const;
+
+// confidence, efficiency_score and risk_score are 0-1 ratios in the ScoredEval
+// contract, and summarize() averages them straight into average_confidence,
+// average_efficiency and average_risk_score. The non-negative check above is
+// not enough on its own: a record posted with confidence 500 was accepted and
+// reported average_confidence 500, a number no scorer can produce (scoreRun
+// clamps its own output and policy-engine clamps the worker's before it ever
+// gets here). Bound the ratios at the route so the stored record cannot
+// contradict the contract every consumer reads it through.
+const RATIO_FIELDS = ["confidence", "efficiency_score", "risk_score"] as const;
 const records: EvalRecord[] = [];
 let initialized = false;
 
@@ -206,6 +216,12 @@ app.post("/api/evals", async (c) => {
     const value = (body as unknown as Record<string, unknown>)[field];
     if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) {
       return c.json({ error: `${field} must be a non-negative finite number` }, 400);
+    }
+  }
+  for (const field of RATIO_FIELDS) {
+    const value = (body as unknown as Record<string, unknown>)[field];
+    if (typeof value === "number" && value > 1) {
+      return c.json({ error: `${field} must be between 0 and 1` }, 400);
     }
   }
   // created_at is required by the EvalRecord contract and consumers sort and
