@@ -1385,7 +1385,25 @@ app.post("/api/abort-execution", async (c) => {
   return c.json({ ok: true, execution_id: body.execution_id });
 });
 
+// An unset HARNESS_OPERATOR_TOKEN is the documented local default: auth is
+// off. A variable that is present but blank is a different thing -- a
+// deployment that meant to configure auth and got an empty value from an
+// unset shell variable or a missing secret key. requireOperator() sees a
+// falsy token and serves every route unauthenticated, so that misconfiguration
+// fails open silently. Refuse to start instead. `pnpm dev:console:auth`
+// already applies the same unset-or-empty rule to VITE_OPERATOR_TOKEN.
+function assertOperatorTokenUsable(env: NodeJS.ProcessEnv = process.env): void {
+  const raw = env.HARNESS_OPERATOR_TOKEN;
+  if (raw !== undefined && raw.trim() === "") {
+    throw new Error(
+      "HARNESS_OPERATOR_TOKEN is set but blank, which would disable operator auth on every route. "
+      + "Give it a value, or unset it entirely to run without auth."
+    );
+  }
+}
+
 if (!process.env.VITEST) {
+  assertOperatorTokenUsable();
   const port = Number(process.env.PORT ?? 4304);
   // @hono/node-server binds 0.0.0.0 when no hostname is given, silently
   // exposing this operator-trust API to the local network. Default to
@@ -1396,4 +1414,4 @@ if (!process.env.VITEST) {
   console.log(`[worker] allowed repo root: ${allowedRepoRoot}`);
 }
 
-export { app, ensureWorkspace, detectTestCommand, bootstrapWorkspaceDependencies, assertAllowedRepoWrite, parseChangedFiles, runCmd };
+export { app, ensureWorkspace, detectTestCommand, bootstrapWorkspaceDependencies, assertAllowedRepoWrite, parseChangedFiles, runCmd, assertOperatorTokenUsable };

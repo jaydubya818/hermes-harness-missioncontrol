@@ -259,7 +259,7 @@ Operator/read models:
 ## Environment
 
 Most important env vars:
-- `HARNESS_OPERATOR_TOKEN` — bearer token guarding all mutating APIs and all read endpoints (orchestrator, eval, memory) except `/health`; the SSE event stream also accepts it as a `token` query parameter since `EventSource` cannot send headers; also used by console auth fallback flow
+- `HARNESS_OPERATOR_TOKEN` — bearer token guarding all mutating APIs and all read endpoints (orchestrator, eval, memory) except `/health`; the SSE event stream also accepts it as a `token` query parameter since `EventSource` cannot send headers; also used by console auth fallback flow. Leaving it **unset** is the local-dev default and disables auth. Setting it to a **blank** value is rejected: all four services refuse to start, because a blank token would silently disable auth on every route instead of enforcing it — the same unset-or-empty rule `pnpm dev:console:auth` already applies to `VITE_OPERATOR_TOKEN`.
 - `HOST` — bind address for each API service (default `127.0.0.1`; set explicitly, e.g. `0.0.0.0`, to expose a service beyond the machine)
 - `CORS_ALLOWED_ORIGINS` — comma-separated origin allowlist for cross-origin API access (default `http://localhost:5173,http://127.0.0.1:5173`, the console dev origins; the console normally uses the Vite proxy and needs no CORS)
 - State-changing requests (`POST`/`PUT`/`PATCH`/`DELETE`) must send `content-type: application/json` on every API, including bodiless action posts; anything else gets `415`. This forces a CORS preflight for cross-origin callers, so a page the operator visits cannot drive the control plane from their browser when no operator token is set.
