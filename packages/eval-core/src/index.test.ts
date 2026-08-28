@@ -124,6 +124,30 @@ describe("summarize", () => {
     expect(result.average_risk_score).toBe(1);
     expect(result.average_duration_ms).toBe(1000);
   });
+
+  // eval-api's POST route bounds the three ratio fields at 1, but only for
+  // records arriving after that guard shipped. A state file written before
+  // it (or hand-edited) still carries values like confidence 500, and those
+  // are finite, so the finiteness guard above passed them straight into the
+  // average -- reporting a number no scorer here can produce. Unbounded
+  // fields (cost, counts, duration) must keep flowing through untouched.
+  it("ignores out-of-range ratios persisted before the route bounded them", () => {
+    const result = summarize([
+      { mission_id: "m1", run_id: "r1", outcome: "success", cost_usd: 0.5,
+        approval_count: 1, artifact_count: 1, created_at: new Date().toISOString(),
+        confidence: 0.9, efficiency_score: 0.8, risk_score: 1.0, duration_ms: 1000 },
+      { mission_id: "m2", run_id: "r2", outcome: "success", cost_usd: 2,
+        approval_count: 3, artifact_count: 0, created_at: new Date().toISOString(),
+        confidence: 500, efficiency_score: 42, risk_score: -1, duration_ms: 4000 },
+    ]);
+    expect(result.average_confidence).toBe(0.9);
+    expect(result.average_efficiency).toBe(0.8);
+    expect(result.average_risk_score).toBe(1);
+    // Unbounded fields are unaffected by the ratio guard.
+    expect(result.total_cost_usd).toBe(2.5);
+    expect(result.total_approvals).toBe(4);
+    expect(result.average_duration_ms).toBe(2500);
+  });
 });
 
 // ---------------------------------------------------------------------------

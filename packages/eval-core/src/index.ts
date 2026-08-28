@@ -34,6 +34,20 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+// confidence, efficiency_score and risk_score are 0-1 ratios in the ScoredEval
+// contract. eval-api's POST route rejects anything above 1, but that guard
+// only covers records arriving from now on: a state file written before it
+// existed (or hand-edited) still carries values like confidence 500, and
+// those are perfectly finite, so isFiniteNumber waves them through and the
+// average reports a number no scorer here can produce. Treat an
+// out-of-contract ratio the same way this function already treats a NaN or a
+// string -- ignore it, so it is excluded from the average rather than
+// dragging it. Clamping instead would invent a value and report a corrupt
+// record as a maximally-confident one.
+function isRatio(value: unknown): value is number {
+  return isFiniteNumber(value) && value >= 0 && value <= 1;
+}
+
 export function summarize(records: EvalRecord[]): EvalSummary {
   const total = records.length;
   if (total === 0) {
@@ -82,9 +96,9 @@ export function summarize(records: EvalRecord[]): EvalSummary {
     else if (record.outcome === "failure") failures += 1;
     if (isFiniteNumber(record.cost_usd)) cost += record.cost_usd;
     if (isFiniteNumber(record.approval_count)) approvals += record.approval_count;
-    if (isFiniteNumber(record.confidence)) { confidenceSum += record.confidence; confidenceCount += 1; }
-    if (isFiniteNumber(record.efficiency_score)) { efficiencySum += record.efficiency_score; efficiencyCount += 1; }
-    if (isFiniteNumber(record.risk_score)) { riskSum += record.risk_score; riskCount += 1; }
+    if (isRatio(record.confidence)) { confidenceSum += record.confidence; confidenceCount += 1; }
+    if (isRatio(record.efficiency_score)) { efficiencySum += record.efficiency_score; efficiencyCount += 1; }
+    if (isRatio(record.risk_score)) { riskSum += record.risk_score; riskCount += 1; }
     if (isFiniteNumber(record.duration_ms)) { durationSum += record.duration_ms; durationCount += 1; }
   }
 
