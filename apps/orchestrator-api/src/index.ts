@@ -480,6 +480,42 @@ function rehydrateRecords<T>(kind: string, loaded: unknown, rehydrate: (record: 
   return kept;
 }
 
+// Normalize the artifact shape a persisted run carries, once at hydration,
+// rather than guarding at each of the many read sites.
+//
+// Two things go wrong with a state file written by an older build (or hand
+// edited), and both are silent:
+//
+// - a step with no `artifacts` array. Every read model does
+//   `step.artifacts.length` and attachArtifact does `step.artifacts.some`,
+//   so the run 500s them all -- permanently, because ensureLoaded() runs on
+//   every request. Same failure mode as the run-without-steps guard above.
+// - an artifact with no `artifact_id`. POST /api/runs/:id/artifacts looks up
+//   `step.artifacts.find((item) => item.artifact_id === body.artifact_id)`
+//   before assigning one, so the first request that also omits an
+//   artifact_id matches the legacy entry on `undefined === undefined` and
+//   answers 200 with the *old* artifact instead of creating the new one --
+//   the operator's artifact is silently dropped. Both live write paths
+//   always stamp an id, so this can only arrive from persisted state; give
+//   the legacy entry one here so the identity comparison has something real
+//   to compare. (Same `undefined === undefined` trap the console's
+//   isCurrentStepActionable guards against.)
+function normalizeRunArtifacts(run: WorkflowRun) {
+  for (const step of run.steps) {
+    if (!step || typeof step !== "object") continue;
+    if (!Array.isArray(step.artifacts)) {
+      step.artifacts = [];
+      continue;
+    }
+    step.artifacts = step.artifacts.filter((artifact) => !!artifact && typeof artifact === "object" && !Array.isArray(artifact));
+    for (const artifact of step.artifacts) {
+      if (typeof artifact.artifact_id !== "string" || !artifact.artifact_id) {
+        artifact.artifact_id = makeId("art");
+      }
+    }
+  }
+}
+
 async function hydrateState() {
   if (initialized) return;
   const persisted = await loadJsonFile<OrchestratorState>(stateFile, state);
@@ -502,6 +538,7 @@ async function hydrateState() {
     if (typeof run.run_id !== "string" || !run.run_id) throw new Error("run_id must be a non-empty string");
     // syncRunState (and every read model) indexes run.steps directly.
     if (!Array.isArray(run.steps)) throw new Error(`run ${run.run_id} has no steps array`);
+    normalizeRunArtifacts(run as WorkflowRun);
     return syncRunState(run as WorkflowRun);
   }));
   state.approvals.splice(0, state.approvals.length, ...rehydrateRecords<Approval>("approval", loaded.approvals, (approval) => {
