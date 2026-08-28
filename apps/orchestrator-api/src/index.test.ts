@@ -1977,6 +1977,81 @@ describe("orchestrator-api", () => {
     expect((await approvals.json()).approvals.map((approval: any) => approval.approval_id)).toEqual(["approval_good"]);
   });
 
+  // Shared fixture for the two hydration-normalization tests below: one
+  // persisted run whose steps exercise both legacy shapes.
+  function writeLegacyArtifactState(steps: unknown[]) {
+    const stateFile = join(mkdtempSync(join(tmpdir(), "orch-legacy-artifacts-")), "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [{ mission_id: "mis_legacy", title: "Legacy", project_id: "proj_demo", workflow: "bugfix", status: "running", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z" }],
+      runs: [{
+        run_id: "run_legacy",
+        mission_id: "mis_legacy",
+        workflow_id: "bugfix",
+        status: "running",
+        current_step_index: 0,
+        created_at: "2026-04-11T00:00:00.000Z",
+        updated_at: "2026-04-11T00:00:00.000Z",
+        steps
+      }],
+      approvals: [],
+      events: [],
+      audit: [],
+      processed_event_ids: []
+    }, null, 2), "utf8");
+    return stateFile;
+  }
+
+  it("survives a persisted step that has no artifacts array", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    // Hydration validated only run_id and that `steps` is an array. Every
+    // read model then does `step.artifacts.length`, and attachArtifact does
+    // `step.artifacts.some(...)`, so a step persisted without the array
+    // 500'd all of them -- permanently, since ensureLoaded() runs per
+    // request. Same class as the run-without-steps and not-an-object state
+    // guards above.
+    const stateFile = writeLegacyArtifactState([
+      { step_id: "plan", title: "Plan", kind: "plan", state: "running", risk: "low", approval_mode: "on_policy_trigger" }
+    ]);
+    const app = await loadApp(stateFile);
+
+    const missions = await app.request("/api/read-models/missions");
+    expect(missions.status).toBe(200);
+    expect((await missions.json()).run_cards[0].steps[0].artifacts_count).toBe(0);
+
+    const runDetail = await app.request("/api/read-models/runs/run_legacy");
+    expect(runDetail.status).toBe(200);
+  });
+
+  it("stamps an id on a persisted artifact that has none, so it cannot swallow a new attachment", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    // Both live write paths stamp an artifact_id, but a state file written
+    // before that did not have to. Such an artifact survived hydration
+    // intact, and the dedupe lookup in POST /api/runs/:id/artifacts
+    // (`item.artifact_id === body.artifact_id`) then matched it on
+    // `undefined === undefined` for the first request that omitted an
+    // artifact_id -- answering 200 with the *old* artifact instead of
+    // creating the new one, and silently dropping the operator's artifact.
+    const stateFile = writeLegacyArtifactState([
+      { step_id: "plan", title: "Plan", kind: "plan", state: "running", risk: "low", approval_mode: "on_policy_trigger", artifacts: [{ type: "legacy", kind: "legacy", label: "legacy", uri: "file:///legacy" }] }
+    ]);
+    const app = await loadApp(stateFile);
+
+    const created = await app.request("/api/runs/run_legacy/artifacts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ step_id: "plan", type: "diff", content: "new artifact" })
+    });
+    expect(created.status).toBe(201);
+    expect((await created.json()).type).toBe("diff");
+
+    const artifacts = await app.request("/api/read-models/artifacts?run_id=run_legacy");
+    const listed = (await artifacts.json()).artifacts;
+    expect(listed).toHaveLength(2);
+    expect(listed.every((item: any) => typeof item.artifact_id === "string" && item.artifact_id)).toBe(true);
+  });
+
   it("starts from empty state when the persisted state file is not an object", async () => {
     // Same class as the per-record guards above, one level up: loadJsonFile
     // only falls back for a missing or unparseable file, so a state file

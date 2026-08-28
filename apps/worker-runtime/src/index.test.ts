@@ -384,6 +384,44 @@ describe("worker-runtime", () => {
     expect(passed.failure_kind).toBeUndefined();
   });
 
+  it("tells a child killed from outside apart from one this worker timed out", async () => {
+    // `killed: true` means *this worker* killed the child at its timeout.
+    // A child terminated by a signal it did not get from here -- the OS OOM
+    // killer, or a runner crashing on SIGSEGV/SIGABRT -- arrives with
+    // `killed: false` and a `signal`, and used to be reported as a timeout.
+    // For the test step that was always wrong: the envelope race aborts
+    // before runCmd's own timeout can fire, so an external signal was the
+    // only thing that could produce a "timed out after Ns" summary.
+    await mkdir(sandboxRoot, { recursive: true });
+
+    const killedExternally = await runCmd("sh", ["-c", "kill -9 $$"], sandboxRoot);
+    expect(killedExternally.exitCode).not.toBe(0);
+    expect(killedExternally.failure_kind).toBe("killed_by_signal");
+    expect(killedExternally.signal).toBe("SIGKILL");
+
+    // A real worker-initiated timeout keeps its own classification.
+    const timedOut = await runCmd("sh", ["-c", "sleep 30"], sandboxRoot, 250);
+    expect(timedOut.failure_kind).toBe("timed_out");
+  });
+
+  it("reports a command that outran the output buffer as such, not as unstartable", async () => {
+    // runCmd caps captured output at 25 MiB. Past that Node kills the child
+    // and rejects with a RangeError whose `code` is the *string*
+    // "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"; a string code is not a number, so
+    // this used to classify as `spawn_failed` and the test step reported
+    // "Test runner could not be started" for a suite that had run to
+    // completion. A verbose suite in a large repo reaches this in normal
+    // operation.
+    await mkdir(sandboxRoot, { recursive: true });
+
+    const noisy = await runCmd(
+      process.execPath,
+      ["-e", "for (let i = 0; i < 26; i += 1) process.stdout.write('x'.repeat(1024 * 1024));"],
+      sandboxRoot
+    );
+    expect(noisy.failure_kind).toBe("output_exceeded");
+  });
+
   it("refuses write-capable steps for non-git repos", async () => {
     const repo = join(sandboxRoot, "repo-b");
     await mkdir(repo, { recursive: true });
