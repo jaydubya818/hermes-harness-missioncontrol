@@ -17,6 +17,15 @@ const FALLBACK_STEP_MINUTES = 2; // assumed duration when timestamps are absent
 export interface ApprovalSummary {
   status: "pending" | "approved" | "rejected";
   reason?: string;
+  /**
+   * The step this approval was requested for. `risk_score` is a per-step
+   * coverage metric, so it needs to know which step an approval settled. The
+   * orchestrator already stamps this on every approval it creates (both
+   * request sites set `step_id: step.step_id`) and passes the approval
+   * records straight to `scoreRun`; it is optional here only so a caller
+   * holding a summary without one still satisfies the type.
+   */
+  step_id?: string;
 }
 
 export interface ScoreInputs {
@@ -148,11 +157,28 @@ export function scoreRun(inputs: ScoreInputs): ScoredEval {
   const efficiency_score = round2(Math.max(0, stepSuccessRate - rejectionPenalty));
 
   // --- risk: approval coverage of high-risk steps ---
-  const highRiskCount = run.steps.filter((s) => s.risk === "high").length;
+  // Count only the approvals that actually settled a high-risk step. The
+  // numerator used to be `approvedCount`, every approved approval in the run,
+  // but approvals are not requested for high-risk steps alone: policy-engine
+  // also raises one for any step whose worker confidence is below 0.6,
+  // whatever its risk. So an approved low-confidence approval on a low-risk
+  // step counted as coverage for a high-risk step nobody had approved -- a
+  // run whose only high-risk deploy was *rejected* still scored a perfect
+  // 1.0 because an earlier plan step had been approved. risk_score is the
+  // governance metric here, so it has to answer the question it claims to.
+  // An approval carrying no step_id cannot be shown to cover a high-risk
+  // step, so it does not count -- the same rule the orchestrator's date
+  // filter applies to a record with no timestamp.
+  const highRiskSteps = run.steps.filter((s) => s.risk === "high");
+  const highRiskCount = highRiskSteps.length;
+  const highRiskStepIds = new Set(highRiskSteps.map((s) => s.step_id));
+  const highRiskApprovedCount = approvals.filter(
+    (a) => a.status === "approved" && !!a.step_id && highRiskStepIds.has(a.step_id)
+  ).length;
   const risk_score = round2(
     highRiskCount === 0
       ? (outcome === "success" ? 1.0 : 0.5)
-      : Math.min(1, approvedCount / highRiskCount)
+      : Math.min(1, highRiskApprovedCount / highRiskCount)
   );
 
   return {

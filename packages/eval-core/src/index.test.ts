@@ -206,7 +206,8 @@ describe("scoreRun", () => {
   it("risk_score is 1.0 when high-risk step has an approval", () => {
     const result = scoreRun({
       run: makeRun(),
-      approvals: [{ status: "approved" }], // 1 approved covers the 1 high-risk (deploy) step
+      // The approval on the high-risk step (deploy) covers the 1 high-risk step.
+      approvals: [{ status: "approved", step_id: "deploy" }],
     });
     expect(result.risk_score).toBe(1.0);
   });
@@ -214,6 +215,49 @@ describe("scoreRun", () => {
   it("risk_score is 0 when high-risk step has no approvals", () => {
     const result = scoreRun({ run: makeRun(), approvals: [] });
     // 1 high-risk step, 0 approved → 0/1 = 0
+    expect(result.risk_score).toBe(0);
+  });
+
+  // risk_score claims to be "approval coverage of high-risk steps", but its
+  // numerator was every approved approval in the run. policy-engine requests
+  // an approval for any low-confidence step regardless of risk, so an
+  // unrelated approval on a low-risk step inflated the coverage of a
+  // high-risk step nobody had approved.
+  it("risk_score ignores approvals granted on steps that are not high-risk", () => {
+    const result = scoreRun({
+      run: makeRun({ status: "failed" }),
+      approvals: [
+        // Low-confidence approval on the low-risk plan step: approved.
+        { status: "approved", step_id: "plan" },
+        // The only high-risk step (deploy) was explicitly refused.
+        { status: "rejected", step_id: "deploy" },
+      ],
+    });
+    // 1 high-risk step, 0 of them approved → 0/1 = 0, not 1.0.
+    expect(result.risk_score).toBe(0);
+  });
+
+  it("risk_score counts an approval only once per high-risk step it covers", () => {
+    const result = scoreRun({
+      run: makeRun(),
+      approvals: [
+        { status: "approved", step_id: "plan" },
+        { status: "approved", step_id: "implement" },
+        { status: "approved", step_id: "deploy" },
+      ],
+    });
+    // 3 approvals but only the deploy one covers the 1 high-risk step.
+    expect(result.risk_score).toBe(1.0);
+    // approval_count stays the run-wide count of approved approvals.
+    expect(result.approval_count).toBe(3);
+  });
+
+  it("risk_score does not credit an approval with no step_id", () => {
+    const result = scoreRun({
+      run: makeRun(),
+      // An approval that names no step cannot be shown to cover a high-risk one.
+      approvals: [{ status: "approved" }],
+    });
     expect(result.risk_score).toBe(0);
   });
 
