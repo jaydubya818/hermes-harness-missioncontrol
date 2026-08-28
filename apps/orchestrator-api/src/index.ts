@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { resolve } from "node:path";
-import { readdir } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { attachArtifact, createWorkflowRun, getCurrentStep, startCurrentStep, advanceRun, markCurrentStepAwaitingApproval, markCurrentStepCompleted, markCurrentStepFailed, pauseCurrentStep, resumeCurrentStep, retryCurrentStep, cancelCurrentStep, syncRunState, type WorkflowArtifact, type WorkflowRun } from "@hermes-harness-with-missioncontrol/workflow-engine";
 import { evaluateStepPolicy } from "@hermes-harness-with-missioncontrol/policy-engine";
 import { loadJsonFile, saveJsonFile } from "@hermes-harness-with-missioncontrol/state-store";
@@ -15,6 +15,8 @@ const stateFile = process.env.ORCHESTRATOR_STATE_FILE ?? resolve(process.cwd(), 
 const memoryApi = process.env.MEMORY_API_URL ?? "http://localhost:4301";
 const evalApi = process.env.EVAL_API_URL ?? "http://localhost:4303";
 const workerApi = process.env.WORKER_API_URL ?? "http://localhost:4304";
+const piBridgeApi = process.env.PI_HERMES_BRIDGE_URL ?? "http://127.0.0.1:8787";
+const piBridgeTokenFile = process.env.PI_HERMES_BRIDGE_TOKEN_FILE ?? resolve(process.env.HOME ?? ".", ".pi/hermes-bridge-token");
 const workerRunsRoot = resolve(process.env.WORKER_RUNTIME_ROOT ?? resolve(process.cwd(), "../../data/worker-runs"));
 const workerWorktreesRoot = resolve(process.env.WORKTREE_ROOT ?? resolve(process.cwd(), "../../data/worktrees"));
 const orphanSweepIntervalMs = Number(process.env.ORPHAN_SWEEP_INTERVAL_MS ?? "0");
@@ -44,6 +46,18 @@ type Approval = ApprovalRequest & Partial<ApprovalResult> & {
   created_at?: string;
 };
 
+type FactoryProject = {
+  project_id: `proj_${string}`;
+  name: string;
+  description?: string;
+  system: ExternalWorkItem["system"];
+  status: "active" | "completed" | "blocked";
+  work_item_keys: string[];
+  mission_ids: string[];
+  created_at: string;
+  updated_at: string;
+};
+
 type OrchestratorState = {
   missions: Mission[];
   runs: WorkflowRun[];
@@ -51,6 +65,8 @@ type OrchestratorState = {
   events: HarnessEvent[];
   audit: Array<Record<string, unknown>>;
   processed_event_ids: string[];
+  factory_projects: FactoryProject[];
+  factory_bindings: FactoryMissionBinding[];
 };
 
 type WorkerArtifact = {
@@ -105,7 +121,7 @@ function toTaskExecutionResult(run: WorkflowRun, stepId: string, execution: Work
   };
 }
 
-const state: OrchestratorState = { missions: [], runs: [], approvals: [], events: [], audit: [], processed_event_ids: [] };
+const state: OrchestratorState = { missions: [], runs: [], approvals: [], events: [], audit: [], processed_event_ids: [], factory_projects: [], factory_bindings: [] };
 let initialized = false;
 
 function normalizeApproval(approval: Approval): Approval {
@@ -358,6 +374,8 @@ async function ensureLoaded() {
   state.missions.splice(0, state.missions.length, ...(loaded.missions ?? []));
   state.runs.splice(0, state.runs.length, ...((loaded.runs ?? []).map((run) => syncRunState(run as WorkflowRun))));
   state.approvals.splice(0, state.approvals.length, ...((loaded.approvals ?? []).map((approval) => normalizeApproval(approval as Approval))));
+  state.factory_projects.splice(0, state.factory_projects.length, ...((loaded.factory_projects ?? []) as FactoryProject[]));
+  state.factory_bindings.splice(0, state.factory_bindings.length, ...((loaded.factory_bindings ?? []) as FactoryMissionBinding[]));
   state.events.splice(0, state.events.length);
   state.audit.splice(0, state.audit.length);
   state.processed_event_ids.splice(0, state.processed_event_ids.length);
@@ -606,6 +624,109 @@ const factoryFixtureThroughput: FactoryThroughputMetric[] = [
   }
 ];
 
+function allFactoryBindings() {
+  return [...factoryFixtureBindings, ...state.factory_bindings];
+}
+
+function findFactoryWorkItem(externalKey: string) {
+  return factoryFixtureWorkItems.find((item) => item.external_key === externalKey);
+}
+
+function buildFactoryProjectFromWorkItem(workItem: ExternalWorkItem, body: { name?: string; description?: string }, now: string): FactoryProject {
+  return {
+    project_id: makeId("proj") as `proj_${string}`,
+    name: body.name?.trim() || `${workItem.external_key} Software Factory Project`,
+    description: body.description?.trim() || `MissionControl dry-run project for ${workItem.external_key}: ${workItem.title}`,
+    system: workItem.system,
+    status: "active",
+    work_item_keys: [workItem.external_key],
+    mission_ids: [],
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+function createFactoryMissionForProject(project: FactoryProject, workItem: ExternalWorkItem, body: { repo_path?: string; workflow_id?: string; preferred_model?: string }, now: string): Mission {
+  return {
+    mission_id: makeId("mis") as `mis_${string}`,
+    title: `${workItem.external_key}: ${workItem.title}`,
+    objective: `Execute factory work item ${workItem.external_key} with context-packet and receipt-packet discipline. Acceptance criteria: ${(workItem.acceptance_criteria ?? []).map((item) => item.statement).join(" ")}`,
+    project_id: project.project_id,
+    workflow: body.workflow_id ?? "bugfix",
+    repo_path: body.repo_path,
+    preferred_model: body.preferred_model ?? "mock",
+    status: "pending",
+    summary: "Factory project created from fixture work item; awaiting governed execution.",
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+function createFactoryContextArtifact(run: WorkflowRun, project: FactoryProject, workItem: ExternalWorkItem, binding: FactoryMissionBinding) {
+  const step = getCurrentStep(run);
+  if (!step) return;
+  const artifact = {
+    artifact_id: makeId("art"),
+    type: "context-packet",
+    kind: "context-packet",
+    label: "Factory context packet",
+    uri: binding.context_packet_uri ?? `artifact://${run.run_id}/context-packet.json`,
+    content: JSON.stringify({ project, work_item: workItem, connector_scopes: factoryFixtureConnectorScopes, loop_policy: factoryFixtureLoopPolicy }, null, 2),
+    metadata: {
+      project_id: project.project_id,
+      work_item_key: workItem.external_key,
+      connector: workItem.system,
+      receipt_packet_uri: binding.receipt_packet_uri,
+    }
+  };
+  attachArtifact(run, step.step_id, artifact as any);
+  recordEvent({ type: "artifact.created", ts: new Date().toISOString(), project_id: project.project_id, mission_id: run.mission_id, run_id: run.run_id, step_id: step.step_id as `step_${string}`, payload: { artifact_id: artifact.artifact_id, kind: artifact.kind, label: artifact.label, uri: artifact.uri, metadata: artifact.metadata } as any });
+}
+
+async function readPiBridgeToken() {
+  if (process.env.PI_HERMES_BRIDGE_TOKEN) return process.env.PI_HERMES_BRIDGE_TOKEN;
+  try {
+    return (await readFile(piBridgeTokenFile, "utf8")).trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function buildPiBridgeReadModel() {
+  const startedAt = Date.now();
+  const token = await readPiBridgeToken();
+  try {
+    const healthResponse = await fetch(`${piBridgeApi}/healthz`);
+    const health = await healthResponse.json().catch(() => ({}));
+    let meta: Record<string, unknown> | null = null;
+    if (token) {
+      const metaResponse = await fetch(`${piBridgeApi}/meta`, { headers: { authorization: `Bearer ${token}` } });
+      meta = await metaResponse.json().catch(() => null);
+    }
+    return {
+      status: healthResponse.ok ? "online" : "degraded",
+      url: piBridgeApi,
+      latency_ms: Date.now() - startedAt,
+      health,
+      meta: meta ? {
+        binaryPath: meta.binaryPath,
+        repoPath: meta.repoPath,
+        authRequired: meta.authRequired,
+        stateRoot: meta.stateRoot,
+      } : null,
+      auth_configured: Boolean(token),
+    };
+  } catch (err) {
+    return {
+      status: "offline",
+      url: piBridgeApi,
+      latency_ms: Date.now() - startedAt,
+      error: err instanceof Error ? err.message : String(err),
+      auth_configured: Boolean(token),
+    };
+  }
+}
+
 function buildFactoryOverviewReadModel() {
   const activeRuns = state.runs.filter((run) => !["completed", "failed", "cancelled"].includes(run.status)).length;
   const blockedRuns = state.runs.filter((run) => run.status === "failed" || run.steps.some((step) => step.state === "blocked" || step.state === "failed")).length;
@@ -630,12 +751,22 @@ function buildFactoryOverviewReadModel() {
     },
     connector_scopes: factoryFixtureConnectorScopes,
     loop_policy: factoryFixtureLoopPolicy,
-    bindings: factoryFixtureBindings,
+    projects: state.factory_projects,
+    bindings: allFactoryBindings(),
   };
 }
 
 function buildFactoryWorkItemsReadModel(query: Record<string, string | undefined> = {}) {
-  const filtered = factoryFixtureWorkItems.filter((item) =>
+  const bindings = allFactoryBindings();
+  const filtered = factoryFixtureWorkItems.map((item) => {
+    const itemBindings = bindings.filter((binding) => binding.work_items.some((workItem) => workItem.external_key === item.external_key));
+    return {
+      ...item,
+      binding_count: itemBindings.length,
+      mission_ids: itemBindings.map((binding) => binding.mission_id),
+      run_ids: itemBindings.map((binding) => binding.run_id).filter(Boolean),
+    };
+  }).filter((item) =>
     (!query.team || item.team === query.team)
     && (!query.assignee || item.assignee === query.assignee)
     && (!query.status || item.status.toLowerCase() === query.status.toLowerCase())
@@ -647,7 +778,8 @@ function buildFactoryWorkItemsReadModel(query: Record<string, string | undefined
     mode: "fixture",
     work_items: page.items,
     pagination: page.pagination,
-    bindings: factoryFixtureBindings,
+    projects: state.factory_projects,
+    bindings,
   };
 }
 
@@ -1480,6 +1612,7 @@ app.get("/api/read-models/overview", async (c) => { await ensureLoaded(); return
 app.get("/api/read-models/factory/overview", async (c) => { await ensureLoaded(); return c.json(buildFactoryOverviewReadModel()); });
 app.get("/api/read-models/factory/work-items", async (c) => { await ensureLoaded(); return c.json(buildFactoryWorkItemsReadModel(c.req.query())); });
 app.get("/api/read-models/factory/throughput", async (c) => { await ensureLoaded(); return c.json(buildFactoryThroughputReadModel(c.req.query())); });
+app.get("/api/read-models/factory/pi-bridge", async (c) => { return c.json(await buildPiBridgeReadModel()); });
 app.get("/api/read-models/missions", async (c) => { await ensureLoaded(); return c.json(buildMissionsReadModel()); });
 app.get("/api/read-models/missions/:id", async (c) => {
   await ensureLoaded();
@@ -1509,6 +1642,56 @@ app.post("/api/maintenance/sweep-orphans", async (c) => {
   if (authError) return authError;
   await ensureLoaded();
   return c.json(await sweepOrphanedExecutionWorkspaces());
+});
+
+app.post("/api/factory/projects/demo", async (c) => {
+  const authError = requireOperator(c);
+  if (authError) return authError;
+  await ensureLoaded();
+  const body = (await c.req.json<{ name?: string; description?: string; work_item_key?: string; repo_path?: string; workflow_id?: string; preferred_model?: string }>().catch(() => ({}))) as { name?: string; description?: string; work_item_key?: string; repo_path?: string; workflow_id?: string; preferred_model?: string };
+  const workItem = findFactoryWorkItem(body.work_item_key ?? "WAID-42");
+  if (!workItem) return c.json({ error: "factory work item not found" }, 404);
+
+  const now = new Date().toISOString();
+  const project = buildFactoryProjectFromWorkItem(workItem, body, now);
+  const mission = createFactoryMissionForProject(project, workItem, body, now);
+  const run = createWorkflowRun(makeId("run") as `run_${string}`, mission.mission_id, mission.workflow);
+  startCurrentStep(run);
+  const firstStep = getCurrentStep(run);
+  if (firstStep) {
+    try {
+      validateExecutionEnvelope(buildExecutionEnvelope(run, firstStep, mission));
+    } catch (err) {
+      return c.json({ error: `factory project repo path is not executable: ${err instanceof Error ? err.message : String(err)}` }, 400);
+    }
+  }
+  mission.active_run_id = run.run_id;
+  mission.status = run.status as Mission["status"];
+  mission.summary = `Factory project ${project.name} started from ${workItem.external_key}`;
+  mission.updated_at = now;
+  project.mission_ids.push(mission.mission_id);
+
+  const binding: FactoryMissionBinding = {
+    binding_id: makeId("fbind"),
+    mission_id: mission.mission_id,
+    run_id: run.run_id,
+    work_items: [workItem],
+    context_packet_uri: `artifact://${run.run_id}/context-packet.json`,
+    receipt_packet_uri: `artifact://${run.run_id}/receipt-packet.json`,
+    created_at: now,
+  };
+
+  state.factory_projects.unshift(project);
+  state.factory_bindings.unshift(binding);
+  state.missions.push(mission);
+  state.runs.push(run);
+  recordEvent({ type: "mission.created", ts: now, project_id: project.project_id, mission_id: mission.mission_id, run_id: run.run_id, payload: { mission, factory_project: project, work_item: workItem } as any });
+  recordEvent({ type: "run.started", ts: now, project_id: project.project_id, mission_id: mission.mission_id, run_id: run.run_id, payload: run as any });
+  recordEvent({ type: "step.started", ts: now, project_id: project.project_id, mission_id: mission.mission_id, run_id: run.run_id, step_id: getCurrentStep(run)?.step_id as `step_${string}` | undefined, payload: { step_kind: getCurrentStep(run)?.kind, state: getCurrentStep(run)?.state, factory_binding_id: binding.binding_id } as any });
+  createFactoryContextArtifact(run, project, workItem, binding);
+  recordRunStatusEvent(run, { step_id: getCurrentStep(run)?.step_id, summary: "Factory demo project created and run started" });
+  await persist();
+  return c.json({ project, mission, run, binding }, 201);
 });
 
 app.post("/api/missions", async (c) => {

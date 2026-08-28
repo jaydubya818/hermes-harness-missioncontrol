@@ -8,6 +8,7 @@ type Tab = (typeof tabs)[number];
 const ORCH = import.meta.env.VITE_ORCH_URL ?? "/orchestrator";
 const MEM = import.meta.env.VITE_MEMORY_URL ?? "/memory";
 const EVAL = import.meta.env.VITE_EVAL_URL ?? "/eval";
+const FACTORY_DEMO_REPO_PATH = import.meta.env.VITE_FACTORY_DEMO_REPO_PATH ?? "";
 
 function getOperatorToken() {
   return window.localStorage.getItem("harness.operatorToken") ?? import.meta.env.VITE_OPERATOR_TOKEN ?? "";
@@ -125,6 +126,7 @@ function useLiveEventStream(url: string) {
         mutate(`${ORCH}/api/read-models/factory/overview`);
         mutate(`${ORCH}/api/read-models/factory/work-items`);
         mutate(`${ORCH}/api/read-models/factory/throughput`);
+        mutate(`${ORCH}/api/read-models/factory/pi-bridge`);
         mutate(`${EVAL}/api/evals`);
       } catch {
         // ignore malformed stream frames
@@ -184,10 +186,38 @@ function Factory() {
   const { data: overview } = useSWR(`${ORCH}/api/read-models/factory/overview`, fetcher, { refreshInterval: 5000 });
   const { data: workItems } = useSWR(`${ORCH}/api/read-models/factory/work-items?team=WAID`, fetcher, { refreshInterval: 5000 });
   const { data: throughput } = useSWR(`${ORCH}/api/read-models/factory/throughput?team=WAID`, fetcher, { refreshInterval: 7000 });
+  const { data: piBridge } = useSWR(`${ORCH}/api/read-models/factory/pi-bridge`, fetcher, { refreshInterval: 7000 });
+  const [projectName, setProjectName] = useState("WAID E2E Factory");
+  const [projectMessage, setProjectMessage] = useState<string | null>(null);
+  const [projectError, setProjectError] = useState<string | null>(null);
   const metrics = overview?.metrics ?? {};
   const scope = overview?.connector_scopes?.[0];
   const latestThroughput = throughput?.throughput?.[0];
   const cycleMinutes = latestThroughput?.average_cycle_time_ms ? Math.round(latestThroughput.average_cycle_time_ms / 60000) : 0;
+
+  async function createDemoProject() {
+    setProjectMessage(null);
+    setProjectError(null);
+    try {
+      const created = await authJson(`${ORCH}/api/factory/projects/demo`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: projectName,
+          work_item_key: "WAID-42",
+          ...(FACTORY_DEMO_REPO_PATH ? { repo_path: FACTORY_DEMO_REPO_PATH } : {}),
+          preferred_model: "mock"
+        })
+      }) as { project?: { name?: string }; mission?: { mission_id?: string }; run?: { run_id?: string } };
+      setProjectMessage(`Created ${created.project?.name ?? "factory project"} · ${created.mission?.mission_id ?? "mission"} · ${created.run?.run_id ?? "run"}`);
+      mutate(`${ORCH}/api/read-models/factory/overview`);
+      mutate(`${ORCH}/api/read-models/factory/work-items?team=WAID`);
+      mutate(`${ORCH}/api/read-models/missions`);
+      mutate(`${ORCH}/api/read-models/overview`);
+    } catch (err) {
+      setProjectError(err instanceof Error ? err.message : String(err));
+    }
+  }
 
   return (
     <div style={{ padding: 16, display: "grid", gap: 16 }}>
@@ -197,6 +227,25 @@ function Factory() {
         <Panel title="Agent Runs"><StatusRow label="Active" value={metrics.active_agent_runs ?? 0} /><StatusRow label="Blocked/failed" value={metrics.blocked_or_failed_runs ?? 0} /></Panel>
         <Panel title="Factory Risk"><StatusRow label="Pending approvals" value={metrics.pending_approvals ?? 0} /><StatusRow label="Verifier failures" value={metrics.verifier_failures ?? 0} /></Panel>
       </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <Panel title="Create Software Factory Project">
+          <div style={{ display: "grid", gap: 10 }}>
+            <input value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="factory project name" style={{ borderRadius: 10, border: "1px solid #334155", background: "#020617", color: "#e2e8f0", padding: 12 }} />
+            <StatusRow label="Seed work item" value="WAID-42" />
+            <StatusRow label="Execution mode" value="fixture + mock LLM" />
+            <Button onClick={createDemoProject}>Create demo project + run</Button>
+            {projectMessage && <div style={{ color: "#86efac", fontSize: 13 }}>{projectMessage}</div>}
+            {projectError && <div style={{ color: "#fca5a5", fontSize: 13 }}>Factory project failed: {projectError}</div>}
+          </div>
+        </Panel>
+        <Panel title="Pi Runtime Lane">
+          <StatusRow label="Bridge" value={piBridge?.status ?? "loading"} />
+          <StatusRow label="Auth configured" value={String(piBridge?.auth_configured ?? false)} />
+          <StatusRow label="Binary" value={piBridge?.meta?.binaryPath ?? "n/a"} />
+          <StatusRow label="State root" value={piBridge?.meta?.stateRoot ?? "n/a"} />
+          <div style={{ color: "#64748b", fontSize: 12, marginTop: 8 }}>Pi is the governed runtime lane; MissionControl remains factory system of record.</div>
+        </Panel>
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "1.25fr .75fr", gap: 16 }}>
         <Panel title="Workday / Jira Work Items">
           {(workItems?.work_items ?? []).length === 0 ? <div>No factory work items loaded.</div> : (workItems?.work_items ?? []).map((item: any) => (
@@ -205,6 +254,7 @@ function Factory() {
               <div style={{ color: "#e2e8f0", fontWeight: 700, marginTop: 6 }}>{item.title}</div>
               <div style={{ color: "#94a3b8", fontSize: 13, marginTop: 6 }}>{item.description}</div>
               <div style={{ color: "#64748b", fontSize: 12, marginTop: 6 }}>{[item.team, item.assignee, item.priority, item.sprint].filter(Boolean).join(" · ")}</div>
+              <div style={{ color: "#7dd3fc", fontSize: 12, marginTop: 6 }}>Bindings: {item.binding_count ?? 0} · Missions: {(item.mission_ids ?? []).join(", ") || "none"}</div>
             </div>
           ))}
         </Panel>
@@ -219,6 +269,15 @@ function Factory() {
           <StatusRow label="Max attempts" value={overview?.loop_policy?.max_attempts ?? 0} />
         </Panel>
       </div>
+      <Panel title="Active Factory Projects">
+        {(overview?.projects ?? []).length === 0 ? <div>No software factory projects yet.</div> : (overview?.projects ?? []).map((project: any) => (
+          <div key={project.project_id} style={{ display: "grid", gridTemplateColumns: "1.2fr .8fr .8fr", gap: 8, padding: 12, borderBottom: "1px solid #1e293b" }}>
+            <StatusRow label={project.name} value={project.status} />
+            <StatusRow label="Work items" value={(project.work_item_keys ?? []).join(", ")} />
+            <StatusRow label="Missions" value={(project.mission_ids ?? []).join(", ")} />
+          </div>
+        ))}
+      </Panel>
       <Panel title="Throughput Receipt Source">
         {(throughput?.throughput ?? []).map((metric: any) => (
           <div key={metric.metric_id} style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, padding: 12, borderBottom: "1px solid #1e293b" }}>

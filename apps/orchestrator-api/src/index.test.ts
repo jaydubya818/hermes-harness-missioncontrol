@@ -32,6 +32,8 @@ describe("orchestrator-api", () => {
     delete process.env.WORKTREE_ROOT;
     delete process.env.WORKER_RUNTIME_ROOT;
     delete process.env.ORPHAN_SWEEP_INTERVAL_MS;
+    delete process.env.PI_HERMES_BRIDGE_TOKEN;
+    delete process.env.PI_HERMES_BRIDGE_URL;
     process.env.VITEST = "1";
   });
 
@@ -102,6 +104,85 @@ describe("orchestrator-api", () => {
     expect(throughputResponse.status).toBe(200);
     expect(throughput.throughput[0].tasks_closed).toBeGreaterThan(0);
     expect(throughput.throughput[0].verifier_failure_count).toBeGreaterThanOrEqual(0);
+  });
+
+  it("creates a fixture-backed software factory project with a started MissionControl run", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const app = await loadApp();
+    const createResponse = await app.request("/api/factory/projects/demo", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "WAID E2E Factory", work_item_key: "WAID-42", preferred_model: "mock" })
+    });
+    const created = await createResponse.json() as {
+      project: { project_id: string; name: string; work_item_keys: string[]; mission_ids: string[] };
+      mission: { mission_id: string; project_id: string; active_run_id?: string; status: string };
+      run: { run_id: string; status: string; steps: Array<{ artifacts: Array<{ type?: string; kind?: string; metadata?: Record<string, unknown> }> }> };
+      binding: { binding_id: string; mission_id: string; run_id?: string; context_packet_uri?: string; receipt_packet_uri?: string };
+    };
+
+    expect(createResponse.status).toBe(201);
+    expect(created.project.name).toBe("WAID E2E Factory");
+    expect(created.project.work_item_keys).toEqual(["WAID-42"]);
+    expect(created.project.mission_ids).toEqual([created.mission.mission_id]);
+    expect(created.mission.project_id).toBe(created.project.project_id);
+    expect(created.mission.active_run_id).toBe(created.run.run_id);
+    expect(created.mission.status).toBe("running");
+    expect(created.binding).toMatchObject({ mission_id: created.mission.mission_id, run_id: created.run.run_id });
+    expect(created.binding.context_packet_uri).toContain("context-packet");
+    expect(created.binding.receipt_packet_uri).toContain("receipt-packet");
+    expect(created.run.steps[0].artifacts[0].metadata?.work_item_key).toBe("WAID-42");
+
+    const overviewResponse = await app.request("/api/read-models/factory/overview");
+    const overview = await overviewResponse.json() as { projects: Array<{ project_id: string }>; bindings: Array<{ binding_id: string }> };
+    expect(overview.projects.some((project) => project.project_id === created.project.project_id)).toBe(true);
+    expect(overview.bindings.some((binding) => binding.binding_id === created.binding.binding_id)).toBe(true);
+
+    const missionsResponse = await app.request("/api/read-models/missions");
+    const missions = await missionsResponse.json() as { mission_queue: Array<{ mission_id: string; active_run_id?: string }> };
+    expect(missions.mission_queue.some((mission) => mission.mission_id === created.mission.mission_id && mission.active_run_id === created.run.run_id)).toBe(true);
+  });
+
+  it("rejects factory demo projects whose repo path cannot execute inside the allowed root", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const app = await loadApp();
+    const response = await app.request("/api/factory/projects/demo", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Bad repo", work_item_key: "WAID-42", repo_path: "/outside/missioncontrol" })
+    });
+    const payload = await response.json() as { error: string };
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toContain("factory project repo path is not executable");
+
+    const missionsResponse = await app.request("/api/missions");
+    const missions = await missionsResponse.json() as { missions: Array<{ title: string }> };
+    expect(missions.missions.some((mission) => mission.title.includes("WAID-42"))).toBe(false);
+  });
+
+  it("reports Pi bridge health without leaking bridge tokens", async () => {
+    process.env.PI_HERMES_BRIDGE_TOKEN = "test-token";
+    process.env.PI_HERMES_BRIDGE_URL = "http://pi-bridge.test";
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/healthz")) return jsonResponse({ body: { ok: true } });
+      if (url.endsWith("/meta")) return jsonResponse({ body: { binaryPath: "/Users/jaywest/.local/bin/hermes", repoPath: "/Users/jaywest/.hermes/hermes-agent", authRequired: true, stateRoot: "/Users/jaywest/.pi/hermes-bridge-state" } });
+      return jsonResponse({ ok: false, status: 404, body: { error: "not found" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await loadApp();
+    const response = await app.request("/api/read-models/factory/pi-bridge");
+    const payload = await response.json() as { status: string; auth_configured: boolean; meta?: { authRequired?: boolean }; token?: string };
+
+    expect(response.status).toBe(200);
+    expect(payload.status).toBe("online");
+    expect(payload.auth_configured).toBe(true);
+    expect(payload.meta?.authRequired).toBe(true);
+    expect(payload).not.toHaveProperty("token");
+    expect(fetchMock).toHaveBeenCalledWith("http://pi-bridge.test/meta", { headers: { authorization: "Bearer test-token" } });
   });
 
   it("returns a TaskExecutionResult-shaped execution_result payload", async () => {

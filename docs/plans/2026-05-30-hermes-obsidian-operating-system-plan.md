@@ -21,6 +21,13 @@ X/Twitter extraction was re-enabled with X API credentials and `x-cli`; 15 uniqu
 - Adapted decision: preserve the operating routines, but do not blindly point Filesystem MCP at Jay's personal vault. Jay's current safer split remains personal vault as human-readable strategy/business layer, Agentic-KB as engineering brain, Morning Review as intake/review loop, and Hermes as synthesis/orchestration layer with explicit receipts.
 - New Obsidian resource created: `/Users/jaywest/Documents/Obsidian Vault/08 - Resources/2026-06-01 Apple Notes Hermes Obsidian System Review.md`.
 
+2026-06-04 72-hour continuation review:
+- Apple Notes 72h window extracted 14 notes and 32 unique X URLs.
+- `x_search` was blocked by xAI/Grok spending-limit status; `x-cli tweet get` fetched all 32 links successfully and is the verified fallback path for this setup.
+- Applied setup deltas: second-brain six-layer gate, Kanban/MissionControl for 3+ step work, Dreaming/proposal inbox as review packets, skill/tool audit before adding automation, and personal-vault writes still gated by allowlists/rollback/receipts.
+- New Obsidian resource created: `/Users/jaywest/Documents/Obsidian Vault/08 - Resources/2026-06-04 Apple Notes Hermes Obsidian Second Brain Review.md`.
+- New Agentic-KB receipt created: `/Users/jaywest/Agentic-KB/wiki/personal/hermes-apple-notes-setup-review-2026-06-04.md`.
+
 High-signal sources:
 - `2053231239721885918` — Addy Osmani, "Agent Harness Engineering"
 - `2042925773300908103` — Garry Tan, "Thin Harness, Fat Skills"
