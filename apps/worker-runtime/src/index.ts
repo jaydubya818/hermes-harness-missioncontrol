@@ -70,7 +70,9 @@ type CommandResult = {
    * status is evidence about the repo rather than about this worker's own
    * environment.
    */
-  failure_kind?: "spawn_failed" | "timed_out" | "aborted";
+  failure_kind?: "spawn_failed" | "timed_out" | "aborted" | "killed_by_signal" | "output_exceeded";
+  /** The signal that terminated the child, when one did. */
+  signal?: string;
 };
 
 type BootstrapCacheEntry = {
@@ -663,16 +665,38 @@ async function runCmd(cmd: string, args: string[], cwd: string, timeoutMs = DEFA
     // about the repo; the other two say this worker could not do the job.
     // Classify them so callers (and the operator reading the step) can tell
     // an unrunnable command from a failing one.
+    //
+    // Two more cases arrive here and used to be mislabelled as one of those
+    // three, both reachable in normal operation:
+    //
+    // - maxBuffer overflow. A suite that writes more than the 25 MiB cap
+    //   makes Node kill the child and reject with a RangeError whose `code`
+    //   is the string "ERR_CHILD_PROCESS_STDIO_MAXBUFFER". A string `code`
+    //   is not a number, so this fell to `spawn_failed` and the step
+    //   reported "Test runner could not be started" for a runner that had
+    //   started and run the whole suite. Checked before `killed`, because
+    //   Node also flags the child as killed on some releases.
+    // - a child terminated by a signal this worker did not send (the OS OOM
+    //   killer, SIGSEGV/SIGABRT from a crashing runner). That arrives with
+    //   `killed: false` and a `signal`, and the old `killed || signal` test
+    //   called it a timeout. Worth separating rather than folding into the
+    //   timeout: for the test step `killed === true` is unreachable anyway
+    //   (the envelope race aborts first -- see docs/HARNESS-INVARIANTS.md),
+    //   so an external signal was the *only* thing that could produce a
+    //   "timed out after Ns" summary, and it was always the wrong one.
     const failure_kind: CommandResult["failure_kind"] =
       error?.name === "AbortError" || error?.code === "ABORT_ERR" ? "aborted"
-      : error?.killed === true || error?.signal ? "timed_out"
+      : error?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" ? "output_exceeded"
+      : error?.killed === true ? "timed_out"
+      : error?.signal ? "killed_by_signal"
       : typeof error?.code !== "number" ? "spawn_failed"
       : undefined;
     return {
       stdout: error?.stdout ?? "",
       stderr: error?.stderr ?? String(error?.message ?? error),
       exitCode: typeof error?.code === "number" ? error.code : 1,
-      ...(failure_kind ? { failure_kind } : {})
+      ...(failure_kind ? { failure_kind } : {}),
+      ...(typeof error?.signal === "string" && error.signal ? { signal: error.signal } : {})
     };
   }
 }
@@ -957,6 +981,7 @@ async function runTests(workspace: WorkspaceContext) {
   let success = false;
   let exitCode = 0;
   let failureKind: CommandResult["failure_kind"];
+  let failureSignal: string | undefined;
 
   if (!detected) {
     report = "No known test runner detected.";
@@ -966,6 +991,7 @@ async function runTests(workspace: WorkspaceContext) {
     success = result.exitCode === 0;
     exitCode = result.exitCode;
     failureKind = result.failure_kind;
+    failureSignal = result.signal;
   }
 
   // "Test command failed" used to cover three different worlds: the suite ran
@@ -983,6 +1009,13 @@ async function runTests(workspace: WorkspaceContext) {
     : failureKind === "spawn_failed" ? `Test runner could not be started: ${detected.label}`
     : failureKind === "timed_out" ? `Test command timed out after ${workspace.envelope.timeout_seconds}s: ${detected.label}`
     : failureKind === "aborted" ? `Test command aborted: ${detected.label}`
+    // The suite ran; the worker could not keep all of its output. Saying
+    // "could not be started" (the old label for this) points the operator at
+    // an install problem that does not exist.
+    : failureKind === "output_exceeded" ? `Test command produced more output than the worker can capture: ${detected.label}`
+    // Killed from outside this worker: the OOM killer, or a runner crashing
+    // on SIGSEGV/SIGABRT. Neither is a timeout, and neither is a test result.
+    : failureKind === "killed_by_signal" ? `Test command was killed by ${failureSignal ?? "a signal"}: ${detected.label}`
     : "Test command failed";
   const confidence =
     success ? 0.88
