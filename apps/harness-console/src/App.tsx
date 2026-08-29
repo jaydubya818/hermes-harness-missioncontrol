@@ -708,6 +708,10 @@ function Audit() {
     mission_id: missionFilter || undefined,
     run_id: runFilter || undefined,
     step_id: stepFilter || undefined,
+    // The Filters panel is shared with the approval history rendered beside
+    // this timeline, which has always sent `actor`. Sending it here too so
+    // one input does not filter half the page.
+    actor: actorFilter || undefined,
     kind: timelineKind || undefined,
     event_type: eventTypeFilter || undefined,
     sort: timelineSort

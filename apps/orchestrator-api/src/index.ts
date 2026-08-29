@@ -1017,6 +1017,19 @@ function buildAuditReadModel(query: Record<string, string | undefined> = {}) {
     if (query.mission_id && event.mission_id !== query.mission_id) return [];
     if (query.run_id && event.run_id !== query.run_id) return [];
     if (query.step_id && event.step_id !== query.step_id) return [];
+    // The audit timeline is the record of who did what, but `actor` was
+    // neither filtered on nor projected: /api/read-models/audit?actor=jay
+    // returned every event in the window, including ones stamped by other
+    // operators and the unattributed worker events. Every sibling surface
+    // already honours it -- /api/events/stream (eventMatchesFilters),
+    // /api/read-models/approvals and /api/read-models/approval-history all
+    // filter on `actor` -- and the console's Audit tab feeds one shared
+    // "actor" input to the approval history beside this timeline, so the
+    // operator saw one half of the page respond and the other half ignore
+    // the filter. Same rule as every other filter here: with a bound
+    // present, a record that cannot be shown to match is excluded, so an
+    // unattributed event drops out of an actor-filtered view.
+    if (query.actor && event.actor !== query.actor) return [];
     if (query.event_type && event.type !== query.event_type) return [];
     const occurred_at = event.ts ?? event.timestamp ?? "";
     if (!inDateRange(occurred_at, query.from, query.to)) return [];
@@ -1029,7 +1042,8 @@ function buildAuditReadModel(query: Record<string, string | undefined> = {}) {
       occurred_at,
       mission_id: event.mission_id,
       run_id: event.run_id,
-      step_id: event.step_id
+      step_id: event.step_id,
+      actor: event.actor
     }];
   });
 
