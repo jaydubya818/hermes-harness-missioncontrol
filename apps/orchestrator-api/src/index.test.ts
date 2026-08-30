@@ -1588,6 +1588,50 @@ describe("orchestrator-api", () => {
     expect(payload.timeline[0]).toMatchObject({ title: "Approval resolved", occurred_at: "2026-04-11T00:02:00.000Z", run_id: "run_demo" });
   });
 
+  // The audit timeline is the record of who authorized what, but `actor` was
+  // neither projected onto a timeline entry nor honoured as a filter: the
+  // query below returned every event in the retained window. Its siblings --
+  // /api/events/stream, /api/read-models/approvals and
+  // /api/read-models/approval-history -- have always filtered on `actor`,
+  // and the console's Audit tab sends one shared actor input to both the
+  // approval history and this timeline.
+  it("filters the audit timeline by actor and reports who each entry is attributed to", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-audit-actor-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [],
+      runs: [],
+      approvals: [],
+      events: [
+        { event_id: "evt_jay", type: "approval.resolved", ts: "2026-04-11T00:02:00.000Z", mission_id: "mis_demo", run_id: "run_demo", step_id: "deploy", actor: "jay", payload: {} },
+        { event_id: "evt_alex", type: "approval.resolved", ts: "2026-04-11T00:03:00.000Z", mission_id: "mis_demo", run_id: "run_demo", step_id: "deploy", actor: "alex", payload: {} },
+        { event_id: "evt_worker", type: "step.progress", ts: "2026-04-11T00:04:00.000Z", mission_id: "mis_demo", run_id: "run_demo", step_id: "deploy", payload: {} }
+      ],
+      audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+
+    const filtered = await app.request("/api/read-models/audit?actor=jay");
+    expect(filtered.status).toBe(200);
+    const filteredPayload = await filtered.json() as { timeline: Array<{ event_type: string; actor?: string; occurred_at: string }> };
+    expect(filteredPayload.timeline).toHaveLength(1);
+    expect(filteredPayload.timeline[0]).toMatchObject({ event_type: "approval.resolved", actor: "jay", occurred_at: "2026-04-11T00:02:00.000Z" });
+
+    // An unattributed event cannot be shown to match an actor bound, so it
+    // drops out -- the same rule the other filters here apply.
+    const workerFiltered = await app.request("/api/read-models/audit?actor=alex");
+    const workerPayload = await workerFiltered.json() as { timeline: Array<{ actor?: string }> };
+    expect(workerPayload.timeline.map((entry) => entry.actor)).toEqual(["alex"]);
+
+    // Unfiltered, every entry is still there and each carries its attribution.
+    const unfiltered = await app.request("/api/read-models/audit?sort=oldest");
+    const unfilteredPayload = await unfiltered.json() as { timeline: Array<{ actor?: string }> };
+    expect(unfilteredPayload.timeline.map((entry) => entry.actor)).toEqual(["jay", "alex", undefined]);
+  });
+
   it("treats a date-only `to` filter as inclusive of that whole day", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
 
@@ -1899,8 +1943,13 @@ describe("orchestrator-api", () => {
     expect(ingested?.actor).toBeUndefined();
 
     // ...and it must not surface under an operator-filtered audit query.
+    // This used to assert only the status code, which passed whatever the
+    // filter did: /api/read-models/audit ignored `actor` entirely.
     const audit = await app.request("/api/read-models/audit?actor=operator");
     expect(audit.status).toBe(200);
+    const auditPayload = await audit.json() as { timeline: Array<{ event_type: string; actor?: string }> };
+    expect(auditPayload.timeline.every((entry) => entry.actor === "operator")).toBe(true);
+    expect(auditPayload.timeline.map((entry) => entry.event_type)).not.toContain("step.progress");
     const stream = await app.request(`/api/events/stream?actor=operator&run_id=${run.run_id}&last=100`);
     expect(await readSseEvents(stream, 0)).not.toContain("evt_worker_actor");
   });
