@@ -4,7 +4,10 @@ import {
   startCurrentStep,
   advanceRun,
   markCurrentStepAwaitingApproval,
+  markCurrentStepCancelled,
   markCurrentStepCompleted,
+  markCurrentStepFailed,
+  getCurrentStep,
   pauseCurrentStep,
   resumeCurrentStep,
   retryCurrentStep,
@@ -213,5 +216,79 @@ describe("workflow-engine", () => {
     expect(run.status).toBe("completed");
     expect(lastStep.state).toBe("completed");
     expect(lastStep.blocked_reason).toBeUndefined();
+  });
+
+  it("fails the current step and the run, stamping a completion time", () => {
+    const run = createWorkflowRun("run_demo", "mis_demo", "bugfix");
+    startCurrentStep(run, "exec_demo");
+
+    markCurrentStepFailed(run, "compiler error");
+
+    expect(run.steps[0]).toMatchObject({ state: "failed", notes: "compiler error" });
+    expect(run.steps[0].completed_at).toBeTruthy();
+    expect(run.status).toBe("failed");
+    // A failed run is terminal, so syncRunState must publish a run-level
+    // completed_at rather than leaving the run looking still in flight.
+    expect(run.completed_at).toBe(run.steps[0].completed_at);
+    // Failing does not advance: the failed step stays current so retry and
+    // the operator read models still point at it.
+    expect(run.current_step_index).toBe(0);
+    expect(run.current_step_id).toBe("plan");
+  });
+
+  it("does not overwrite an already terminal step when failing again", () => {
+    const run = createWorkflowRun("run_demo", "mis_demo", "bugfix");
+    startCurrentStep(run);
+    cancelCurrentStep(run, "operator cancelled");
+    const cancelledAt = run.steps[0].completed_at;
+
+    markCurrentStepFailed(run, "should not apply");
+
+    expect(run.steps[0]).toMatchObject({ state: "cancelled", notes: "operator cancelled" });
+    expect(run.steps[0].completed_at).toBe(cancelledAt);
+    expect(run.status).toBe("cancelled");
+  });
+
+  it("routes advanceRun('failed') through the same failure transition", () => {
+    const run = createWorkflowRun("run_demo", "mis_demo", "bugfix");
+    startCurrentStep(run);
+
+    advanceRun(run, "failed", "tests red");
+
+    expect(run.steps[0]).toMatchObject({ state: "failed", notes: "tests red" });
+    expect(run.status).toBe("failed");
+  });
+
+  it("markCurrentStepCancelled is an alias for cancelCurrentStep", () => {
+    const viaAlias = createWorkflowRun("run_alias", "mis_demo", "bugfix");
+    const viaDirect = createWorkflowRun("run_direct", "mis_demo", "bugfix");
+    startCurrentStep(viaAlias);
+    startCurrentStep(viaDirect);
+
+    markCurrentStepCancelled(viaAlias, "stop");
+    cancelCurrentStep(viaDirect, "stop");
+
+    expect(viaAlias.steps[0].state).toBe(viaDirect.steps[0].state);
+    expect(viaAlias.status).toBe(viaDirect.status);
+    expect(viaAlias.steps[0].approval_id).toBe(viaDirect.steps[0].approval_id);
+  });
+
+  it("treats a current_step_index past the end of the steps array as no current step", () => {
+    // Nothing validates current_step_index when a run is hydrated from a
+    // persisted state file -- hydrateState only checks that `steps` is an
+    // array -- so an index pointing past the end has to degrade to "no
+    // current step" instead of throwing or mutating the wrong step.
+    const run = createWorkflowRun("run_demo", "mis_demo", "bugfix");
+    run.current_step_index = run.steps.length + 5;
+
+    expect(getCurrentStep(run)).toBeUndefined();
+    expect(syncRunState(run).current_step_id).toBeUndefined();
+
+    const statesBefore = run.steps.map((step) => step.state);
+    startCurrentStep(run, "exec_oob");
+    markCurrentStepFailed(run, "oob");
+    markCurrentStepCancelled(run, "oob");
+    retryCurrentStep(run, "oob");
+    expect(run.steps.map((step) => step.state)).toEqual(statesBefore);
   });
 });
