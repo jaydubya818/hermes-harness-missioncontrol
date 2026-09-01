@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadJsonFile, saveJsonFile } from "./index.js";
@@ -109,5 +109,46 @@ describe("state-store", () => {
     expect(value).toEqual({ ok: false });
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
+  });
+
+  // saveJsonFile chains every save for a path onto the previous one. The
+  // caller gets the raw `save` promise (so a write error still surfaces), but
+  // the *queue* advances through `save.catch(() => undefined)`. Without that
+  // catch a single transient failure -- a full disk, a lost permission --
+  // would leave a rejected promise as the queue tail and every later save to
+  // that path would chain onto it and never run, so the services would go on
+  // mutating in-memory state that silently stopped being persisted.
+  it("keeps persisting to a path after one save to it fails", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "state-store-"));
+    const target = join(dir, "state.json");
+    // Renaming a file over an existing directory fails, as above.
+    mkdirSync(target);
+
+    await expect(saveJsonFile(target, { generation: 1 })).rejects.toThrow();
+
+    rmSync(target, { recursive: true });
+    await saveJsonFile(target, { generation: 2 });
+
+    expect(await loadJsonFile(target, { generation: 0 })).toEqual({ generation: 2 });
+    expect(readdirSync(dir).filter((name) => name.endsWith(".tmp"))).toHaveLength(0);
+  });
+
+  // Same guarantee, but for saves already queued behind the failing one
+  // rather than issued after it has settled.
+  it("still publishes a save that was queued behind a failing one", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "state-store-"));
+    const target = join(dir, "state.json");
+    mkdirSync(target);
+
+    const failing = saveJsonFile(target, { generation: 1 });
+    const queued = failing.catch(() => undefined).then(() => {
+      rmSync(target, { recursive: true });
+      return saveJsonFile(target, { generation: 2 });
+    });
+
+    await expect(failing).rejects.toThrow();
+    await queued;
+
+    expect(await loadJsonFile(target, { generation: 0 })).toEqual({ generation: 2 });
   });
 });
