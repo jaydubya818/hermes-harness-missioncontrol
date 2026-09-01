@@ -1,20 +1,18 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
+import { assertOperatorTokenNotBundled } from "./src/operatorTokenGuard.js";
 
-export default defineConfig(({ command }) => {
-  // `vite build` inlines every VITE_* variable into the emitted JS as clear
-  // text. VITE_OPERATOR_TOKEN is the bearer token guarding every mutating
-  // API, so baking it into a static bundle hands full control-plane access
-  // to anyone who can fetch the console's assets. The dev server keeps the
-  // convenience -- it never writes a bundle to disk -- and operators can
-  // always paste the token into Settings, which stores it in localStorage.
-  if (command === "build" && process.env.VITE_OPERATOR_TOKEN && process.env.ALLOW_OPERATOR_TOKEN_IN_BUNDLE !== "1") {
-    throw new Error(
-      "VITE_OPERATOR_TOKEN is set during `vite build`: it would be inlined into the console bundle in clear text. "
-      + "Unset it and enter the token in the console's Settings tab instead, "
-      + "or set ALLOW_OPERATOR_TOKEN_IN_BUNDLE=1 if you really intend to ship it."
-    );
-  }
+export default defineConfig(({ command, mode }) => {
+  // loadEnv() rather than process.env: it returns the same union Vite itself
+  // inlines -- the .env files for this mode plus any VITE_* already in the
+  // process environment -- so a token supplied through a .env file cannot
+  // slip past the guard. envDir mirrors Vite's own default (config.root,
+  // which defaults to cwd) so the two stay in lockstep.
+  assertOperatorTokenNotBundled(
+    command,
+    loadEnv(mode, process.cwd()),
+    process.env.ALLOW_OPERATOR_TOKEN_IN_BUNDLE
+  );
 
   return {
     plugins: [react()],
