@@ -288,19 +288,23 @@ Most important env vars:
 ## Setup
 
 Prereqs:
-- Node / pnpm matching workspace lockfile expectations
+- Node 22.20 or newer (`.nvmrc`). Declared as `engines.node: ">=22.20 <23"` in the root
+  `package.json`; pnpm treats `engines` as **advisory** unless `engine-strict`
+  is turned on in an `.npmrc` (there is none here), so another major prints
+  `WARN Unsupported engine` and installs anyway rather than failing.
+- pnpm 10.32.1, pinned by `packageManager` — run it via `corepack pnpm`
 - local writable `data/` area
 
 Install:
 ```bash
-pnpm install --frozen-lockfile
+corepack pnpm install --frozen-lockfile
 ```
 
 Verify workspace:
 ```bash
-pnpm typecheck
-pnpm test
-pnpm build
+corepack pnpm typecheck
+corepack pnpm test
+corepack pnpm build
 ```
 
 `pnpm typecheck` bootstraps workspace package build outputs first so dependent apps/packages can resolve workspace types from a clean checkout.
