@@ -305,6 +305,27 @@ pnpm build
 
 `pnpm typecheck` bootstraps workspace package build outputs first so dependent apps/packages can resolve workspace types from a clean checkout.
 
+Three things that make a verification run report the wrong answer, all of
+them observed rather than theorised:
+
+- **`pnpm --filter <pkg> test` does not type-check.** Vitest transpiles and
+  discards types, but every package's `tsconfig.json` includes its own test
+  files, so `tsc` does check them. A test file with a type error passes
+  `pnpm --filter <pkg> test` and fails `pnpm typecheck` / `pnpm build`. Run
+  the typecheck before believing a green suite.
+- **An exit status read through a pipe is the pipe's last command.**
+  `pnpm typecheck 2>&1 | tail -12` exits 0 while the typecheck fails,
+  because that is `tail`'s status. Use `set -o pipefail` (or read
+  `${pipestatus[1]}` in zsh) in any script that gates on these commands.
+- **Use `corepack pnpm`, not whatever `pnpm` is on `PATH`.** `packageManager`
+  pins `pnpm@10.32.1`; corepack honours it, a globally installed pnpm does
+  not, and the two resolve `pnpm-workspace.yaml` overrides differently.
+
+`NODE_ENV=production` is *not* one of them: unlike npm, pnpm does not read
+`NODE_ENV` to decide prod-only installs, so a `pnpm install --frozen-lockfile`
+under `NODE_ENV=production` still installs devDependencies here. Verified on a
+fresh clone; do not spend time on it again.
+
 Reset local state if needed:
 ```bash
 pnpm dev:reset-state
