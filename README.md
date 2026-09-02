@@ -305,9 +305,19 @@ pnpm build
 
 `pnpm typecheck` bootstraps workspace package build outputs first so dependent apps/packages can resolve workspace types from a clean checkout.
 
-Three things that make a verification run report the wrong answer, all of
+Four things that make a verification run report the wrong answer, all of
 them observed rather than theorised:
 
+- **`pnpm test` on a fresh checkout fails until the workspace packages are
+  built, and the failure does not look like a build problem.** Every
+  `packages/*` manifest points `main` at `dist/`, which does not exist until
+  `pnpm --filter './packages/**' build` has run, so `pnpm -r test` and
+  `pnpm --filter <app> test` both fail with `Failed to resolve entry for
+  package "@hermes-harness-with-missioncontrol/<pkg>" ... incorrect
+  main/module/exports` across several suites. That reads like a red
+  `main`; it is a missing build. The order above (`pnpm typecheck` first)
+  works only because `typecheck` runs that build as its first step. Build
+  the packages before running any test suite on its own.
 - **`pnpm --filter <pkg> test` does not type-check.** Vitest transpiles and
   discards types, but every package's `tsconfig.json` includes its own test
   files, so `tsc` does check them. A test file with a type error passes
