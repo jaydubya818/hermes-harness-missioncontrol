@@ -2468,6 +2468,100 @@ describe("orchestrator-api", () => {
     expect(calls.some((url) => url.includes("/api/evals"))).toBe(true);
   });
 
+  it("cancel-step rejects the pending approval and releases the workspace like a run cancel", async () => {
+    const abortCalls: Array<{ execution_id?: string; reason?: string }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes("/api/abort-execution")) {
+        abortCalls.push(JSON.parse(String(init?.body ?? "{}")) as { execution_id?: string; reason?: string });
+      }
+      return jsonResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const stateDir = mkdtempSync(join(tmpdir(), "orch-cancel-step-approval-"));
+    const stateFile = join(stateDir, "state.json");
+    writeFileSync(stateFile, JSON.stringify({
+      missions: [{ mission_id: "mis_demo", title: "Cancel step flow", objective: "Cancel step flow", project_id: "proj_demo", workflow: "bugfix", status: "awaiting_approval", active_run_id: "run_demo", summary: "waiting approval", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z" }],
+      runs: [{ run_id: "run_demo", mission_id: "mis_demo", workflow_id: "bugfix", status: "awaiting_approval", current_step_index: 0, current_step_id: "deploy", approval_id: "approval_demo", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z", steps: [{ step_id: "deploy", title: "Canary deploy", kind: "deploy", risk: "high", approval_mode: "on_policy_trigger", state: "awaiting_approval", approval_id: "approval_demo", execution_id: "exec_demo", notes: "waiting approval", blocked_reason: "needs approval", artifacts: [], started_at: "2026-04-11T00:00:00.000Z" }] }],
+      approvals: [{ approval_id: "approval_demo", mission_id: "mis_demo", run_id: "run_demo", step_id: "deploy", status: "pending", reason: "needs approval", decision_scope: "step", requested_at: "2026-04-11T00:00:00.000Z" }], events: [], audit: []
+    }, null, 2), "utf8");
+
+    const app = await loadApp(stateFile);
+    const response = await app.request("/api/runs/run_demo/cancel-step", { method: "POST", headers: { "content-type": "application/json" } });
+    const payload = await response.json() as { run: { status: string; steps: Array<{ state: string }> }; mission: { status: string }; approval?: { status: string; resolved_by?: string } };
+
+    expect(response.status).toBe(200);
+    expect(payload.run.status).toBe("cancelled");
+    expect(payload.mission.status).toBe("cancelled");
+    expect(payload.run.steps[0]).toMatchObject({ state: "cancelled" });
+    // The approval must not stay pending on a step that can no longer be
+    // executed, and the response carries the resolved approval so the
+    // console can drop it from the queue without a refetch.
+    expect(payload.approval).toMatchObject({ status: "rejected", resolved_by: "operator" });
+
+    const approvals = await app.request("/api/approvals");
+    const approvalsPayload = await approvals.json() as { approvals: Array<{ approval_id: string; status: string }> };
+    expect(approvalsPayload.approvals.find((item) => item.approval_id === "approval_demo")?.status).toBe("rejected");
+
+    // The step carried an execution id, so the worker is told to stop it
+    // rather than only having its late result discarded.
+    expect(abortCalls).toEqual([{ execution_id: "exec_demo", reason: "operator cancelled current step" }]);
+
+    // Cancel-step is terminal exactly like /cancel: eval recorded, workspace released.
+    const calls = fetchMock.mock.calls.map((call) => String(call[0]));
+    expect(calls.some((url) => url.includes("/api/cleanup-run"))).toBe(true);
+    expect(calls.some((url) => url.includes("/api/evals"))).toBe(true);
+
+    const events = await app.request("/api/events");
+    const eventsPayload = await events.json() as { events: Array<{ type: string; actor?: string }> };
+    expect(eventsPayload.events.some((event) => event.type === "approval.resolved" && event.actor === "operator")).toBe(true);
+    expect(eventsPayload.events.some((event) => event.type === "step.cancelled")).toBe(true);
+  });
+
+  it("cancel-step refuses a terminal current step and records nothing", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse());
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const terminalState of ["completed", "failed", "cancelled"] as const) {
+      const stateDir = mkdtempSync(join(tmpdir(), `orch-cancel-step-${terminalState}-`));
+      const stateFile = join(stateDir, "state.json");
+      writeFileSync(stateFile, JSON.stringify({
+        missions: [{ mission_id: "mis_demo", title: "Terminal step", objective: "Terminal step", project_id: "proj_demo", workflow: "bugfix", status: terminalState, active_run_id: "run_demo", summary: terminalState, created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z" }],
+        runs: [{ run_id: "run_demo", mission_id: "mis_demo", workflow_id: "bugfix", status: terminalState, current_step_index: 0, current_step_id: "plan", created_at: "2026-04-11T00:00:00.000Z", updated_at: "2026-04-11T00:00:00.000Z", steps: [{ step_id: "plan", title: "Plan fix", kind: "plan", risk: "low", approval_mode: "on_policy_trigger", state: terminalState, execution_id: "exec_demo", artifacts: [], started_at: "2026-04-11T00:00:00.000Z", completed_at: "2026-04-11T00:01:00.000Z" }] }],
+        approvals: [], events: [], audit: []
+      }, null, 2), "utf8");
+
+      const app = await loadApp(stateFile);
+      fetchMock.mockClear();
+      const response = await app.request("/api/runs/run_demo/cancel-step", { method: "POST", headers: { "content-type": "application/json" } });
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ error: "current step not cancellable" });
+
+      // A repeated cancel on an already-closed step must not abort a worker
+      // execution, record a second eval or re-run workspace cleanup.
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      const runs = await app.request("/api/runs");
+      const runsPayload = await runs.json() as { runs: Array<{ status: string; steps: Array<{ state: string }> }> };
+      expect(runsPayload.runs[0]?.status).toBe(terminalState);
+      expect(runsPayload.runs[0]?.steps[0]?.state).toBe(terminalState);
+
+      const events = await app.request("/api/events");
+      const eventsPayload = await events.json() as { events: unknown[] };
+      expect(eventsPayload.events).toHaveLength(0);
+    }
+  });
+
+  it("cancel-step 404s an unknown run before touching the worker", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse());
+    vi.stubGlobal("fetch", fetchMock);
+    const app = await loadApp();
+    const response = await app.request("/api/runs/run_missing/cancel-step", { method: "POST", headers: { "content-type": "application/json" } });
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "run not found" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("keeps approval pending when a stale approval response is rejected", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse()));
 
