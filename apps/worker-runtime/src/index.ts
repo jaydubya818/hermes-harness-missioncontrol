@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { mkdir, writeFile, access, rm, readFile, symlink, unlink, readdir, lstat } from "node:fs/promises";
-import { resolve, join, relative, dirname, isAbsolute } from "node:path";
+import { resolve, join, relative, dirname, isAbsolute, posix, sep } from "node:path";
 import { execFile } from "node:child_process";
 import { timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
@@ -238,8 +238,12 @@ function assertAllowedRepoWrite(workspace: WorkspaceContext, targetPath: string)
   }
   const relPath = safeRelativePath(rel);
   const allowed = workspace.envelope.repo_scope.writable_paths.some((allowedPath) => {
-    if (allowedPath === ".") return true;
     const normalized = safeRelativePath(allowedPath);
+    // A grant that still climbs above the repo after normalization
+    // ("../x", "src/../../etc") grants nothing. validateEnvelope rejects
+    // these up front; this keeps the gate closed if one gets past it.
+    if (normalized === ".." || normalized.startsWith("../")) return false;
+    if (normalized === ".") return true;
     return relPath === normalized || relPath.startsWith(`${normalized}/`);
   });
   if (!allowed) {
@@ -566,8 +570,17 @@ function relativeWithin(root: string, path: string) {
   return rel;
 }
 
-function safeRelativePath(path: string) {
-  return path.split("/").filter(Boolean).join("/");
+// Canonical form for comparing a writable_paths grant against a relative
+// write target: "." and empty segments are dropped and ".." is resolved, so
+// "./src", "src/", "src/./" and "lib/../src" all read as "src" and "./" or
+// "src/.." read as "." (the whole repo). validateEnvelope accepts every one
+// of those spellings because it resolves them against the repo root; the
+// gate that consumes them has to read them the same way or it refuses a
+// path the envelope just granted. A grant that resolves above the root
+// stays "../..."-prefixed so the caller can fail closed on it.
+function safeRelativePath(path: string, nativeSeparator = sep) {
+  const normalized = posix.normalize(path.split(nativeSeparator).filter(Boolean).join("/"));
+  return normalized === "" ? "." : normalized;
 }
 
 async function selectDeployProvider(repoWorkspace: string) {
@@ -1447,4 +1460,4 @@ if (!process.env.VITEST) {
   console.log(`[worker] allowed repo root: ${allowedRepoRoot}`);
 }
 
-export { app, ensureWorkspace, detectTestCommand, bootstrapWorkspaceDependencies, assertAllowedRepoWrite, parseChangedFiles, runCmd, assertOperatorTokenUsable };
+export { app, ensureWorkspace, detectTestCommand, bootstrapWorkspaceDependencies, assertAllowedRepoWrite, safeRelativePath, parseChangedFiles, runCmd, assertOperatorTokenUsable };
