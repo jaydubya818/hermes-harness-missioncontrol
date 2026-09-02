@@ -118,6 +118,49 @@ describe("memory-api", () => {
     expect(((await after.json()) as { recent_promotions: number }).recent_promotions).toBe(0);
   });
 
+  it("classifies a project's wiki files in its summary by filename", async () => {
+    const vault = makeVault();
+    const projectDir = join(vault, "wiki", "projects", "proj_demo");
+    writeFileSync(join(projectDir, "recipes.md"), "recipes body");
+    writeFileSync(join(projectDir, "postmortem-2026-04-11.md"), "what broke");
+    writeFileSync(join(projectDir, "promoted-rewrite_1.md"), "---\npromoted_by: agent_demo\n---\n");
+    writeFileSync(join(projectDir, "notes.md"), "unclassified");
+    const app = await loadApp({ vaultRoot: vault });
+
+    const res = await app.request("/api/memory/projects/proj_demo/summary");
+    expect(res.status).toBe(200);
+    const payload = await res.json() as { project_id: string; standards: string[]; active_rewrites: unknown[]; recent_postmortems: string[]; recipes: string[]; promoted: string[] };
+    expect(payload.project_id).toBe("proj_demo");
+    // Classification is by filename substring, and a promoted artifact
+    // counts as both a standard and a promotion. active_rewrites is a
+    // placeholder the route never populates.
+    expect(payload.standards.sort()).toEqual(["promoted-rewrite_1.md", "standards.md"]);
+    expect(payload.recipes).toEqual(["recipes.md"]);
+    expect(payload.recent_postmortems).toEqual(["postmortem-2026-04-11.md"]);
+    expect(payload.promoted).toEqual(["promoted-rewrite_1.md"]);
+    expect(payload.active_rewrites).toEqual([]);
+    // A file matching no bucket is simply absent from the summary.
+    for (const bucket of [payload.standards, payload.recipes, payload.recent_postmortems, payload.promoted]) {
+      expect(bucket).not.toContain("notes.md");
+    }
+  });
+
+  it("answers an empty summary for a project with no wiki directory", async () => {
+    const app = await loadApp({ vaultRoot: makeVault() });
+    const res = await app.request("/api/memory/projects/proj_unknown/summary");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ project_id: "proj_unknown", standards: [], active_rewrites: [], recent_postmortems: [], recipes: [], promoted: [] });
+  });
+
+  it("rejects traversal and absolute project ids on the project summary", async () => {
+    const app = await loadApp({ vaultRoot: makeVault() });
+    for (const id of ["..%2Fagents", "%2Fetc", "proj%20demo"]) {
+      const res = await app.request(`/api/memory/projects/${id}/summary`);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "unsafe id" });
+    }
+  });
+
   it("counts only entry-anchored lines in learned_count and pending_rewrites", async () => {
     const vault = makeVault();
     // Frontmatter delimiters and horizontal rules start with "-" but are not
