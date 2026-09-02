@@ -216,7 +216,18 @@ export function markCurrentStepAwaitingApproval(run: WorkflowRun, approval_id: s
 export function retryCurrentStep(run: WorkflowRun, notes?: string): WorkflowRun {
   const current = getCurrentStep(run);
   if (!current) return run;
-  if (!["failed", "paused", "cancelled", "blocked", "awaiting_approval"].includes(current.state)) return run;
+  // "cancelled" is deliberately absent. Every other terminal state here is a
+  // blocker the operator can clear; cancel is a close-out decision -- by the
+  // time a step is cancelled the run's eval is recorded and its worktree and
+  // branch are released -- so retrying it revived a run that
+  // /execute-current refuses as not executable and /artifacts refuses as
+  // terminal, and queued a second eval against a workspace that no longer
+  // exists. Every sibling helper (`startCurrentStep`, `markCurrentStep*`)
+  // already refuses a cancelled step; this was the one that did not, and the
+  // orchestrator's retry-step route and the console's RETRYABLE_STEP_STATES
+  // each had to hand-mirror the exclusion to compensate. Fixed at the source
+  // so a future caller cannot reintroduce it.
+  if (!["failed", "paused", "blocked", "awaiting_approval"].includes(current.state)) return run;
   current.started_at = undefined;
   current.completed_at = undefined;
   current.execution_id = undefined;

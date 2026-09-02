@@ -273,6 +273,42 @@ describe("workflow-engine", () => {
     expect(viaAlias.steps[0].approval_id).toBe(viaDirect.steps[0].approval_id);
   });
 
+  it("does not resurrect a cancelled step or run via retry", () => {
+    // Before this guard, cancel followed by retry flipped run.status back to
+    // "running" and the step back to "running" -- reviving a run whose eval
+    // was already recorded and whose worktree and branch were already
+    // released. The orchestrator's retry-step route and the console's
+    // RETRYABLE_STEP_STATES each excluded "cancelled" by hand; the source
+    // helper did not.
+    const run = createWorkflowRun("run_demo", "mis_demo", "bugfix");
+    startCurrentStep(run, "exec_demo");
+    cancelCurrentStep(run, "operator cancelled");
+    const cancelledAt = run.steps[0].completed_at;
+
+    retryCurrentStep(run, "operator retried current step");
+
+    expect(run.status).toBe("cancelled");
+    expect(run.steps[0]).toMatchObject({ state: "cancelled", notes: "operator cancelled" });
+    expect(run.steps[0].completed_at).toBe(cancelledAt);
+    expect(run.completed_at).toBe(cancelledAt);
+  });
+
+  it("still retries every non-cancelled blocker state", () => {
+    for (const block of ["failed", "paused", "blocked", "awaiting_approval"] as const) {
+      const run = createWorkflowRun(`run_${block}`, "mis_demo", "bugfix");
+      startCurrentStep(run, "exec_demo");
+      if (block === "failed") markCurrentStepFailed(run, "boom");
+      else if (block === "paused") pauseCurrentStep(run, "hold");
+      else if (block === "blocked") markCurrentStepBlocked(run, "waiting on dep");
+      else markCurrentStepAwaitingApproval(run, "appr_1", "needs sign-off");
+
+      retryCurrentStep(run, "retry");
+
+      expect(run.steps[0].state).toBe("running");
+      expect(run.status).toBe("running");
+    }
+  });
+
   it("treats a current_step_index past the end of the steps array as no current step", () => {
     // Nothing validates current_step_index when a run is hydrated from a
     // persisted state file -- hydrateState only checks that `steps` is an
