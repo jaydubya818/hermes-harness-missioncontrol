@@ -3,7 +3,7 @@ import { access, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promise
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { dirname, join, resolve } from "node:path";
-import { app, assertAllowedRepoWrite, assertSafeRepoPath, bootstrapWorkspaceDependencies, cleanupRun, detectTestCommand, ensureWorkspace, parseChangedFiles, runCmd, sanitizedChildEnv } from "./index.js";
+import { app, assertAllowedRepoWrite, assertSafeRepoPath, bootstrapWorkspaceDependencies, cleanupRun, detectTestCommand, ensureWorkspace, parseChangedFiles, runCmd, safeRelativePath, sanitizedChildEnv } from "./index.js";
 
 // Keep in sync with the ALLOWED_REPO_ROOT default in vitest.config.ts.
 const allowedRepoRoot = resolve(process.env.ALLOWED_REPO_ROOT ?? "/Users/jaywest/projects");
@@ -239,6 +239,52 @@ describe("worker-runtime", () => {
     expect(() => assertAllowedRepoWrite(workspace, join(repoWorkspace, "..", "outside.txt"))).toThrow(/write path not allowed/);
     // the workspace root itself is a directory, not a writable file target
     expect(() => assertAllowedRepoWrite(workspace, repoWorkspace)).toThrow(/write path not allowed/);
+  });
+
+  it("honours a dot-prefixed or trailing-slash writable_paths grant the same as the bare directory", () => {
+    const repoWorkspace = join(sandboxRoot, "repo");
+    const workspaceFor = (writablePaths: string[]) => ({
+      workdir: join(sandboxRoot, "out"),
+      repoWorkspace,
+      envelope: { repo_scope: { writable_paths: writablePaths } }
+    } as unknown as Parameters<typeof assertAllowedRepoWrite>[0]);
+
+    // validateEnvelope accepts all of these (it resolves them against the
+    // repo root), so the write gate must read them the same way instead of
+    // refusing a path the envelope just granted.
+    for (const grant of ["src", "src/", "./src", "./src/", "src/./", "lib/../src"]) {
+      expect(() => assertAllowedRepoWrite(workspaceFor([grant]), join(repoWorkspace, "src", "ok.ts")), grant).not.toThrow();
+      expect(() => assertAllowedRepoWrite(workspaceFor([grant]), join(repoWorkspace, "src", "nested", "ok.ts")), grant).not.toThrow();
+      // a sibling that merely shares the prefix is still outside the grant
+      expect(() => assertAllowedRepoWrite(workspaceFor([grant]), join(repoWorkspace, "srcx", "no.ts")), grant).toThrow(/write path not allowed/);
+      expect(() => assertAllowedRepoWrite(workspaceFor([grant]), join(repoWorkspace, "lib", "no.ts")), grant).toThrow(/write path not allowed/);
+    }
+
+    // "./" and "src/.." both denote the repo root, exactly like the "." grant.
+    for (const grant of ["./", "src/.."]) {
+      expect(() => assertAllowedRepoWrite(workspaceFor([grant]), join(repoWorkspace, "anything", "ok.ts")), grant).not.toThrow();
+    }
+  });
+
+  it("canonicalizes Windows-native relative paths before writable-path comparison", () => {
+    expect(safeRelativePath("src\\nested\\ok.ts", "\\")).toBe("src/nested/ok.ts");
+    expect(safeRelativePath(".\\src\\.\\ok.ts", "\\")).toBe("src/ok.ts");
+    expect(safeRelativePath("src\\..", "\\")).toBe(".");
+    expect(safeRelativePath("src\\..\\..\\etc", "\\")).toBe("../etc");
+  });
+
+  it("fails closed on a writable_paths grant that still points above the repo after normalization", () => {
+    const repoWorkspace = join(sandboxRoot, "repo");
+    const workspace = {
+      workdir: join(sandboxRoot, "out"),
+      repoWorkspace,
+      envelope: { repo_scope: { writable_paths: ["../", "src/../../etc", "../repo/src"] } }
+    } as unknown as Parameters<typeof assertAllowedRepoWrite>[0];
+    // validateEnvelope rejects these before a workspace exists; if one ever
+    // reaches the gate anyway it must grant nothing, not resolve to a
+    // sibling directory or to the whole repo.
+    expect(() => assertAllowedRepoWrite(workspace, join(repoWorkspace, "src", "ok.ts"))).toThrow(/write path not allowed/);
+    expect(() => assertAllowedRepoWrite(workspace, join(repoWorkspace, "etc", "ok.ts"))).toThrow(/write path not allowed/);
   });
 
   it("strips operator credentials from spawned command environments", () => {
