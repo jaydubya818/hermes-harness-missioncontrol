@@ -5,7 +5,10 @@ __pycache__/
 .vite
 coverage
 .env
-.env.local
+# .env.* and not just .env.local: Vite reads .env.[mode] and .env.[mode].local
+# too, so .env.production is a real place for VITE_OPERATOR_TOKEN to sit, and
+# it was committable until this line.
+.env.*
 .DS_Store
 *.log
 *.tsbuildinfo
